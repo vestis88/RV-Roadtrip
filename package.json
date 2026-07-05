@@ -3,15 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "workspaces": ["shared", "functions"],
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run build -w shared && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "format": "prettier --write .",
     "test": "vitest run"
   },
   "dependencies": {
+    "@rv/shared": "*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
