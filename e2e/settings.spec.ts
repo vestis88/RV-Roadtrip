@@ -45,6 +45,12 @@ test('settings form fills, persists across reload, and flips plan status to stal
 
   await expect(page.getByTestId('plan-status')).toHaveText('stale')
 
+  // Every field commits its own Firestore write independently; give the
+  // last one (max-drive-hours) time to actually reach the emulator before
+  // reloading, since 'plan-status' already flipped to stale on the very
+  // first edit and so doesn't prove later writes have landed.
+  await page.waitForTimeout(500)
+
   await page.reload()
   await page.getByTestId('trip-name-input').waitFor()
 

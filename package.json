@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:functions": "firebase emulators:exec --project demo-rv-trip-planner --only firestore,auth \"npm run test -w functions\"",
+    "test:functions": "npm run build -w functions && firebase emulators:exec --project demo-rv-trip-planner --only firestore,auth,functions \"npm run test -w functions\"",
     "test:e2e": "npm run build -w functions && playwright test"
   },
   "dependencies": {

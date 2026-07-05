@@ -261,7 +261,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: type, wait, reload — text persists; second device sees it live.
 
 ### PHASE 3 — Planning engine (Cloud Functions)
-- [ ] **T-12** `generatePlan` function skeleton: triggers on `planRequests` write, sets status transitions pending→generating→ready/error, writes a hard-coded 3-day fixture plan.
+- [x] **T-12** `generatePlan` function skeleton: triggers on `planRequests` write, sets status transitions pending→generating→ready/error, writes a hard-coded 3-day fixture plan.
   ✅ TEST: emulator — writing a request produces fixture days/activities/restaurants docs and `status: ready`.
 - [ ] **T-13** Routes API integration: real distance/duration between stops; store polylines; compute `avgDriveMinutesPerDay`, `totalKm`.
   ✅ TEST: unit test with mocked Routes response; emulator run on Oslo→Rome fixture yields plausible totals (±10 % of known ~2,700 km).
