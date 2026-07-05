@@ -15,6 +15,9 @@ dist-ssr
 .env.*
 !.env.example
 .firebase/
+test-results/
+playwright-report/
+blob-report/
 
 # Editor directories and files
 .vscode/*

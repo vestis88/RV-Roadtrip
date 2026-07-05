@@ -251,7 +251,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: emulator test — device A creates, device B joins with code, both read the trip; a non-member read is rejected by security rules.
 - [x] **T-08** Firestore security rules per Section 4 + rules unit tests.
   ✅ TEST: `firebase emulators:exec` rules tests pass (member CRUD ok, stranger denied).
-- [ ] **T-09** Enable offline persistence; Zustand store wiring; `useTrip(tripId)` live hook.
+- [x] **T-09** Enable offline persistence; Zustand store wiring; `useTrip(tripId)` live hook.
   ✅ TEST: E2E — edit settings in tab A, tab B updates < 3 s; airplane-mode reload still shows data.
 
 ### PHASE 2 — Trip setup UI
