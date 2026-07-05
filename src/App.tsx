@@ -1,4 +1,15 @@
+import { useEffect, useState } from 'react'
+import { ensureSignedIn } from './lib/firebase'
+
 function App() {
+  const [uid, setUid] = useState<string | null>(null)
+
+  useEffect(() => {
+    ensureSignedIn()
+      .then((user) => setUid(user.uid))
+      .catch((error: unknown) => console.error('Sign-in failed', error))
+  }, [])
+
   return (
     <main className="flex min-h-svh items-center justify-center bg-white px-4 dark:bg-neutral-900">
       <div className="text-center">
@@ -6,7 +17,7 @@ function App() {
           RV Road Trip Planner
         </h1>
         <p className="mt-2 text-neutral-500 dark:text-neutral-400">
-          Setup in progress.
+          {uid ? 'Signed in anonymously.' : 'Signing in…'}
         </p>
       </div>
     </main>

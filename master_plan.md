@@ -247,7 +247,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 ### PHASE 1 — Data layer & trip sharing
 - [x] **T-06** Implement Firestore schema (Section 4) as TS types + zod schemas in `shared/` (used by both app and functions).
   ✅ TEST: unit tests validate a fixture trip object against every schema.
-- [ ] **T-07** Anonymous auth on first load; create-trip flow generates `tripId` + 6-char shareCode; `joinTrip` Cloud Function adds UID to members by code.
+- [x] **T-07** Anonymous auth on first load; create-trip flow generates `tripId` + 6-char shareCode; `joinTrip` Cloud Function adds UID to members by code.
   ✅ TEST: emulator test — device A creates, device B joins with code, both read the trip; a non-member read is rejected by security rules.
 - [ ] **T-08** Firestore security rules per Section 4 + rules unit tests.
   ✅ TEST: `firebase emulators:exec` rules tests pass (member CRUD ok, stranger denied).

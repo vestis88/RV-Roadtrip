@@ -8,9 +8,10 @@ service cloud.firestore {
     }
 
     match /trips/{tripId} {
+      // Trip creation and joining-by-code only happen via the createTrip
+      // and joinTrip Cloud Functions (Admin SDK bypasses these rules).
       allow read, update: if isMember(tripId);
-      allow create: if request.auth != null;
-      allow delete: if false;
+      allow create, delete: if false;
 
       match /members/{uid} {
         allow read: if isMember(tripId);
@@ -20,6 +21,10 @@ service cloud.firestore {
       match /{document=**} {
         allow read, write: if isMember(tripId);
       }
+    }
+
+    match /shareCodes/{code} {
+      allow read, write: if false;
     }
 
     match /planRequests/{requestId} {
