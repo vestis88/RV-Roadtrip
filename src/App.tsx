@@ -1,60 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { doc, updateDoc } from 'firebase/firestore'
-import { httpsCallable } from 'firebase/functions'
-import { db, ensureSignedIn, functions } from './lib/firebase'
+import { db } from './lib/firebase'
 import { useTrip } from './hooks/useTrip'
-
-function useTripSession() {
-  const [tripId, setTripId] = useState<string | null>(null)
-  const [shareCode, setShareCode] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function run() {
-      await ensureSignedIn()
-      if (cancelled) return
-
-      const params = new URLSearchParams(window.location.search)
-      const joinCode = params.get('join')
-      const storedTripId = localStorage.getItem('tripId')
-
-      if (joinCode) {
-        const join = httpsCallable<{ shareCode: string }, { tripId: string }>(
-          functions,
-          'joinTrip',
-        )
-        const { data } = await join({ shareCode: joinCode })
-        if (cancelled) return
-        localStorage.setItem('tripId', data.tripId)
-        setTripId(data.tripId)
-        return
-      }
-
-      if (storedTripId) {
-        setTripId(storedTripId)
-        return
-      }
-
-      const create = httpsCallable<void, { tripId: string; shareCode: string }>(
-        functions,
-        'createTrip',
-      )
-      const { data } = await create()
-      if (cancelled) return
-      localStorage.setItem('tripId', data.tripId)
-      setTripId(data.tripId)
-      setShareCode(data.shareCode)
-    }
-
-    run().catch((error: unknown) => console.error('Trip session failed', error))
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return { tripId, shareCode }
-}
+import { useTripSession } from './hooks/useTripSession'
+import { SettingsScreen } from './screens/SettingsScreen'
 
 function App() {
   const { tripId, shareCode } = useTripSession()
@@ -73,8 +22,8 @@ function App() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-white px-4 dark:bg-neutral-900">
-      <div className="w-full max-w-sm text-center">
+    <main className="min-h-svh bg-white px-4 py-6 dark:bg-neutral-900">
+      <div className="mx-auto max-w-2xl text-center">
         <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white">
           RV Road Trip Planner
         </h1>
@@ -103,6 +52,7 @@ function App() {
           </div>
         )}
       </div>
+      {tripId && trip && <SettingsScreen tripId={tripId} trip={trip} />}
     </main>
   )
 }

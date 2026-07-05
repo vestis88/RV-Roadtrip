@@ -255,7 +255,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: E2E — edit settings in tab A, tab B updates < 3 s; airplane-mode reload still shows data.
 
 ### PHASE 2 — Trip setup UI
-- [ ] **T-10** Settings screen: full form per 7.1 incl. travelers rows, interests chips, Places autocomplete for start/finish, preferred countries, rest-day slider, max drive hours. All fields write to Firestore and are re-editable.
+- [x] **T-10** Settings screen: full form per 7.1 incl. travelers rows, interests chips, Places autocomplete for start/finish, preferred countries, rest-day slider, max drive hours. All fields write to Firestore and are re-editable.
   ✅ TEST: E2E fills every field, reloads, values persist; editing any field flips `planMeta.status` to `stale`.
 - [ ] **T-11** Notes panel (the freeform "text file"): autosaving textarea + updatedAt stamp.
   ✅ TEST: type, wait, reload — text persists; second device sees it live.
