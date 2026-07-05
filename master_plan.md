@@ -233,7 +233,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 1. Do tasks strictly in order. 2. A task is done only when its ✅ TEST passes. 3. Tick the checkbox and commit (`git commit -m "T-XX: …"`) after each task. 4. If a test fails twice, stop and write findings under the task before continuing. 5. Re-read Sections 4–7 before any task that touches data or UI.
 
 ### PHASE 0 — Foundation
-- [ ] **T-01** Create GitHub repo `rv-trip-planner`; scaffold Vite + React + TS + Tailwind; add ESLint/Prettier.
+- [x] **T-01** Create GitHub repo `rv-trip-planner`; scaffold Vite + React + TS + Tailwind; add ESLint/Prettier.
   ✅ TEST: `npm run dev` serves the starter page; `npm run lint` passes.
 - [ ] **T-02** Create Firebase project; enable Firestore, Auth (anonymous), Functions, Hosting; install Emulator Suite; commit `firebase.json`, `.firebaserc`.
   ✅ TEST: `firebase emulators:start` runs Firestore + Functions locally.
