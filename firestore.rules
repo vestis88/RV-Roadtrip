@@ -18,7 +18,23 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      match /{document=**} {
+      match /days/{dayId} {
+        allow read, write: if isMember(tripId);
+
+        match /activities/{placeId} {
+          allow read, write: if isMember(tripId);
+        }
+
+        match /restaurants/{placeId} {
+          allow read, write: if isMember(tripId);
+        }
+      }
+
+      match /countries/{countryCode} {
+        allow read, write: if isMember(tripId);
+      }
+
+      match /log/{entryId} {
         allow read, write: if isMember(tripId);
       }
     }

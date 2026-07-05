@@ -249,7 +249,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: unit tests validate a fixture trip object against every schema.
 - [x] **T-07** Anonymous auth on first load; create-trip flow generates `tripId` + 6-char shareCode; `joinTrip` Cloud Function adds UID to members by code.
   ✅ TEST: emulator test — device A creates, device B joins with code, both read the trip; a non-member read is rejected by security rules.
-- [ ] **T-08** Firestore security rules per Section 4 + rules unit tests.
+- [x] **T-08** Firestore security rules per Section 4 + rules unit tests.
   ✅ TEST: `firebase emulators:exec` rules tests pass (member CRUD ok, stranger denied).
 - [ ] **T-09** Enable offline persistence; Zustand store wiring; `useTrip(tripId)` live hook.
   ✅ TEST: E2E — edit settings in tab A, tab B updates < 3 s; airplane-mode reload still shows data.
