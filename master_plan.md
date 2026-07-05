@@ -257,7 +257,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 ### PHASE 2 — Trip setup UI
 - [x] **T-10** Settings screen: full form per 7.1 incl. travelers rows, interests chips, Places autocomplete for start/finish, preferred countries, rest-day slider, max drive hours. All fields write to Firestore and are re-editable.
   ✅ TEST: E2E fills every field, reloads, values persist; editing any field flips `planMeta.status` to `stale`.
-- [ ] **T-11** Notes panel (the freeform "text file"): autosaving textarea + updatedAt stamp.
+- [x] **T-11** Notes panel (the freeform "text file"): autosaving textarea + updatedAt stamp.
   ✅ TEST: type, wait, reload — text persists; second device sees it live.
 
 ### PHASE 3 — Planning engine (Cloud Functions)

@@ -3,6 +3,7 @@ import { doc, updateDoc } from 'firebase/firestore'
 import { db } from './lib/firebase'
 import { useTrip } from './hooks/useTrip'
 import { useTripSession } from './hooks/useTripSession'
+import { NotesScreen } from './screens/NotesScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 
 function App() {
@@ -52,7 +53,12 @@ function App() {
           </div>
         )}
       </div>
-      {tripId && trip && <SettingsScreen tripId={tripId} trip={trip} />}
+      {tripId && trip && (
+        <>
+          <SettingsScreen tripId={tripId} trip={trip} />
+          <NotesScreen tripId={tripId} trip={trip} />
+        </>
+      )}
     </main>
   )
 }
