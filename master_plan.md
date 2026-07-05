@@ -237,7 +237,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: `npm run dev` serves the starter page; `npm run lint` passes.
 - [x] **T-02** Create Firebase project; enable Firestore, Auth (anonymous), Functions, Hosting; install Emulator Suite; commit `firebase.json`, `.firebaserc`.
   ✅ TEST: `firebase emulators:start` runs Firestore + Functions locally.
-- [ ] **T-03** GitHub Actions: on push to `main` → lint, unit tests, build, deploy to Firebase Hosting preview channel.
+- [x] **T-03** GitHub Actions: on push to `main` → lint, unit tests, build, deploy to Firebase Hosting preview channel.
   ✅ TEST: pipeline green on a dummy commit; preview URL loads.
 - [ ] **T-04** PWA setup: manifest (name, icons, standalone), service worker via vite-plugin-pwa, offline app shell.
   ✅ TEST: Lighthouse PWA check passes; app installable on a phone; loads shell offline.
