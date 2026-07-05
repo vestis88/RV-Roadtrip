@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isMember(tripId) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
+    }
+
+    match /trips/{tripId} {
+      allow read, update: if isMember(tripId);
+      allow create: if request.auth != null;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(tripId);
+        allow write: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if isMember(tripId);
+      }
+    }
+
+    match /planRequests/{requestId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      allow update, delete: if false;
+    }
+  }
+}

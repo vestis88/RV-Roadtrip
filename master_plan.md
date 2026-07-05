@@ -235,7 +235,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 ### PHASE 0 — Foundation
 - [x] **T-01** Create GitHub repo `rv-trip-planner`; scaffold Vite + React + TS + Tailwind; add ESLint/Prettier.
   ✅ TEST: `npm run dev` serves the starter page; `npm run lint` passes.
-- [ ] **T-02** Create Firebase project; enable Firestore, Auth (anonymous), Functions, Hosting; install Emulator Suite; commit `firebase.json`, `.firebaserc`.
+- [x] **T-02** Create Firebase project; enable Firestore, Auth (anonymous), Functions, Hosting; install Emulator Suite; commit `firebase.json`, `.firebaserc`.
   ✅ TEST: `firebase emulators:start` runs Firestore + Functions locally.
 - [ ] **T-03** GitHub Actions: on push to `main` → lint, unit tests, build, deploy to Firebase Hosting preview channel.
   ✅ TEST: pipeline green on a dummy commit; preview URL loads.
