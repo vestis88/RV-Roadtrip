@@ -239,7 +239,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: `firebase emulators:start` runs Firestore + Functions locally.
 - [x] **T-03** GitHub Actions: on push to `main` → lint, unit tests, build, deploy to Firebase Hosting preview channel.
   ✅ TEST: pipeline green on a dummy commit; preview URL loads.
-- [ ] **T-04** PWA setup: manifest (name, icons, standalone), service worker via vite-plugin-pwa, offline app shell.
+- [x] **T-04** PWA setup: manifest (name, icons, standalone), service worker via vite-plugin-pwa, offline app shell.
   ✅ TEST: Lighthouse PWA check passes; app installable on a phone; loads shell offline.
 - [ ] **T-05** Google Cloud: enable Maps JS, Places (New), Routes APIs; create browser key (referrer-restricted) + server key; store server key & `CLAUDE_API_KEY` as Functions secrets.
   ✅ TEST: sample map renders in app; a test Function reads both secrets.
