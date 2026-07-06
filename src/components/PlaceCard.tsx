@@ -6,6 +6,9 @@ interface PlaceCardProps {
   ratingCount?: number
   blurb: string
   photoUrl?: string
+  googleMapsUrl?: string
+  selected?: boolean
+  onTap?: () => void
 }
 
 export function PlaceCard({
@@ -16,11 +19,25 @@ export function PlaceCard({
   ratingCount,
   blurb,
   photoUrl,
+  googleMapsUrl,
+  selected,
+  onTap,
 }: PlaceCardProps) {
   return (
     <div
+      role={onTap ? 'button' : undefined}
+      tabIndex={onTap ? 0 : undefined}
       data-testid={testId}
-      className="flex w-56 shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white text-left shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+      aria-pressed={onTap ? selected ?? false : undefined}
+      onClick={onTap}
+      onKeyDown={(event) => {
+        if (onTap && (event.key === 'Enter' || event.key === ' ')) onTap()
+      }}
+      className={`flex w-56 shrink-0 flex-col overflow-hidden rounded-lg border bg-white text-left shadow-sm dark:bg-neutral-900 ${
+        selected
+          ? 'border-emerald-600 ring-2 ring-emerald-600'
+          : 'border-neutral-200 dark:border-neutral-800'
+      }`}
     >
       {photoUrl ? (
         <img src={photoUrl} alt={name} className="h-28 w-full object-cover" />
@@ -42,6 +59,18 @@ export function PlaceCard({
           </p>
         )}
         <p className="text-xs text-neutral-600 dark:text-neutral-300">{blurb}</p>
+        {googleMapsUrl && (
+          <a
+            data-testid={`${testId}-navigate`}
+            href={googleMapsUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="mt-1 text-xs font-medium text-emerald-700 underline dark:text-emerald-400"
+          >
+            Navigate
+          </a>
+        )}
       </div>
     </div>
   )

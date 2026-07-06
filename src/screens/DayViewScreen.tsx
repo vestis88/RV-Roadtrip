@@ -1,12 +1,34 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import {
+  APIProvider,
+  AdvancedMarker,
+  Map as GoogleMap,
+  useMap,
+} from '@vis.gl/react-google-maps'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail } from '../hooks/useDayDetail'
 import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
+import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 
 const SWIPE_THRESHOLD_PX = 50
+
+interface SelectedPlace {
+  id: string
+  name: string
+  lat: number
+  lng: number
+}
+
+function MapPanner({ target }: { target: SelectedPlace | null }) {
+  const map = useMap()
+  useEffect(() => {
+    if (map && target) map.panTo({ lat: target.lat, lng: target.lng })
+  }, [map, target])
+  return null
+}
 
 export function DayViewScreen() {
   const { tripId } = useTripContext()
@@ -14,6 +36,7 @@ export function DayViewScreen() {
   const { dayId } = useParams<{ dayId: string }>()
   const { days } = useTripDays(tripId)
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
+  const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
 
   const touchStartX = useRef<number | null>(null)
   const dayIndex = days.findIndex((d) => d.id === dayId)
@@ -39,6 +62,8 @@ export function DayViewScreen() {
     goToDay(deltaX < 0 ? nextDayId : prevDayId)
   }
 
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
+
   if (loading || !day) {
     return (
       <p className="p-4 text-neutral-500 dark:text-neutral-400">
@@ -59,9 +84,78 @@ export function DayViewScreen() {
       onTouchEnd={onTouchEnd}
     >
       <div
-        className="h-[45%] w-full shrink-0 bg-neutral-200 dark:bg-neutral-800 lg:h-full lg:w-1/2"
+        className="relative h-[45%] w-full shrink-0 lg:h-full lg:w-1/2"
         data-testid="day-map"
-      />
+      >
+        {apiKey ? (
+          <APIProvider apiKey={apiKey}>
+            <GoogleMap
+              defaultCenter={{ lat: day.overnight.lat, lng: day.overnight.lng }}
+              defaultZoom={12}
+              mapId="rv-day-view"
+            >
+              <MapPanner target={selectedPlace} />
+
+              <AdvancedMarker
+                position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
+                title={day.overnight.name}
+              >
+                <span>{OVERNIGHT_ICON}</span>
+              </AdvancedMarker>
+
+              {activities.map((activity, i) => (
+                <AdvancedMarker
+                  key={`activity-${i}`}
+                  position={{ lat: activity.lat, lng: activity.lng }}
+                  title={activity.name}
+                  onClick={() =>
+                    setSelectedPlace({
+                      id: `activity-card-${i}`,
+                      name: activity.name,
+                      lat: activity.lat,
+                      lng: activity.lng,
+                    })
+                  }
+                >
+                  <span>{CATEGORY_ICON[activity.category]}</span>
+                </AdvancedMarker>
+              ))}
+
+              {restaurants.map((restaurant, i) => (
+                <AdvancedMarker
+                  key={`restaurant-${i}`}
+                  position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                  title={restaurant.name}
+                  onClick={() =>
+                    setSelectedPlace({
+                      id: `${restaurant.meal}-card-${restaurants
+                        .filter((r) => r.meal === restaurant.meal)
+                        .indexOf(restaurant)}`,
+                      name: restaurant.name,
+                      lat: restaurant.lat,
+                      lng: restaurant.lng,
+                    })
+                  }
+                >
+                  <span>{RESTAURANT_ICON}</span>
+                </AdvancedMarker>
+              ))}
+            </GoogleMap>
+          </APIProvider>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-neutral-200 p-4 text-center text-neutral-500 dark:bg-neutral-800">
+            Set VITE_GOOGLE_MAPS_API_KEY to display the map.
+          </div>
+        )}
+        {selectedPlace && (
+          <p
+            data-testid="map-selected-caption"
+            className="absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-xs font-medium text-neutral-900 shadow dark:bg-neutral-900/90 dark:text-white"
+          >
+            Showing: {selectedPlace.name}
+          </p>
+        )}
+      </div>
 
       <div className="flex-1 overflow-y-auto text-left lg:w-1/2">
         <div className="flex items-center justify-between p-4">
@@ -120,57 +214,109 @@ export function DayViewScreen() {
         )}
 
         <CardRow title="Activities" testId="activities-row">
-          {activities.map((activity, i) => (
-            <PlaceCard
-              key={i}
-              testId={`activity-card-${i}`}
-              name={activity.name}
-              category={activity.category}
-              rating={activity.rating}
-              ratingCount={activity.ratingCount}
-              blurb={activity.blurb}
-              photoUrl={activity.photoUrl}
-            />
-          ))}
+          {activities.map((activity, i) => {
+            const testId = `activity-card-${i}`
+            return (
+              <PlaceCard
+                key={i}
+                testId={testId}
+                name={activity.name}
+                category={activity.category}
+                rating={activity.rating}
+                ratingCount={activity.ratingCount}
+                blurb={activity.blurb}
+                photoUrl={activity.photoUrl}
+                googleMapsUrl={activity.googleMapsUrl}
+                selected={selectedPlace?.id === testId}
+                onTap={() =>
+                  setSelectedPlace({
+                    id: testId,
+                    name: activity.name,
+                    lat: activity.lat,
+                    lng: activity.lng,
+                  })
+                }
+              />
+            )
+          })}
         </CardRow>
 
         <CardRow title="Breakfast" testId="breakfast-row">
-          {breakfast.map((restaurant, i) => (
-            <PlaceCard
-              key={i}
-              testId={`breakfast-card-${i}`}
-              name={restaurant.name}
-              rating={restaurant.rating}
-              ratingCount={restaurant.ratingCount}
-              blurb={restaurant.blurb}
-            />
-          ))}
+          {breakfast.map((restaurant, i) => {
+            const testId = `breakfast-card-${i}`
+            return (
+              <PlaceCard
+                key={i}
+                testId={testId}
+                name={restaurant.name}
+                rating={restaurant.rating}
+                ratingCount={restaurant.ratingCount}
+                blurb={restaurant.blurb}
+                googleMapsUrl={restaurant.googleMapsUrl}
+                selected={selectedPlace?.id === testId}
+                onTap={() =>
+                  setSelectedPlace({
+                    id: testId,
+                    name: restaurant.name,
+                    lat: restaurant.lat,
+                    lng: restaurant.lng,
+                  })
+                }
+              />
+            )
+          })}
         </CardRow>
 
         <CardRow title="Lunch" testId="lunch-row">
-          {lunch.map((restaurant, i) => (
-            <PlaceCard
-              key={i}
-              testId={`lunch-card-${i}`}
-              name={restaurant.name}
-              rating={restaurant.rating}
-              ratingCount={restaurant.ratingCount}
-              blurb={restaurant.blurb}
-            />
-          ))}
+          {lunch.map((restaurant, i) => {
+            const testId = `lunch-card-${i}`
+            return (
+              <PlaceCard
+                key={i}
+                testId={testId}
+                name={restaurant.name}
+                rating={restaurant.rating}
+                ratingCount={restaurant.ratingCount}
+                blurb={restaurant.blurb}
+                googleMapsUrl={restaurant.googleMapsUrl}
+                selected={selectedPlace?.id === testId}
+                onTap={() =>
+                  setSelectedPlace({
+                    id: testId,
+                    name: restaurant.name,
+                    lat: restaurant.lat,
+                    lng: restaurant.lng,
+                  })
+                }
+              />
+            )
+          })}
         </CardRow>
 
         <CardRow title="Dinner" testId="dinner-row">
-          {dinner.map((restaurant, i) => (
-            <PlaceCard
-              key={i}
-              testId={`dinner-card-${i}`}
-              name={restaurant.name}
-              rating={restaurant.rating}
-              ratingCount={restaurant.ratingCount}
-              blurb={restaurant.blurb}
-            />
-          ))}
+          {dinner.map((restaurant, i) => {
+            const testId = `dinner-card-${i}`
+            return (
+              <PlaceCard
+                key={i}
+                testId={testId}
+                name={restaurant.name}
+                rating={restaurant.rating}
+                ratingCount={restaurant.ratingCount}
+                blurb={restaurant.blurb}
+                googleMapsUrl={restaurant.googleMapsUrl}
+                selected={selectedPlace?.id === testId}
+                onTap={() =>
+                  setSelectedPlace({
+                    id: testId,
+                    name: restaurant.name,
+                    lat: restaurant.lat,
+                    lng: restaurant.lng,
+                  })
+                }
+              />
+            )
+          })}
         </CardRow>
       </div>
     </div>

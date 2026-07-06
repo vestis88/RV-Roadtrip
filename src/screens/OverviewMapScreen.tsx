@@ -8,23 +8,13 @@ import {
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
 import { addDoc, collection } from 'firebase/firestore'
-import type { Activity, ActivityCategory } from '@rv/shared'
+import type { Activity } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayPlaces } from '../hooks/useDayPlaces'
 import { getZoomTiers } from '../lib/mapZoomTiers'
-
-const CATEGORY_ICON: Record<ActivityCategory, string> = {
-  sight: '🏰',
-  hike: '⛰️',
-  museum: '🏛️',
-  beach: '🌊',
-  playground: '🎈',
-  other: '📍',
-}
-const RESTAURANT_ICON = '🍴'
-const OVERNIGHT_ICON = '🛏️'
+import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 
 function isoCountryFlag(code: string): string {
   if (code.length !== 2) return ''
