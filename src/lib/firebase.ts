@@ -29,7 +29,9 @@ export const db = initializeFirestore(app, {
     tabManager: persistentMultipleTabManager(),
   }),
 })
-export const functions = getFunctions(app)
+// Must match the region pinned via setGlobalOptions in functions/src/index.ts —
+// callable URLs embed the region, so a mismatch 404s every createTrip/joinTrip.
+export const functions = getFunctions(app, 'europe-west1')
 
 if (import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true') {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
