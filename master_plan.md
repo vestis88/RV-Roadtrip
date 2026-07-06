@@ -24,6 +24,7 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 | Routing | Google Routes API |
 | AI planning | Claude API (claude-sonnet-4-6), called ONLY from Firebase Cloud Functions |
 | Repo | GitHub, CI via GitHub Actions → Firebase deploy |
+| Cloud region | `europe-west1` for Firestore and all Cloud Functions (set via `setGlobalOptions` in `functions/src/index.ts`). Do NOT use `europe-north2` (Stockholm) — Cloud Functions triggers are not supported there, causes deploy failures. |
 
 ---
 
@@ -40,8 +41,8 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 ### Environment keys
 | Key | Where it lives |
 |---|---|
-| Google Maps JS API key | Frontend `.env` (restricted by HTTP referrer in Google Cloud Console) |
-| Google Places/Routes key | Cloud Functions secret (server-restricted) |
+| Google Maps JS API key | Frontend `.env` (`VITE_GOOGLE_MAPS_API_KEY`, restricted by HTTP referrer in Google Cloud Console) |
+| Google Places/Routes key | One Google Cloud API key (restricted to Places API (New) + Routes API), stored as **two** separate Cloud Functions secrets since the code reads them under different names: `firebase functions:secrets:set GOOGLE_PLACES_API_KEY` and `firebase functions:secrets:set GOOGLE_ROUTES_API_KEY` (same key value in both) |
 | Claude API key | Cloud Functions secret (`firebase functions:secrets:set CLAUDE_API_KEY`) |
 
 ---
