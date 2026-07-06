@@ -277,6 +277,9 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: emulator — fixture trip mid-way, replan request → past days untouched, future days regenerated, pacing rules hold.
 - [ ] **T-18** `countryGuide` per 6.3 for each route country, cached; refresh callable.
   ✅ TEST: plan through 3 countries creates 3 guide docs with all six sections non-empty.
+  NOTE: generateCountryGuide (Claude + web_search_20260209 tool, zod-validated with one retry) and the refreshCountryGuide callable are implemented and unit-tested against a recorded response covering all six sections. Not auto-wired into generatePlan/replanTrip's fixture pipeline for the same reason as T-14/T-16 — needs CLAUDE_API_KEY. Live "plan through 3 countries" test pending that key.
+
+This completes Phase 3 (Planning engine). T-14, T-16, and T-18 are code-complete and unit-tested against recorded/mocked responses, but their real-API integration into the generatePlan/replanTrip pipeline and their live smoke tests are blocked on CLAUDE_API_KEY, GOOGLE_ROUTES_API_KEY, and GOOGLE_PLACES_API_KEY.
 
 ### PHASE 4 — Overview map
 - [ ] **T-19** Map screen: polyline + start/end + overnight markers with day numbers; header shows total km, day count, **avg driving time/day**.
