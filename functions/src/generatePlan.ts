@@ -9,6 +9,7 @@ import {
   type Restaurant,
   type TripDay,
 } from '@rv/shared'
+import { validatePacing } from './pacingValidator.js'
 import { computeMultiLegTotals, googleRoutesApiKey } from './routesApi.js'
 
 interface PlanRequestData {
@@ -175,6 +176,17 @@ export const generatePlan = onDocumentCreated(
       await tripRef.update({ 'planMeta.status': 'generating' })
 
       const days = await fixturePlan()
+
+      // Section 5 pacing rules: no day > 1.4x target, final 2 days <= 1.0x
+      // target, rest days stay put. planTrip (T-14) isn't wired into this
+      // fixture pipeline yet, so there's nothing to feed a retry back to —
+      // this is the "never show a bad plan" backstop that T-16/T-17 will
+      // extend into a real one-shot retry once Claude drives the content.
+      const violation = validatePacing(days.map((d) => d.day))
+      if (violation) {
+        throw new Error(`Pacing validation failed: ${violation.reason}`)
+      }
+
       const batch = db.batch()
       for (const { day, activities, restaurants } of days) {
         tripDaySchema.parse(day)

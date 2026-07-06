@@ -268,7 +268,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 - [ ] **T-14** `planTrip` Claude call per 6.1 (includes notes text every time); zod-validate; one retry on parse/schema failure.
   ✅ TEST: recorded-response unit test parses to valid skeleton; live smoke test returns a plan honoring preferred countries and interests.
   NOTE: implementation + recorded-response unit tests (parse success, schema-violation, one-retry-then-succeed, retry-exhausted) are done and passing. The live smoke test against the real Claude API is blocked on `CLAUDE_API_KEY` — run it once that secret is set.
-- [ ] **T-15** Pacing validator per Section 5 incl. final-2-days rule and rest-day placement; violation → feedback retry → error status.
+- [x] **T-15** Pacing validator per Section 5 incl. final-2-days rule and rest-day placement; violation → feedback retry → error status.
   ✅ TEST: unit tests: crafted violating plan is rejected with correct reason; valid plan passes.
 - [ ] **T-16** Places enrichment per 6.4: resolve every proposed item, enforce counts (5 activities, 3×3 restaurants) with backfill, store rating/link/photo/hours.
   ✅ TEST: unit test with mocked Places; live smoke: every activity/restaurant doc has rating + googleMapsUrl; counts exact on all days.
