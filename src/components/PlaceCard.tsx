@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import type { ItemStatus } from '@rv/shared'
+
 interface PlaceCardProps {
   testId: string
   name: string
@@ -9,6 +12,9 @@ interface PlaceCardProps {
   googleMapsUrl?: string
   selected?: boolean
   onTap?: () => void
+  status?: ItemStatus
+  onMarkSelected?: () => void
+  onMarkDone?: (note: string) => void
 }
 
 export function PlaceCard({
@@ -22,7 +28,17 @@ export function PlaceCard({
   googleMapsUrl,
   selected,
   onTap,
+  status,
+  onMarkSelected,
+  onMarkDone,
 }: PlaceCardProps) {
+  const [noteDraft, setNoteDraft] = useState('')
+  const [addingNote, setAddingNote] = useState(false)
+
+  function stop(event: { stopPropagation: () => void }) {
+    event.stopPropagation()
+  }
+
   return (
     <div
       role={onTap ? 'button' : undefined}
@@ -65,11 +81,73 @@ export function PlaceCard({
             href={googleMapsUrl}
             target="_blank"
             rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
+            onClick={stop}
             className="mt-1 text-xs font-medium text-emerald-700 underline dark:text-emerald-400"
           >
             Navigate
           </a>
+        )}
+
+        {(onMarkSelected || onMarkDone) && (
+          <div className="mt-2 border-t border-neutral-100 pt-2 dark:border-neutral-800">
+            <p
+              data-testid={`${testId}-status`}
+              className="text-xs text-neutral-500 dark:text-neutral-400"
+            >
+              Status: {status ?? 'suggested'}
+            </p>
+            {addingNote ? (
+              <div onClick={stop} className="mt-1 flex flex-col gap-1">
+                <textarea
+                  data-testid={`${testId}-note-input`}
+                  className="w-full rounded border border-neutral-300 p-1 text-xs dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                  placeholder="Optional note…"
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                />
+                <button
+                  type="button"
+                  data-testid={`${testId}-confirm-done`}
+                  className="rounded bg-emerald-700 px-2 py-1 text-xs text-white"
+                  onClick={() => {
+                    onMarkDone?.(noteDraft)
+                    setAddingNote(false)
+                  }}
+                >
+                  Confirm done
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex gap-2">
+                {onMarkSelected && (
+                  <button
+                    type="button"
+                    data-testid={`${testId}-mark-selected`}
+                    onClick={(event) => {
+                      stop(event)
+                      onMarkSelected()
+                    }}
+                    className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                  >
+                    Select
+                  </button>
+                )}
+                {onMarkDone && (
+                  <button
+                    type="button"
+                    data-testid={`${testId}-mark-done`}
+                    onClick={(event) => {
+                      stop(event)
+                      setAddingNote(true)
+                    }}
+                    className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                  >
+                    Done
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

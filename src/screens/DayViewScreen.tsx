@@ -12,6 +12,7 @@ import { useDayDetail } from '../hooks/useDayDetail'
 import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
+import { markDone, markSelected } from '../lib/placeStatus'
 
 const SWIPE_THRESHOLD_PX = 50
 
@@ -64,7 +65,7 @@ export function DayViewScreen() {
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
-  if (loading || !day) {
+  if (loading || !day || !dayId) {
     return (
       <p className="p-4 text-neutral-500 dark:text-neutral-400">
         Loading day…
@@ -227,6 +228,7 @@ export function DayViewScreen() {
                 blurb={activity.blurb}
                 photoUrl={activity.photoUrl}
                 googleMapsUrl={activity.googleMapsUrl}
+                status={activity.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
                   setSelectedPlace({
@@ -235,6 +237,21 @@ export function DayViewScreen() {
                     lat: activity.lat,
                     lng: activity.lng,
                   })
+                }
+                onMarkSelected={() =>
+                  markSelected(tripId, dayId, 'activity', activity.id).catch(
+                    console.error,
+                  )
+                }
+                onMarkDone={(note) =>
+                  markDone(
+                    tripId,
+                    dayId,
+                    'activity',
+                    activity.id,
+                    day.date,
+                    note,
+                  ).catch(console.error)
                 }
               />
             )
@@ -253,6 +270,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
                   setSelectedPlace({
@@ -261,6 +279,21 @@ export function DayViewScreen() {
                     lat: restaurant.lat,
                     lng: restaurant.lng,
                   })
+                }
+                onMarkSelected={() =>
+                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
+                }
+                onMarkDone={(note) =>
+                  markDone(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                    day.date,
+                    note,
+                  ).catch(console.error)
                 }
               />
             )
@@ -279,6 +312,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
                   setSelectedPlace({
@@ -287,6 +321,21 @@ export function DayViewScreen() {
                     lat: restaurant.lat,
                     lng: restaurant.lng,
                   })
+                }
+                onMarkSelected={() =>
+                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
+                }
+                onMarkDone={(note) =>
+                  markDone(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                    day.date,
+                    note,
+                  ).catch(console.error)
                 }
               />
             )
@@ -305,6 +354,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
                   setSelectedPlace({
@@ -313,6 +363,21 @@ export function DayViewScreen() {
                     lat: restaurant.lat,
                     lng: restaurant.lng,
                   })
+                }
+                onMarkSelected={() =>
+                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
+                }
+                onMarkDone={(note) =>
+                  markDone(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                    day.date,
+                    note,
+                  ).catch(console.error)
                 }
               />
             )
