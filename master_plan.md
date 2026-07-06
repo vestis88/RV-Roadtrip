@@ -314,8 +314,9 @@ This completes Phase 4 (Overview map).
 This completes Phase 5 (Day view & execution).
 
 ### PHASE 6 — Country guide UI & polish
-- [ ] **T-27** Country tab + detail accordions for the six sections; refresh button.
+- [x] **T-27** Country tab + detail accordions for the six sections; refresh button.
   ✅ TEST: E2E — every route country listed; all sections render; refresh updates `generatedAt`.
+  NOTE: new CountriesScreen (`/countries`) lists the unique countries across `days` (flag + name, deduped by `EUROPEAN_COUNTRIES`); CountryDetailScreen (`/countries/:code`) renders the six sections as native `<details>` accordions and a "Refresh info" button calling the existing `refreshCountryGuide` callable. E2E (e2e/countries.spec.ts) confirms every route country is listed and, via a guide seeded directly through firebase-admin (mirroring T-26's approach, since there's no live-generated guide to test against), that all six sections render with real content. The "refresh updates generatedAt" half is blocked on CLAUDE_API_KEY like T-14/16/18/22 — the test instead confirms the call fails *gracefully* (a visible error, not a crash) when the secret is missing.
 - [ ] **T-28** Responsive/offline audit per Section 8 across the three viewports; offline banner for map.
   ✅ TEST: Playwright viewport suite green; offline reload shows day cards + banner.
 - [ ] **T-29** Cost guards: request debouncing, single pending planRequest enforcement, photo size caps.

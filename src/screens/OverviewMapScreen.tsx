@@ -15,16 +15,7 @@ import { useTripDays } from '../hooks/useTripDays'
 import { useDayPlaces } from '../hooks/useDayPlaces'
 import { getZoomTiers } from '../lib/mapZoomTiers'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
-
-function isoCountryFlag(code: string): string {
-  if (code.length !== 2) return ''
-  const A = 0x1f1e6
-  const chars = code
-    .toUpperCase()
-    .split('')
-    .map((c) => String.fromCodePoint(A + (c.charCodeAt(0) - 65)))
-  return chars.join('')
-}
+import { isoCountryFlag } from '../lib/countryFlag'
 
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()

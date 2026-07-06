@@ -82,6 +82,13 @@ function AppShell() {
               <Link to="/diary" data-testid="nav-diary" className="underline">
                 Diary
               </Link>
+              <Link
+                to="/countries"
+                data-testid="nav-countries"
+                className="underline"
+              >
+                Countries
+              </Link>
             </nav>
           </>
         )}
