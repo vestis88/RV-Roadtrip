@@ -19,9 +19,11 @@
   },
   "dependencies": {
     "@rv/shared": "*",
+    "@vis.gl/react-google-maps": "^1.9.0",
     "firebase": "^12.15.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

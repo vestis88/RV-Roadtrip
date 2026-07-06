@@ -18,6 +18,8 @@ export interface ReplanContext {
   completedRefPaths: string[]
   remainingEndDate: string
   remainingEndPoint: NamedPoint
+  changeRequestText?: string
+  lockedDayIds?: string[]
 }
 
 interface FixtureDay {
@@ -141,12 +143,17 @@ export async function runReplan(
   await tripRef.update({ 'planMeta.status': 'pending' })
   await tripRef.update({ 'planMeta.status': 'generating' })
 
+  const lockedDayIds = new Set(context.lockedDayIds ?? [])
   const daysSnap = await tripRef.collection('days').orderBy('date').get()
+  // Past days are historical fact; locked days were explicitly pinned by the
+  // user via the "Request changes" flow. Both survive the replan untouched.
   const pastDocs = daysSnap.docs.filter(
-    (doc) => (doc.data() as TripDay).date < context.today,
+    (doc) =>
+      (doc.data() as TripDay).date < context.today || lockedDayIds.has(doc.id),
   )
   const futureDocs = daysSnap.docs.filter(
-    (doc) => (doc.data() as TripDay).date >= context.today,
+    (doc) =>
+      (doc.data() as TripDay).date >= context.today && !lockedDayIds.has(doc.id),
   )
 
   for (const doc of futureDocs) {
