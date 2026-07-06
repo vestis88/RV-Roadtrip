@@ -10,11 +10,13 @@ import {
   type TripDay,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
+import { runReplan, type ReplanContext } from './replanTrip.js'
 import { computeMultiLegTotals, googleRoutesApiKey } from './routesApi.js'
 
 interface PlanRequestData {
   tripId: string
   kind: 'full' | 'replan'
+  replanContext?: ReplanContext
   status: string
 }
 
@@ -170,6 +172,32 @@ export const generatePlan = onDocumentCreated(
     const request = snap.data() as PlanRequestData
     const db = getFirestore()
     const tripRef = db.collection('trips').doc(request.tripId)
+
+    if (request.kind === 'replan') {
+      if (!request.replanContext) {
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': 'replan request is missing replanContext',
+        })
+        await snap.ref.update({
+          status: 'error',
+          error: 'replan request is missing replanContext',
+        })
+        return
+      }
+      try {
+        await runReplan(request.tripId, request.replanContext)
+        await snap.ref.update({ status: 'done' })
+      } catch (error) {
+        console.error('runReplan failed', error)
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': String(error),
+        })
+        await snap.ref.update({ status: 'error', error: String(error) })
+      }
+      return
+    }
 
     try {
       await tripRef.update({ 'planMeta.status': 'pending' })
