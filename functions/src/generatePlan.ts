@@ -5,9 +5,11 @@ import {
   restaurantSchema,
   tripDaySchema,
   type Activity,
+  type NamedPoint,
   type Restaurant,
   type TripDay,
 } from '@rv/shared'
+import { computeMultiLegTotals, googleRoutesApiKey } from './routesApi.js'
 
 interface PlanRequestData {
   tripId: string
@@ -16,12 +18,20 @@ interface PlanRequestData {
 }
 
 interface FixtureDay {
-  day: TripDay
+  day: Omit<TripDay, 'drive'> & { drive?: TripDay['drive'] }
   activities: Activity[]
   restaurants: Restaurant[]
 }
 
-function fixturePlan(): FixtureDay[] {
+const FIXTURE_WAYPOINTS: NamedPoint[] = [
+  { name: 'Oslo', lat: 59.9139, lng: 10.7522 },
+  { name: 'Lillehammer', lat: 61.1153, lng: 10.4662 },
+  { name: 'Otta', lat: 61.7725, lng: 9.5406 },
+]
+
+async function fixturePlan(): Promise<FixtureDay[]> {
+  const { legs } = await computeMultiLegTotals(FIXTURE_WAYPOINTS)
+
   return [
     {
       day: {
@@ -38,9 +48,10 @@ function fixturePlan(): FixtureDay[] {
         drive: {
           fromName: 'Oslo',
           toName: 'Lillehammer',
-          distanceKm: 180,
-          durationMin: 150,
+          distanceKm: legs[0].distanceKm,
+          durationMin: legs[0].durationMin,
           slot: 'morning',
+          ...(legs[0].polyline ? { polyline: legs[0].polyline } : {}),
         },
         summary: 'Easy first day north along the Mjøsa lake.',
       },
@@ -81,9 +92,10 @@ function fixturePlan(): FixtureDay[] {
         drive: {
           fromName: 'Lillehammer',
           toName: 'Otta',
-          distanceKm: 140,
-          durationMin: 120,
+          distanceKm: legs[1].distanceKm,
+          durationMin: legs[1].durationMin,
           slot: 'midday',
+          ...(legs[1].polyline ? { polyline: legs[1].polyline } : {}),
         },
         summary: 'Into the mountains along the Gudbrandsdalen valley.',
       },
@@ -149,7 +161,7 @@ function fixturePlan(): FixtureDay[] {
 }
 
 export const generatePlan = onDocumentCreated(
-  'planRequests/{requestId}',
+  { document: 'planRequests/{requestId}', secrets: [googleRoutesApiKey] },
   async (event) => {
     const snap = event.data
     if (!snap) return
@@ -162,7 +174,7 @@ export const generatePlan = onDocumentCreated(
       await tripRef.update({ 'planMeta.status': 'pending' })
       await tripRef.update({ 'planMeta.status': 'generating' })
 
-      const days = fixturePlan()
+      const days = await fixturePlan()
       const batch = db.batch()
       for (const { day, activities, restaurants } of days) {
         tripDaySchema.parse(day)
@@ -199,6 +211,7 @@ export const generatePlan = onDocumentCreated(
       })
       await snap.ref.update({ status: 'done' })
     } catch (error) {
+      console.error('generatePlan failed', error)
       await tripRef.update({
         'planMeta.status': 'error',
         'planMeta.error': String(error),
