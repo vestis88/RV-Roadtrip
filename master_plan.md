@@ -97,7 +97,11 @@ trips/{tripId}
                  restDayFrequency: number,        // days between rest days, default 7
                  maxDriveHoursPerDay: number,     // default 4
                  vehicle: { type:"RV", weightKg:3500, registeredAs:"car",
-                            heightM?, lengthM? } }
+                            heightM?, lengthM?, widthM?, fuel?: diesel|petrol|electric|lpg } }
+                 // dimensions + fuel feed the countryGuide prompt: bridge/ferry
+                 // tolls are frequently tiered by length/height, clearance
+                 // warnings need height+width, and some tolls/ferries discount
+                 // by fuel type (T-18/T-27's road fees + driving rules sections).
   notes:       { freeText: string, updatedAt }    // THE editable "text file".
                                                   // Injected into EVERY Claude call.
   planMeta:    { status: idle|pending|generating|ready|error,

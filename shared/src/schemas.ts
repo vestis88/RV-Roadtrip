@@ -18,12 +18,16 @@ export const travelerSchema = z.object({
   age: z.number().int().nonnegative().optional(),
 })
 
+export const fuelTypeSchema = z.enum(['diesel', 'petrol', 'electric', 'lpg'])
+
 export const vehicleSchema = z.object({
   type: z.literal('RV'),
   weightKg: z.number().positive(),
   registeredAs: z.literal('car'),
   heightM: z.number().positive().optional(),
   lengthM: z.number().positive().optional(),
+  widthM: z.number().positive().optional(),
+  fuel: fuelTypeSchema.optional(),
 })
 
 export const tripSettingsSchema = z.object({
@@ -215,6 +219,7 @@ export const planRequestSchema = z.object({
 export type LatLng = z.infer<typeof latLngSchema>
 export type NamedPoint = z.infer<typeof namedPointSchema>
 export type Traveler = z.infer<typeof travelerSchema>
+export type FuelType = z.infer<typeof fuelTypeSchema>
 export type Vehicle = z.infer<typeof vehicleSchema>
 export type TripSettings = z.infer<typeof tripSettingsSchema>
 export type TripMeta = z.infer<typeof tripMetaSchema>

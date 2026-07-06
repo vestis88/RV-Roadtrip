@@ -35,6 +35,8 @@ export const fixtureTrip: Trip = {
       registeredAs: 'car',
       heightM: 2.9,
       lengthM: 6.5,
+      widthM: 2.3,
+      fuel: 'diesel',
     },
   },
   notes: {

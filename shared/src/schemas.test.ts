@@ -72,4 +72,16 @@ describe('schema rejects invalid data', () => {
       }),
     ).toThrow()
   })
+
+  it('rejects a vehicle with an unrecognized fuel type', () => {
+    expect(() =>
+      tripSchema.parse({
+        ...fixtureTrip,
+        settings: {
+          ...fixtureTrip.settings,
+          vehicle: { ...fixtureTrip.settings.vehicle, fuel: 'hydrogen' },
+        },
+      }),
+    ).toThrow()
+  })
 })
