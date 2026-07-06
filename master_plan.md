@@ -272,6 +272,7 @@ For each Claude-proposed name+town: Places Text Search → take top match within
   ✅ TEST: unit tests: crafted violating plan is rejected with correct reason; valid plan passes.
 - [ ] **T-16** Places enrichment per 6.4: resolve every proposed item, enforce counts (5 activities, 3×3 restaurants) with backfill, store rating/link/photo/hours.
   ✅ TEST: unit test with mocked Places; live smoke: every activity/restaurant doc has rating + googleMapsUrl; counts exact on all days.
+  NOTE: enrichActivities/enrichRestaurantsForMeal implemented (text search → quality-bar filter → nearby-search backfill, exact counts, shared exclude set across meals) with 5 mocked-Places unit tests passing. Not yet wired into generatePlan's fixture pipeline — that requires `GOOGLE_PLACES_API_KEY`, and wiring it in now would break T-12's fixture-only emulator test. Live smoke test pending the real key, same as T-14.
 - [ ] **T-17** `replanTrip` per 6.2 preserving completed days.
   ✅ TEST: emulator — fixture trip mid-way, replan request → past days untouched, future days regenerated, pacing rules hold.
 - [ ] **T-18** `countryGuide` per 6.3 for each route country, cached; refresh callable.
