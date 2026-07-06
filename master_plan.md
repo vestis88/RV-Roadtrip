@@ -298,8 +298,9 @@ This completes Phase 3 (Planning engine). T-14, T-16, and T-18 are code-complete
 This completes Phase 4 (Overview map).
 
 ### PHASE 5 — Day view & execution
-- [ ] **T-23** Day View layout per 7.3: map top / content bottom, drive card with slot, card rows for 5 activities + 3×3 meals, prev/next + swipe cycling, rest-day banner. iPad split layout at `lg`.
+- [x] **T-23** Day View layout per 7.3: map top / content bottom, drive card with slot, card rows for 5 activities + 3×3 meals, prev/next + swipe cycling, rest-day banner. iPad split layout at `lg`.
   ✅ TEST: E2E on phone + iPad viewports; swiping cycles days without visiting overview.
+  NOTE: map pane is a placeholder div (data-testid="day-map") — wiring it to an actual Google Map with highlighted pins is T-24's job. Card content (photo/name/category/rating/blurb) renders via a shared PlaceCard; Navigate links and Selected/Done controls are deliberately deferred to T-24/T-25 per the task split. E2E (e2e/dayview.spec.ts) covers phone (375×812), iPad portrait (820×1180), and iPad landscape (1180×820), plus a real touchstart/touchend swipe cycling through all 3 fixture days without ever hitting the overview route.
 - [ ] **T-24** Card ↔ map interaction: tap card highlights pin & pans; "Navigate" opens Google Maps link.
   ✅ TEST: E2E — tapping card N pans map to its coords; link href equals stored googleMapsUrl.
 - [ ] **T-25** Selected/Done states + diary notes; Done writes `log/` entry; Diary screen lists entries chronologically with share/export.
