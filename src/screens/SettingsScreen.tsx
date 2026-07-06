@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { addDoc, collection } from 'firebase/firestore'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
@@ -15,6 +15,8 @@ interface SettingsScreenProps {
 
 export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
@@ -41,12 +43,27 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     commit({ travelers: settings.travelers.filter((_, i) => i !== index) })
   }
 
-  async function generatePlan() {
-    await addDoc(collection(db, 'planRequests'), {
-      tripId,
-      kind: 'full',
-      status: 'pending',
-    })
+  async function generatePlan(event: React.MouseEvent<HTMLButtonElement>) {
+    // Debounce guard: rapid clicks can fire faster than React re-renders a
+    // `disabled` prop, and faster than the Firestore round-trip that flips
+    // trip.planMeta.status away from idle/stale (which is what normally
+    // hides this button) — so disable the actual DOM node synchronously,
+    // in the same tick as the click, rather than waiting on a render.
+    const button = event.currentTarget
+    if (submittingRef.current || button.disabled) return
+    submittingRef.current = true
+    button.disabled = true
+    setSubmitting(true)
+    try {
+      await addDoc(collection(db, 'planRequests'), {
+        tripId,
+        kind: 'full',
+        status: 'pending',
+      })
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -220,7 +237,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             type="button"
             data-testid="generate-plan-button"
             onClick={generatePlan}
-            className="rounded bg-emerald-700 px-4 py-2 text-white"
+            disabled={submitting}
+            className="rounded bg-emerald-700 px-4 py-2 text-white disabled:opacity-50"
           >
             Generate plan
           </button>
@@ -230,7 +248,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             type="button"
             data-testid="generate-plan-button"
             onClick={generatePlan}
-            className="rounded bg-emerald-700 px-4 py-2 text-white"
+            disabled={submitting}
+            className="rounded bg-emerald-700 px-4 py-2 text-white disabled:opacity-50"
           >
             Re-plan trip
           </button>

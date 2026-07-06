@@ -140,7 +140,6 @@ export async function runReplan(
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
 
-  await tripRef.update({ 'planMeta.status': 'pending' })
   await tripRef.update({ 'planMeta.status': 'generating' })
 
   const lockedDayIds = new Set(context.lockedDayIds ?? [])

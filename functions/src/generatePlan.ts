@@ -175,6 +175,29 @@ export const generatePlan = onDocumentCreated(
     const db = getFirestore()
     const tripRef = db.collection('trips').doc(request.tripId)
 
+    // Cost guard: only one plan request may be active per trip at a time.
+    // Rapid double-clicks on "Generate" (or a replan racing a full generate)
+    // create multiple planRequest docs, but this transaction ensures only
+    // the first to claim the trip's planMeta actually runs — the rest are
+    // rejected immediately rather than piling up duplicate work.
+    const claimed = await db.runTransaction(async (tx) => {
+      const tripSnap = await tx.get(tripRef)
+      const currentStatus = tripSnap.data()?.planMeta?.status
+      if (currentStatus === 'pending' || currentStatus === 'generating') {
+        return false
+      }
+      tx.update(tripRef, { 'planMeta.status': 'pending' })
+      return true
+    })
+
+    if (!claimed) {
+      await snap.ref.update({
+        status: 'error',
+        error: 'Another plan request is already in progress for this trip.',
+      })
+      return
+    }
+
     if (request.kind === 'replan') {
       if (!request.replanContext) {
         await tripRef.update({
@@ -202,7 +225,6 @@ export const generatePlan = onDocumentCreated(
     }
 
     try {
-      await tripRef.update({ 'planMeta.status': 'pending' })
       await tripRef.update({ 'planMeta.status': 'generating' })
 
       const days = await fixturePlan()
