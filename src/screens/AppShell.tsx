@@ -1,10 +1,30 @@
 import { useState } from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import { doc, updateDoc } from 'firebase/firestore'
+import type { Trip } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { useTrip } from '../hooks/useTrip'
 import { useTripSession } from '../hooks/useTripSession'
+import { useTripDays } from '../hooks/useTripDays'
+import { useExecutionMode } from '../hooks/useExecutionMode'
 import { TripContext } from '../context/TripContext'
+import { ExecutionModePrompt } from '../components/ExecutionModePrompt'
+
+function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
+  const { days } = useTripDays(tripId)
+  const { behindKm, permissionDenied, replan, snoozeToday, submitManualPosition } =
+    useExecutionMode(tripId, trip, days)
+
+  return (
+    <ExecutionModePrompt
+      behindKm={behindKm}
+      permissionDenied={permissionDenied}
+      onReplan={() => replan().catch(console.error)}
+      onSnooze={snoozeToday}
+      onManualPosition={submitManualPosition}
+    />
+  )
+}
 
 function AppShell() {
   const { tripId, shareCode } = useTripSession()
@@ -68,6 +88,7 @@ function AppShell() {
       </div>
       {trip && tripId && (
         <TripContext.Provider value={{ tripId, trip }}>
+          <ExecutionModeGate tripId={tripId} trip={trip} />
           <Outlet />
         </TripContext.Provider>
       )}
