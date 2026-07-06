@@ -72,20 +72,32 @@ function AppShell() {
                 </p>
               )}
             </div>
-            <nav className="mt-4 flex justify-center gap-4 text-sm">
-              <Link to="/" data-testid="nav-setup" className="underline">
+            <nav className="mt-4 flex flex-wrap justify-center gap-1 text-sm">
+              <Link
+                to="/"
+                data-testid="nav-setup"
+                className="inline-flex min-h-11 items-center px-3 underline"
+              >
                 Trip setup
               </Link>
-              <Link to="/map" data-testid="nav-map" className="underline">
+              <Link
+                to="/map"
+                data-testid="nav-map"
+                className="inline-flex min-h-11 items-center px-3 underline"
+              >
                 Map
               </Link>
-              <Link to="/diary" data-testid="nav-diary" className="underline">
+              <Link
+                to="/diary"
+                data-testid="nav-diary"
+                className="inline-flex min-h-11 items-center px-3 underline"
+              >
                 Diary
               </Link>
               <Link
                 to="/countries"
                 data-testid="nav-countries"
-                className="underline"
+                className="inline-flex min-h-11 items-center px-3 underline"
               >
                 Countries
               </Link>

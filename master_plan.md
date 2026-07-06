@@ -317,8 +317,11 @@ This completes Phase 5 (Day view & execution).
 - [x] **T-27** Country tab + detail accordions for the six sections; refresh button.
   ✅ TEST: E2E — every route country listed; all sections render; refresh updates `generatedAt`.
   NOTE: new CountriesScreen (`/countries`) lists the unique countries across `days` (flag + name, deduped by `EUROPEAN_COUNTRIES`); CountryDetailScreen (`/countries/:code`) renders the six sections as native `<details>` accordions and a "Refresh info" button calling the existing `refreshCountryGuide` callable. E2E (e2e/countries.spec.ts) confirms every route country is listed and, via a guide seeded directly through firebase-admin (mirroring T-26's approach, since there's no live-generated guide to test against), that all six sections render with real content. The "refresh updates generatedAt" half is blocked on CLAUDE_API_KEY like T-14/16/18/22 — the test instead confirms the call fails *gracefully* (a visible error, not a crash) when the secret is missing.
-- [ ] **T-28** Responsive/offline audit per Section 8 across the three viewports; offline banner for map.
+- [x] **T-28** Responsive/offline audit per Section 8 across the three viewports; offline banner for map.
   ✅ TEST: Playwright viewport suite green; offline reload shows day cards + banner.
+  NOTE: audited Setup/Map/Diary/Countries at 375×812, 820×1180, 1180×820 — no horizontal scroll on any of them. The audit caught AppShell's nav links and the Map screen's "Request changes" button sitting well under the 44px tap-target minimum (measured ~20px); fixed with `min-h-11` + padding. Added a new `useOnlineStatus` hook and an offline banner on the Map screen (`data-testid="offline-banner"`) — going offline and reloading still shows the header's cached day/km/drive-time numbers (from Firestore's persistentLocalCache) alongside the banner; only the Maps JS tiles themselves need network, per spec. E2E: e2e/responsive-offline.spec.ts.
+
+This completes Phase 6's audit work; T-29/T-30 remain.
 - [ ] **T-29** Cost guards: request debouncing, single pending planRequest enforcement, photo size caps.
   ✅ TEST: hammering Generate creates exactly one active request.
 - [ ] **T-30** Production launch: restrict keys to prod domain, deploy `main` to live channel, install on both phones + iPad, generate the real trip.

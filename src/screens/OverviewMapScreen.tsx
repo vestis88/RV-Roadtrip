@@ -16,10 +16,12 @@ import { useDayPlaces } from '../hooks/useDayPlaces'
 import { getZoomTiers } from '../lib/mapZoomTiers'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
 
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()
   const navigate = useNavigate()
+  const online = useOnlineStatus()
   const { days } = useTripDays(tripId)
   const [zoom, setZoom] = useState(6)
   const tiers = getZoomTiers(zoom)
@@ -89,12 +91,22 @@ export function OverviewMapScreen() {
         <button
           type="button"
           data-testid="request-changes-button"
-          className="underline"
+          className="inline-flex min-h-11 items-center underline"
           onClick={() => setChangeRequestOpen(true)}
         >
           Request changes
         </button>
       </div>
+
+      {!online && (
+        <p
+          data-testid="offline-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-center text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          You're offline — showing your last synced plan. Map tiles need a
+          connection.
+        </p>
+      )}
 
       {changeRequestOpen && (
         <div className="border-b border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
