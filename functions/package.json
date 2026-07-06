@@ -7,7 +7,8 @@
   },
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npm --prefix ../shared run build && tsc --noEmit && npm run bundle",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=lib/index.js --sourcemap --external:firebase-admin --external:firebase-admin/* --external:firebase-functions --external:firebase-functions/* --external:@anthropic-ai/sdk --external:zod",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
@@ -18,12 +19,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@rv/shared": "*",
     "firebase-admin": "^13.0.0",
-    "firebase-functions": "^7.2.5"
+    "firebase-functions": "^7.2.5",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
+    "esbuild": "^0.25.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }
