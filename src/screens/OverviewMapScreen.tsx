@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  APIProvider,
   AdvancedMarker,
   Map as GoogleMap,
   Polyline,
@@ -146,95 +145,93 @@ export function OverviewMapScreen() {
 
       <div className="relative flex-1" data-testid="map-canvas">
         {apiKey ? (
-          <APIProvider apiKey={apiKey}>
-            <GoogleMap
-              defaultCenter={{
+          <GoogleMap
+            defaultCenter={{
+              lat: trip.settings.startPoint.lat,
+              lng: trip.settings.startPoint.lng,
+            }}
+            defaultZoom={zoom}
+            mapId="rv-trip-overview"
+            onCameraChanged={(event: MapCameraChangedEvent) =>
+              setZoom(event.detail.zoom)
+            }
+          >
+            {path.length > 1 && (
+              <Polyline
+                path={path}
+                strokeColor="#0f764d"
+                strokeOpacity={0.8}
+                strokeWeight={4}
+              />
+            )}
+
+            <AdvancedMarker
+              position={{
                 lat: trip.settings.startPoint.lat,
                 lng: trip.settings.startPoint.lng,
               }}
-              defaultZoom={zoom}
-              mapId="rv-trip-overview"
-              onCameraChanged={(event: MapCameraChangedEvent) =>
-                setZoom(event.detail.zoom)
-              }
-            >
-              {path.length > 1 && (
-                <Polyline
-                  path={path}
-                  strokeColor="#0f764d"
-                  strokeOpacity={0.8}
-                  strokeWeight={4}
-                />
-              )}
+              title="Start"
+            />
+            <AdvancedMarker
+              position={{
+                lat: trip.settings.endPoint.lat,
+                lng: trip.settings.endPoint.lng,
+              }}
+              title="Finish"
+            />
 
-              <AdvancedMarker
-                position={{
-                  lat: trip.settings.startPoint.lat,
-                  lng: trip.settings.startPoint.lng,
-                }}
-                title="Start"
-              />
-              <AdvancedMarker
-                position={{
-                  lat: trip.settings.endPoint.lat,
-                  lng: trip.settings.endPoint.lng,
-                }}
-                title="Finish"
-              />
+            {tiers.showOvernightStops &&
+              days.map((day) => (
+                <AdvancedMarker
+                  key={day.id}
+                  position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
+                  title={`Day ${day.index + 1}: ${day.overnight.name} ${isoCountryFlag(day.overnight.country)}`}
+                  data-testid={`day-badge-${day.id}`}
+                  onClick={() => navigate(`/map/day/${day.id}`)}
+                >
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-xs font-semibold text-white shadow">
+                    {OVERNIGHT_ICON} {day.index + 1}
+                  </div>
+                </AdvancedMarker>
+              ))}
 
-              {tiers.showOvernightStops &&
-                days.map((day) => (
+            {(tiers.showSelectedActivities || tiers.showAllPlaces) &&
+              days.flatMap((day) => {
+                const dayPlaces = places[day.id]
+                if (!dayPlaces) return []
+                const activities: Activity[] = tiers.showAllPlaces
+                  ? dayPlaces.activities
+                  : dayPlaces.activities.filter(
+                      (a) => a.status === 'selected',
+                    )
+                return activities.map((activity, i) => (
                   <AdvancedMarker
-                    key={day.id}
-                    position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
-                    title={`Day ${day.index + 1}: ${day.overnight.name} ${isoCountryFlag(day.overnight.country)}`}
-                    data-testid={`day-badge-${day.id}`}
-                    onClick={() => navigate(`/map/day/${day.id}`)}
+                    key={`${day.id}-activity-${i}`}
+                    position={{ lat: activity.lat, lng: activity.lng }}
+                    title={activity.name}
+                    data-testid="activity-marker"
                   >
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-xs font-semibold text-white shadow">
-                      {OVERNIGHT_ICON} {day.index + 1}
-                    </div>
+                    <span>{CATEGORY_ICON[activity.category]}</span>
                   </AdvancedMarker>
-                ))}
+                ))
+              })}
 
-              {(tiers.showSelectedActivities || tiers.showAllPlaces) &&
-                days.flatMap((day) => {
-                  const dayPlaces = places[day.id]
-                  if (!dayPlaces) return []
-                  const activities: Activity[] = tiers.showAllPlaces
-                    ? dayPlaces.activities
-                    : dayPlaces.activities.filter(
-                        (a) => a.status === 'selected',
-                      )
-                  return activities.map((activity, i) => (
-                    <AdvancedMarker
-                      key={`${day.id}-activity-${i}`}
-                      position={{ lat: activity.lat, lng: activity.lng }}
-                      title={activity.name}
-                      data-testid="activity-marker"
-                    >
-                      <span>{CATEGORY_ICON[activity.category]}</span>
-                    </AdvancedMarker>
-                  ))
-                })}
-
-              {tiers.showAllPlaces &&
-                days.flatMap((day) => {
-                  const dayPlaces = places[day.id]
-                  if (!dayPlaces) return []
-                  return dayPlaces.restaurants.map((restaurant, i) => (
-                    <AdvancedMarker
-                      key={`${day.id}-restaurant-${i}`}
-                      position={{ lat: restaurant.lat, lng: restaurant.lng }}
-                      title={restaurant.name}
-                      data-testid="restaurant-marker"
-                    >
-                      <span>{RESTAURANT_ICON}</span>
-                    </AdvancedMarker>
-                  ))
-                })}
-            </GoogleMap>
-          </APIProvider>
+            {tiers.showAllPlaces &&
+              days.flatMap((day) => {
+                const dayPlaces = places[day.id]
+                if (!dayPlaces) return []
+                return dayPlaces.restaurants.map((restaurant, i) => (
+                  <AdvancedMarker
+                    key={`${day.id}-restaurant-${i}`}
+                    position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                    title={restaurant.name}
+                    data-testid="restaurant-marker"
+                  >
+                    <span>{RESTAURANT_ICON}</span>
+                  </AdvancedMarker>
+                ))
+              })}
+          </GoogleMap>
         ) : (
           <p className="p-4 text-neutral-500">
             Set VITE_GOOGLE_MAPS_API_KEY to display the map.

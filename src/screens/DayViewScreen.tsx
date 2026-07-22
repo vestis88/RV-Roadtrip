@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import {
-  APIProvider,
-  AdvancedMarker,
-  Map as GoogleMap,
-  useMap,
-} from '@vis.gl/react-google-maps'
+import { AdvancedMarker, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail } from '../hooks/useDayDetail'
@@ -89,60 +84,58 @@ export function DayViewScreen() {
         data-testid="day-map"
       >
         {apiKey ? (
-          <APIProvider apiKey={apiKey}>
-            <GoogleMap
-              defaultCenter={{ lat: day.overnight.lat, lng: day.overnight.lng }}
-              defaultZoom={12}
-              mapId="rv-day-view"
+          <GoogleMap
+            defaultCenter={{ lat: day.overnight.lat, lng: day.overnight.lng }}
+            defaultZoom={12}
+            mapId="rv-day-view"
+          >
+            <MapPanner target={selectedPlace} />
+
+            <AdvancedMarker
+              position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
+              title={day.overnight.name}
             >
-              <MapPanner target={selectedPlace} />
+              <span>{OVERNIGHT_ICON}</span>
+            </AdvancedMarker>
 
+            {activities.map((activity, i) => (
               <AdvancedMarker
-                position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
-                title={day.overnight.name}
+                key={`activity-${i}`}
+                position={{ lat: activity.lat, lng: activity.lng }}
+                title={activity.name}
+                onClick={() =>
+                  setSelectedPlace({
+                    id: `activity-card-${i}`,
+                    name: activity.name,
+                    lat: activity.lat,
+                    lng: activity.lng,
+                  })
+                }
               >
-                <span>{OVERNIGHT_ICON}</span>
+                <span>{CATEGORY_ICON[activity.category]}</span>
               </AdvancedMarker>
+            ))}
 
-              {activities.map((activity, i) => (
-                <AdvancedMarker
-                  key={`activity-${i}`}
-                  position={{ lat: activity.lat, lng: activity.lng }}
-                  title={activity.name}
-                  onClick={() =>
-                    setSelectedPlace({
-                      id: `activity-card-${i}`,
-                      name: activity.name,
-                      lat: activity.lat,
-                      lng: activity.lng,
-                    })
-                  }
-                >
-                  <span>{CATEGORY_ICON[activity.category]}</span>
-                </AdvancedMarker>
-              ))}
-
-              {restaurants.map((restaurant, i) => (
-                <AdvancedMarker
-                  key={`restaurant-${i}`}
-                  position={{ lat: restaurant.lat, lng: restaurant.lng }}
-                  title={restaurant.name}
-                  onClick={() =>
-                    setSelectedPlace({
-                      id: `${restaurant.meal}-card-${restaurants
-                        .filter((r) => r.meal === restaurant.meal)
-                        .indexOf(restaurant)}`,
-                      name: restaurant.name,
-                      lat: restaurant.lat,
-                      lng: restaurant.lng,
-                    })
-                  }
-                >
-                  <span>{RESTAURANT_ICON}</span>
-                </AdvancedMarker>
-              ))}
-            </GoogleMap>
-          </APIProvider>
+            {restaurants.map((restaurant, i) => (
+              <AdvancedMarker
+                key={`restaurant-${i}`}
+                position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                title={restaurant.name}
+                onClick={() =>
+                  setSelectedPlace({
+                    id: `${restaurant.meal}-card-${restaurants
+                      .filter((r) => r.meal === restaurant.meal)
+                      .indexOf(restaurant)}`,
+                    name: restaurant.name,
+                    lat: restaurant.lat,
+                    lng: restaurant.lng,
+                  })
+                }
+              >
+                <span>{RESTAURANT_ICON}</span>
+              </AdvancedMarker>
+            ))}
+          </GoogleMap>
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-neutral-200 p-4 text-center text-neutral-500 dark:bg-neutral-800">
             Set VITE_GOOGLE_MAPS_API_KEY to display the map.
