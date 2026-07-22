@@ -1,14 +1,5 @@
 import { expect, test } from '@playwright/test'
-
-async function createTripWithPlan(page: import('@playwright/test').Page) {
-  await page.goto('/')
-  await page.getByTestId('trip-name-input').waitFor()
-  await page.getByTestId('nav-setup').click()
-  await page.getByTestId('generate-plan-button').click()
-  await expect(page.getByTestId('plan-status')).toHaveText('ready', {
-    timeout: 15_000,
-  })
-}
+import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 // The Google Maps JS API itself can't load in this sandbox (see master_plan.md's
 // T-20 note — the agent proxy's egress policy blocks Google domains from the

@@ -1,14 +1,5 @@
 import { expect, test } from '@playwright/test'
-
-async function createTripWithPlan(page: import('@playwright/test').Page) {
-  await page.goto('/')
-  await page.getByTestId('trip-name-input').waitFor()
-  await page.getByTestId('nav-setup').click()
-  await page.getByTestId('generate-plan-button').click()
-  await expect(page.getByTestId('plan-status')).toHaveText('ready', {
-    timeout: 15_000,
-  })
-}
+import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 test('overview map header summarizes the plan (route/km/day count)', async ({
   page,

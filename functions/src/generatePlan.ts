@@ -6,12 +6,22 @@ import {
   tripDaySchema,
   type Activity,
   type NamedPoint,
+  type OvernightStop,
   type Restaurant,
+  type Trip,
   type TripDay,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
-import { computeMultiLegTotals, googleRoutesApiKey } from './routesApi.js'
+import { computeRouteLeg, googleRoutesApiKey } from './routesApi.js'
+import { claudeApiKey, planTrip } from './prompts/planTrip.js'
+import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
+import {
+  enrichActivities,
+  enrichRestaurantsForMeal,
+  geocodeQuery,
+  googlePlacesApiKey,
+} from './placesApi.js'
 
 interface PlanRequestData {
   tripId: string
@@ -20,153 +30,150 @@ interface PlanRequestData {
   status: string
 }
 
-interface FixtureDay {
+interface GeneratedDay {
   day: Omit<TripDay, 'drive'> & { drive?: TripDay['drive'] }
   activities: Activity[]
   restaurants: Restaurant[]
 }
 
-const FIXTURE_WAYPOINTS: NamedPoint[] = [
-  { name: 'Oslo', lat: 59.9139, lng: 10.7522 },
-  { name: 'Lillehammer', lat: 61.1153, lng: 10.4662 },
-  { name: 'Otta', lat: 61.7725, lng: 9.5406 },
-]
+/**
+ * Turns one skeleton day (town names only, per 6.1's contract — Claude
+ * never invents ratings/URLs/coordinates) into a fully resolved day: real
+ * coordinates for the overnight stop (geocoded via Places, biased near the
+ * previous stop so same-named towns in different countries don't collide),
+ * a real drive leg via the Routes API for 'drive' days, and Places-enriched
+ * activities/restaurants. Rest days reuse the previous stop's exact
+ * coordinates rather than re-geocoding — they're the same physical place.
+ */
+async function resolveSkeletonDay(
+  skDay: PlanTripSkeletonDay,
+  currentLocation: NamedPoint,
+): Promise<{ generated: GeneratedDay; nextLocation: NamedPoint }> {
+  let overnight: OvernightStop
+  let drive: TripDay['drive']
 
-async function fixturePlan(): Promise<FixtureDay[]> {
-  const { legs } = await computeMultiLegTotals(FIXTURE_WAYPOINTS)
+  if (skDay.type === 'drive') {
+    const geocoded = await geocodeQuery(
+      `${skDay.overnight.name}, ${skDay.overnight.town}, ${skDay.overnight.country}`,
+      currentLocation,
+    )
+    if (!geocoded) {
+      throw new Error(
+        `Could not geocode overnight stop "${skDay.overnight.name}, ${skDay.overnight.town}"`,
+      )
+    }
+    overnight = {
+      name: skDay.overnight.name,
+      lat: geocoded.lat,
+      lng: geocoded.lng,
+      country: skDay.overnight.country,
+      ...(skDay.overnight.campsiteSuggestion
+        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
+        : {}),
+    }
+    const leg = await computeRouteLeg(currentLocation, geocoded)
+    drive = {
+      fromName: currentLocation.name,
+      toName: overnight.name,
+      distanceKm: leg.distanceKm,
+      durationMin: leg.durationMin,
+      slot: skDay.drive?.slot ?? 'morning',
+      ...(leg.polyline ? { polyline: leg.polyline } : {}),
+    }
+  } else {
+    overnight = {
+      name: skDay.overnight.name || currentLocation.name,
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+      country: skDay.overnight.country,
+      ...(skDay.overnight.campsiteSuggestion
+        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
+        : {}),
+    }
+  }
 
-  return [
-    {
+  const near = { lat: overnight.lat, lng: overnight.lng }
+  const excludeIds = new Set<string>()
+  const [activities, breakfast, lunch, dinner] = await Promise.all([
+    enrichActivities(skDay.activities, near),
+    enrichRestaurantsForMeal(
+      skDay.restaurants.filter((r) => r.meal === 'breakfast'),
+      'breakfast',
+      near,
+      excludeIds,
+    ),
+    enrichRestaurantsForMeal(
+      skDay.restaurants.filter((r) => r.meal === 'lunch'),
+      'lunch',
+      near,
+      excludeIds,
+    ),
+    enrichRestaurantsForMeal(
+      skDay.restaurants.filter((r) => r.meal === 'dinner'),
+      'dinner',
+      near,
+      excludeIds,
+    ),
+  ])
+
+  return {
+    generated: {
       day: {
-        index: 0,
-        date: '2026-07-10',
-        type: 'drive',
-        overnight: {
-          name: 'Lillehammer Camping',
-          lat: 61.1153,
-          lng: 10.4662,
-          country: 'NO',
-          campsiteSuggestion: 'Lillehammer Camping',
-        },
-        drive: {
-          fromName: 'Oslo',
-          toName: 'Lillehammer',
-          distanceKm: legs[0].distanceKm,
-          durationMin: legs[0].durationMin,
-          slot: 'morning',
-          ...(legs[0].polyline ? { polyline: legs[0].polyline } : {}),
-        },
-        summary: 'Easy first day north along the Mjøsa lake.',
+        index: skDay.index,
+        date: skDay.date,
+        type: skDay.type,
+        overnight,
+        drive,
+        summary: skDay.summary,
+        ...(skDay.extraTimeReason
+          ? { extraTimeReason: skDay.extraTimeReason }
+          : {}),
       },
-      activities: [
-        {
-          name: 'Maihaugen Open-Air Museum',
-          category: 'museum',
-          lat: 61.1147,
-          lng: 10.4726,
-          googleMapsUrl: 'https://maps.google.com/?q=Maihaugen+Open-Air+Museum',
-          blurb: 'A hidden-gem open-air museum the kids will love.',
-          kidFriendly: true,
-          status: 'suggested',
-        },
-      ],
-      restaurants: [
-        {
-          name: 'Bryggerikjelleren',
-          meal: 'dinner',
-          lat: 61.1123,
-          lng: 10.4661,
-          googleMapsUrl: 'https://maps.google.com/?q=Bryggerikjelleren',
-          blurb: 'Cozy cellar restaurant near the river.',
-          status: 'suggested',
-        },
-      ],
+      activities,
+      restaurants: [...breakfast, ...lunch, ...dinner],
     },
-    {
-      day: {
-        index: 1,
-        date: '2026-07-11',
-        type: 'drive',
-        overnight: {
-          name: 'Otta Camping',
-          lat: 61.7725,
-          lng: 9.5406,
-          country: 'NO',
-          campsiteSuggestion: 'Otta Camping',
-        },
-        drive: {
-          fromName: 'Lillehammer',
-          toName: 'Otta',
-          distanceKm: legs[1].distanceKm,
-          durationMin: legs[1].durationMin,
-          slot: 'midday',
-          ...(legs[1].polyline ? { polyline: legs[1].polyline } : {}),
-        },
-        summary: 'Into the mountains along the Gudbrandsdalen valley.',
-      },
-      activities: [
-        {
-          name: 'Rondane National Park hike',
-          category: 'hike',
-          lat: 61.85,
-          lng: 9.85,
-          blurb: 'A gentle family hike with sweeping mountain views.',
-          kidFriendly: true,
-          status: 'suggested',
-        },
-      ],
-      restaurants: [
-        {
-          name: 'Otta Café',
-          meal: 'lunch',
-          lat: 61.7719,
-          lng: 9.541,
-          blurb: 'Simple local café, good stop before the trail.',
-          status: 'suggested',
-        },
-      ],
-    },
-    {
-      day: {
-        index: 2,
-        date: '2026-07-12',
-        type: 'rest',
-        overnight: {
-          name: 'Otta Camping',
-          lat: 61.7725,
-          lng: 9.5406,
-          country: 'NO',
-          campsiteSuggestion: 'Otta Camping',
-        },
-        summary: 'Rest day in Otta — no driving today.',
-      },
-      activities: [
-        {
-          name: 'Sjoa river rafting',
-          category: 'other',
-          lat: 61.68,
-          lng: 9.55,
-          blurb: 'A splash of adventure on a rest day.',
-          kidFriendly: false,
-          status: 'suggested',
-        },
-      ],
-      restaurants: [
-        {
-          name: 'Peer Gynt Gård',
-          meal: 'dinner',
-          lat: 61.71,
-          lng: 9.6,
-          blurb: 'Farmhouse restaurant with local produce.',
-          status: 'suggested',
-        },
-      ],
-    },
-  ]
+    nextLocation: { name: overnight.name, lat: overnight.lat, lng: overnight.lng },
+  }
+}
+
+/**
+ * Runs the real planning pipeline for a trip: Claude proposes the route
+ * shape (planTrip), then each day is resolved to real coordinates/distances
+ * (Routes + Places geocoding) and enriched with real activities/restaurants
+ * (Places). Days are resolved in order — each one's geocoding bias and
+ * drive-leg origin depend on the previous day's resolved location — but
+ * enrichment (Places lookups) is NOT parallelized across days, since a
+ * multi-week trip can mean hundreds of sequential Places calls; see the
+ * generatePlan timeout for how that's accommodated.
+ */
+async function generateRealPlan(trip: Trip): Promise<GeneratedDay[]> {
+  const skeleton = await planTrip({
+    settings: trip.settings,
+    notesFreeText: trip.notes.freeText,
+  })
+
+  const days: GeneratedDay[] = []
+  let currentLocation: NamedPoint = trip.settings.startPoint
+  for (const skDay of skeleton.days) {
+    const { generated, nextLocation } = await resolveSkeletonDay(
+      skDay,
+      currentLocation,
+    )
+    days.push(generated)
+    currentLocation = nextLocation
+  }
+  return days
 }
 
 export const generatePlan = onDocumentCreated(
-  { document: 'planRequests/{requestId}', secrets: [googleRoutesApiKey] },
+  {
+    document: 'planRequests/{requestId}',
+    secrets: [googleRoutesApiKey, claudeApiKey, googlePlacesApiKey],
+    // A multi-week trip means Claude's own generation plus hundreds of
+    // sequential Places lookups (5 activities + 9 restaurants per day) —
+    // comfortably past the 60s default for anything beyond a few days.
+    timeoutSeconds: 540,
+  },
   async (event) => {
     const snap = event.data
     if (!snap) return
@@ -227,13 +234,16 @@ export const generatePlan = onDocumentCreated(
     try {
       await tripRef.update({ 'planMeta.status': 'generating' })
 
-      const days = await fixturePlan()
+      const tripSnap = await tripRef.get()
+      const trip = tripSnap.data() as Trip
+
+      const days = await generateRealPlan(trip)
 
       // Section 5 pacing rules: no day > 1.4x target, final 2 days <= 1.0x
-      // target, rest days stay put. planTrip (T-14) isn't wired into this
-      // fixture pipeline yet, so there's nothing to feed a retry back to —
-      // this is the "never show a bad plan" backstop that T-16/T-17 will
-      // extend into a real one-shot retry once Claude drives the content.
+      // target, rest days stay put. Unlike a replan (which only re-paces
+      // the remainder), a fresh generation has no prior plan to preserve —
+      // if Claude's route violates pacing, there's nothing to salvage, so
+      // this is a hard failure rather than a retry (never show a bad plan).
       const violation = validatePacing(days.map((d) => d.day))
       if (violation) {
         throw new Error(`Pacing validation failed: ${violation.reason}`)

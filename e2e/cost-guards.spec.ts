@@ -7,6 +7,19 @@ const PROJECT_ID = 'demo-rv-trip-planner'
 if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
 const adminDb = getFirestore()
 
+async function waitFor<T>(
+  fn: () => Promise<T | undefined>,
+  timeoutMs = 15_000,
+): Promise<T> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const result = await fn()
+    if (result !== undefined) return result
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  throw new Error('Timed out waiting for condition')
+}
+
 test('hammering the Generate button creates exactly one plan request', async ({
   page,
 }) => {
@@ -31,8 +44,14 @@ test('hammering the Generate button creates exactly one plan request', async ({
     for (let i = 0; i < 5; i++) button?.click()
   })
 
-  await expect(page.getByTestId('plan-status')).toHaveText('ready', {
-    timeout: 15_000,
+  // The guard's job is "exactly one request gets created," not "the plan
+  // succeeds" — generatePlan's real Claude/Places pipeline has no
+  // synthetic fallback and will settle on 'error' without those
+  // credentials configured in this emulator, which is fine here.
+  await waitFor(async () => {
+    const snap = await adminDb.collection('trips').doc(tripId).get()
+    const status = snap.data()?.planMeta?.status
+    return status === 'ready' || status === 'error' ? status : undefined
   })
 
   const requestsSnap = await adminDb

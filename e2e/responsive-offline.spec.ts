@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 const VIEWPORTS = {
   phone: { width: 375, height: 812 },
@@ -7,16 +8,6 @@ const VIEWPORTS = {
 }
 
 const MIN_TAP_TARGET_PX = 44
-
-async function createTripWithPlan(page: import('@playwright/test').Page) {
-  await page.goto('/')
-  await page.getByTestId('trip-name-input').waitFor()
-  await page.getByTestId('nav-setup').click()
-  await page.getByTestId('generate-plan-button').click()
-  await expect(page.getByTestId('plan-status')).toHaveText('ready', {
-    timeout: 15_000,
-  })
-}
 
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {
   test(`no horizontal scroll on any screen at ${name}`, async ({ page }) => {

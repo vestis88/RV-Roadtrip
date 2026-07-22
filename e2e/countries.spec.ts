@@ -1,24 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
 if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
 const adminDb = getFirestore()
-
-async function createTripWithPlan(page: import('@playwright/test').Page) {
-  await page.goto('/')
-  await page.getByTestId('trip-name-input').waitFor()
-  await page.getByTestId('nav-setup').click()
-  await page.getByTestId('generate-plan-button').click()
-  await expect(page.getByTestId('plan-status')).toHaveText('ready', {
-    timeout: 15_000,
-  })
-  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
-  if (!tripId) throw new Error('tripId missing from localStorage')
-  return tripId
-}
 
 test('every route country is listed, and its detail page has an empty state before a guide exists', async ({
   page,

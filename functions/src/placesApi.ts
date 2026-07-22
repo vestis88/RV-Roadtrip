@@ -184,6 +184,28 @@ async function resolveOne(
   return match
 }
 
+/**
+ * Resolves a free-text place query (e.g. "Lillehammer Camping, Lillehammer,
+ * NO") to coordinates, biased near a reference point. Unlike resolveOne,
+ * this applies no quality bar — a town/campsite name isn't a "tourist
+ * attraction" and may have few or no ratings; the first match is enough
+ * since only its location is needed, not its quality.
+ */
+export async function geocodeQuery(
+  query: string,
+  near: LatLng,
+): Promise<LatLng | null> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — geocoding requires real data and has no synthetic fallback.',
+    )
+  }
+  const results = await textSearch(query, near, apiKey)
+  const first = results[0]
+  return first ? { lat: first.lat, lng: first.lng } : null
+}
+
 export interface ProposedActivity {
   name: string
   town: string

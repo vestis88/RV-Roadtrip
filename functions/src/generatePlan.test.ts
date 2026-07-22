@@ -23,7 +23,17 @@ async function waitFor<T>(
 }
 
 describe('generatePlan', () => {
-  it('writes a fixture plan and marks planMeta ready when a planRequest is created', async () => {
+  // generatePlan now runs the real pipeline (planTrip via Claude, then
+  // Routes + Places for each day) instead of a hardcoded fixture. That
+  // pipeline has no synthetic fallback by design (same as T-16/T-18) — it
+  // needs CLAUDE_API_KEY and GOOGLE_PLACES_API_KEY, which this local
+  // emulator setup doesn't have configured. This test instead confirms the
+  // trigger correctly attempts the real pipeline and fails gracefully
+  // (a clear planMeta.error, not a crash or an infinite 'generating') when
+  // those secrets aren't available — the actual "produces a ready plan"
+  // path is a live check against the deployed project, which does have
+  // real secrets configured.
+  it('attempts the real pipeline and surfaces a clear error without Claude/Places credentials', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidA')
 
@@ -36,25 +46,17 @@ describe('generatePlan', () => {
     const trip = await waitFor(async () => {
       const snap = await db.collection('trips').doc(tripId).get()
       const data = snap.data()
-      return data?.planMeta?.status === 'ready' ? data : undefined
+      return data?.planMeta?.status === 'error' ? data : undefined
     })
 
-    expect(trip.planMeta.status).toBe('ready')
-    expect(trip.planMeta.totalKm).toBeGreaterThan(0)
-    expect(trip.planMeta.avgDriveMinutesPerDay).toBeGreaterThan(0)
+    expect(trip.planMeta.status).toBe('error')
+    expect(trip.planMeta.error).toBeTruthy()
 
     const daysSnap = await db
       .collection('trips')
       .doc(tripId)
       .collection('days')
       .get()
-    expect(daysSnap.size).toBe(3)
-
-    for (const dayDoc of daysSnap.docs) {
-      const activities = await dayDoc.ref.collection('activities').get()
-      const restaurants = await dayDoc.ref.collection('restaurants').get()
-      expect(activities.size).toBeGreaterThan(0)
-      expect(restaurants.size).toBeGreaterThan(0)
-    }
+    expect(daysSnap.size).toBe(0)
   }, 15_000)
 })
