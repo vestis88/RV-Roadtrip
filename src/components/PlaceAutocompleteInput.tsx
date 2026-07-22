@@ -73,12 +73,18 @@ export function PlaceAutocompleteInput({
       }
     }
 
+    function handleError(event: Event) {
+      console.error('PlaceAutocompleteElement gmp-error', event)
+    }
+
     element.addEventListener('gmp-select', handleSelect)
     element.addEventListener('blur', handleBlur)
+    element.addEventListener('gmp-error', handleError)
 
     return () => {
       element.removeEventListener('gmp-select', handleSelect)
       element.removeEventListener('blur', handleBlur)
+      element.removeEventListener('gmp-error', handleError)
       element.remove()
       elementRef.current = null
     }
