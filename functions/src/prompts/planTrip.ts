@@ -40,7 +40,7 @@ export async function planTrip(input: {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 8000,
+      max_tokens: 16000,
       system,
       messages,
     })
