@@ -40,6 +40,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 
+      - name: Print Playwright error-context (page snapshot at failure) to the job log
+        if: failure()
+        run: |
+          find test-results -name 'error-context.md' -print -exec echo '---' \; -exec cat {} \; -exec echo '---' \; || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
