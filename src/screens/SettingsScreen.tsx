@@ -116,11 +116,11 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           {settings.travelers.map((traveler, index) => (
             <div
               key={index}
-              className="flex items-center gap-2"
+              className="flex flex-wrap items-center gap-2"
               data-testid={`traveler-row-${index}`}
             >
               <input
-                className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                className="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
                 data-testid={`traveler-name-${index}`}
                 value={traveler.name}
                 onChange={(event) =>
