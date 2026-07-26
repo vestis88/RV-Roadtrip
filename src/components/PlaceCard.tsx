@@ -51,7 +51,7 @@ export function PlaceCard({
       }}
       className={`flex w-56 shrink-0 flex-col overflow-hidden rounded-lg border bg-white text-left shadow-sm dark:bg-neutral-900 ${
         selected
-          ? 'border-emerald-600 ring-2 ring-emerald-600'
+          ? 'border-orange-600 ring-2 ring-orange-600'
           : 'border-neutral-200 dark:border-neutral-800'
       }`}
     >
@@ -82,7 +82,7 @@ export function PlaceCard({
             target="_blank"
             rel="noreferrer"
             onClick={stop}
-            className="mt-1 text-xs font-medium text-emerald-700 underline dark:text-emerald-400"
+            className="mt-1 text-xs font-medium text-orange-700 underline dark:text-orange-400"
           >
             Navigate
           </a>
@@ -108,7 +108,7 @@ export function PlaceCard({
                 <button
                   type="button"
                   data-testid={`${testId}-confirm-done`}
-                  className="rounded bg-emerald-700 px-2 py-1 text-xs text-white"
+                  className="rounded bg-orange-600 px-2 py-1 text-xs text-white"
                   onClick={() => {
                     onMarkDone?.(noteDraft)
                     setAddingNote(false)
@@ -127,7 +127,7 @@ export function PlaceCard({
                       stop(event)
                       onMarkSelected()
                     }}
-                    className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                    className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-900 dark:border-neutral-700 dark:text-white"
                   >
                     Select
                   </button>
@@ -140,7 +140,7 @@ export function PlaceCard({
                       stop(event)
                       setAddingNote(true)
                     }}
-                    className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                    className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-900 dark:border-neutral-700 dark:text-white"
                   >
                     Done
                   </button>

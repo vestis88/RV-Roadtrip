@@ -80,7 +80,7 @@ export function DiaryScreen() {
           type="button"
           data-testid="diary-export"
           onClick={exportDiary}
-          className="rounded border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700"
+          className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
         >
           Export
         </button>

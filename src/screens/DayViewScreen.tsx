@@ -158,7 +158,7 @@ export function DayViewScreen() {
             data-testid="prev-day"
             disabled={!prevDayId}
             onClick={() => goToDay(prevDayId)}
-            className="rounded px-3 py-1 text-sm underline disabled:opacity-30 disabled:no-underline"
+            className="rounded px-3 py-1 text-sm text-orange-700 underline disabled:opacity-30 disabled:no-underline dark:text-orange-400"
           >
             ← Prev
           </button>
@@ -173,7 +173,7 @@ export function DayViewScreen() {
             data-testid="next-day"
             disabled={!nextDayId}
             onClick={() => goToDay(nextDayId)}
-            className="rounded px-3 py-1 text-sm underline disabled:opacity-30 disabled:no-underline"
+            className="rounded px-3 py-1 text-sm text-orange-700 underline disabled:opacity-30 disabled:no-underline dark:text-orange-400"
           >
             Next →
           </button>
@@ -185,7 +185,7 @@ export function DayViewScreen() {
 
         {day.type === 'rest' ? (
           <p
-            className="mx-4 mt-4 rounded bg-emerald-50 p-3 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+            className="mx-4 mt-4 rounded bg-orange-50 p-3 text-orange-800 dark:bg-orange-950 dark:text-orange-200"
             data-testid="rest-day-banner"
           >
             No driving today 🎉

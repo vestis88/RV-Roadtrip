@@ -85,28 +85,28 @@ function AppShell() {
                 <Link
                   to="/"
                   data-testid="nav-setup"
-                  className="inline-flex min-h-11 items-center px-3 underline"
+                  className="inline-flex min-h-11 items-center px-3 text-orange-700 underline dark:text-orange-400"
                 >
                   Trip setup
                 </Link>
                 <Link
                   to="/map"
                   data-testid="nav-map"
-                  className="inline-flex min-h-11 items-center px-3 underline"
+                  className="inline-flex min-h-11 items-center px-3 text-orange-700 underline dark:text-orange-400"
                 >
                   Map
                 </Link>
                 <Link
                   to="/diary"
                   data-testid="nav-diary"
-                  className="inline-flex min-h-11 items-center px-3 underline"
+                  className="inline-flex min-h-11 items-center px-3 text-orange-700 underline dark:text-orange-400"
                 >
                   Diary
                 </Link>
                 <Link
                   to="/countries"
                   data-testid="nav-countries"
-                  className="inline-flex min-h-11 items-center px-3 underline"
+                  className="inline-flex min-h-11 items-center px-3 text-orange-700 underline dark:text-orange-400"
                 >
                   Countries
                 </Link>

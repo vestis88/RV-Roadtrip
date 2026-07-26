@@ -160,7 +160,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
                 type="button"
                 data-testid={`traveler-remove-${index}`}
                 onClick={() => removeTraveler(index)}
-                className="text-sm text-red-600"
+                className="text-sm text-red-600 dark:text-red-400"
               >
                 Remove
               </button>
@@ -171,7 +171,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           type="button"
           data-testid="traveler-add"
           onClick={addTraveler}
-          className="mt-2 rounded border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700"
+          className="mt-2 rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
         >
           Add traveler
         </button>
@@ -238,7 +238,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="generate-plan-button"
             onClick={generatePlan}
             disabled={submitting}
-            className="rounded bg-emerald-700 px-4 py-2 text-white disabled:opacity-50"
+            className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
           >
             Generate plan
           </button>
@@ -249,7 +249,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="generate-plan-button"
             onClick={generatePlan}
             disabled={submitting}
-            className="rounded bg-emerald-700 px-4 py-2 text-white disabled:opacity-50"
+            className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
           >
             Re-plan trip
           </button>

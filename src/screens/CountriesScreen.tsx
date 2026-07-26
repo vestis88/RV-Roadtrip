@@ -35,7 +35,7 @@ export function CountriesScreen() {
               <Link
                 to={`/countries/${code}`}
                 data-testid={`country-link-${code}`}
-                className="flex items-center gap-2 rounded border border-neutral-200 p-3 underline dark:border-neutral-800"
+                className="flex items-center gap-2 rounded border border-neutral-200 p-3 text-orange-700 underline dark:border-neutral-800 dark:text-orange-400"
               >
                 <span>{isoCountryFlag(code)}</span>
                 <span>{countryName(code)}</span>

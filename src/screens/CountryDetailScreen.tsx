@@ -62,7 +62,10 @@ export function CountryDetailScreen() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 text-left">
-      <Link to="/countries" className="text-sm underline">
+      <Link
+        to="/countries"
+        className="text-sm text-orange-700 underline dark:text-orange-400"
+      >
         ← Back to countries
       </Link>
 
@@ -75,7 +78,7 @@ export function CountryDetailScreen() {
           data-testid="refresh-country-guide"
           onClick={refresh}
           disabled={refreshing}
-          className="rounded border border-neutral-300 px-3 py-1 text-sm disabled:opacity-50 dark:border-neutral-700"
+          className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 disabled:opacity-50 dark:border-neutral-700 dark:text-white"
         >
           {refreshing ? 'Refreshing…' : 'Refresh info'}
         </button>
@@ -145,7 +148,7 @@ export function CountryDetailScreen() {
                 href={guide.roadFees.vignetteUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-1 inline-block underline"
+                className="mt-1 inline-block text-orange-700 underline dark:text-orange-400"
               >
                 Buy a vignette
               </a>

@@ -90,7 +90,7 @@ export function OverviewMapScreen() {
         <button
           type="button"
           data-testid="request-changes-button"
-          className="inline-flex min-h-11 items-center underline"
+          className="inline-flex min-h-11 items-center text-orange-700 underline dark:text-orange-400"
           onClick={() => setChangeRequestOpen(true)}
         >
           Request changes
@@ -120,7 +120,7 @@ export function OverviewMapScreen() {
             {days.map((day) => (
               <label
                 key={day.id}
-                className="flex items-center gap-1 text-sm"
+                className="flex items-center gap-1 text-sm text-neutral-900 dark:text-white"
                 data-testid={`lock-toggle-${day.id}`}
               >
                 <input
@@ -135,7 +135,7 @@ export function OverviewMapScreen() {
           <button
             type="button"
             data-testid="submit-change-request"
-            className="mt-2 rounded bg-emerald-700 px-4 py-2 text-white"
+            className="mt-2 rounded bg-orange-600 px-4 py-2 text-white"
             onClick={submitChangeRequest}
           >
             Submit
@@ -159,7 +159,7 @@ export function OverviewMapScreen() {
             {path.length > 1 && (
               <Polyline
                 path={path}
-                strokeColor="#0f764d"
+                strokeColor="#ea580c"
                 strokeOpacity={0.8}
                 strokeWeight={4}
               />

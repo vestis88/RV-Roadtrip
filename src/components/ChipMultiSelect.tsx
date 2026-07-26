@@ -57,7 +57,7 @@ export function ChipMultiSelect({
                 onClick={() => toggle(option.value)}
                 className={
                   isSelected
-                    ? 'rounded-full bg-emerald-700 px-3 py-1 text-sm text-white'
+                    ? 'rounded-full bg-orange-600 px-3 py-1 text-sm text-white'
                     : 'rounded-full border border-neutral-300 px-3 py-1 text-sm text-neutral-700 dark:border-neutral-600 dark:text-neutral-300'
                 }
               >
@@ -86,7 +86,7 @@ export function ChipMultiSelect({
             type="button"
             data-testid={`${testIdPrefix}-free-entry-add`}
             onClick={addFreeEntry}
-            className="rounded border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700"
+            className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
           >
             Add
           </button>
