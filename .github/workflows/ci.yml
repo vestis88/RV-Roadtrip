@@ -26,7 +26,11 @@ jobs:
       - name: Write emulator-mode .env for build/test steps
         run: |
           cat <<'EOF' > .env
+          VITE_FIREBASE_API_KEY=demo-key
+          VITE_FIREBASE_AUTH_DOMAIN=demo-rv-trip-planner.firebaseapp.com
           VITE_FIREBASE_PROJECT_ID=demo-rv-trip-planner
+          VITE_FIREBASE_STORAGE_BUCKET=demo-rv-trip-planner.appspot.com
+          VITE_FIREBASE_APP_ID=demo-app-id
           VITE_USE_FIREBASE_EMULATORS=true
           EOF
 
