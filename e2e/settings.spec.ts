@@ -10,6 +10,24 @@ async function setRange(locator: import('@playwright/test').Locator, value: stri
   }, value)
 }
 
+// PlaceAutocompleteInput renders either a plain <input> (fallback, e.g. when
+// the Places library hasn't loaded) or a real `gmp-place-autocomplete`
+// custom element once Google's library is reachable — the latter isn't a
+// native <input>/<textarea>, so .fill()/.blur()/toHaveValue don't apply to
+// it. Set/read its `value` property directly and dispatch the same 'blur'
+// event the component's own manual-entry handler listens for.
+async function setPlaceInput(locator: import('@playwright/test').Locator, value: string) {
+  await locator.evaluate((el: HTMLInputElement, v: string) => {
+    el.focus()
+    el.value = v
+    el.blur()
+  }, value)
+}
+
+async function getPlaceInputValue(locator: import('@playwright/test').Locator) {
+  return locator.evaluate((el: HTMLInputElement) => el.value)
+}
+
 test('settings form fills, persists across reload, and flips plan status to stale', async ({
   page,
 }) => {
@@ -20,10 +38,8 @@ test('settings form fills, persists across reload, and flips plan status to stal
   await page.getByTestId('start-date-input').fill('2026-07-10')
   await page.getByTestId('end-date-input').fill('2026-08-02')
 
-  await page.getByTestId('start-point-input').fill('Oslo, Norway')
-  await page.getByTestId('start-point-input').blur()
-  await page.getByTestId('end-point-input').fill('Rome, Italy')
-  await page.getByTestId('end-point-input').blur()
+  await setPlaceInput(page.getByTestId('start-point-input'), 'Oslo, Norway')
+  await setPlaceInput(page.getByTestId('end-point-input'), 'Rome, Italy')
 
   await page.getByTestId('traveler-add').click()
   await page.getByTestId('traveler-name-0').fill('Bim')
@@ -56,10 +72,12 @@ test('settings form fills, persists across reload, and flips plan status to stal
 
   await expect(page.getByTestId('start-date-input')).toHaveValue('2026-07-10')
   await expect(page.getByTestId('end-date-input')).toHaveValue('2026-08-02')
-  await expect(page.getByTestId('start-point-input')).toHaveValue(
+  expect(await getPlaceInputValue(page.getByTestId('start-point-input'))).toBe(
     'Oslo, Norway',
   )
-  await expect(page.getByTestId('end-point-input')).toHaveValue('Rome, Italy')
+  expect(await getPlaceInputValue(page.getByTestId('end-point-input'))).toBe(
+    'Rome, Italy',
+  )
   await expect(page.getByTestId('traveler-name-0')).toHaveValue('Bim')
   await expect(page.getByTestId('traveler-name-1')).toHaveValue('Kid')
   await expect(page.getByTestId('traveler-role-1')).toHaveValue('child')
