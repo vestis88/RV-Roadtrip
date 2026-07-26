@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures.js'
 
 test('two devices stay in sync in real time, and offline reload still shows cached data', async ({
   browser,

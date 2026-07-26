@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures.js'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 // The Google Maps JS API itself can't load in this sandbox (see master_plan.md's

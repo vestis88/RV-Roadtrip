@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures.js'
 
 test('notes autosave, persist across reload, and sync live to a second device', async ({
   browser,

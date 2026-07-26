@@ -22,4 +22,12 @@ export default tseslint.config([
       globals: globals.browser,
     },
   },
+  {
+    // Playwright fixtures take a parameter literally named `use`, which
+    // react-hooks/rules-of-hooks misreads as a React Hook call.
+    files: ['e2e/**/*.ts'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
 ])

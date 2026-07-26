@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures.js'
 import { seedFixturePlan } from './helpers/seedFixturePlan.js'
 
 test('marking cards done with notes logs them to the diary, synced live to a second device', async ({

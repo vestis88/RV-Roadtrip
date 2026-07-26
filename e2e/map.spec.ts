@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures.js'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 
 test('overview map header summarizes the plan (route/km/day count)', async ({
