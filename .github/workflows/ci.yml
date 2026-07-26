@@ -23,6 +23,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Write emulator-mode .env for build/test steps
+        run: |
+          cat <<'EOF' > .env
+          VITE_FIREBASE_PROJECT_ID=demo-rv-trip-planner
+          VITE_USE_FIREBASE_EMULATORS=true
+          EOF
+
       - run: npm ci
       - run: npm run lint
       - run: npm run test -w shared
@@ -56,6 +63,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      - name: Write production .env for the Hosting build
+        run: |
+          cat <<'EOF' > .env
+          VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_GOOGLE_MAPS_API_KEY=${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+          VITE_USE_FIREBASE_EMULATORS=false
+          EOF
 
       - run: npm ci
       - run: npm run build
