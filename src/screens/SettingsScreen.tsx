@@ -231,35 +231,56 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         />
       </label>
 
-      <div className="flex items-center gap-3">
-        {trip.planMeta.status === 'idle' && (
-          <button
-            type="button"
-            data-testid="generate-plan-button"
-            onClick={generatePlan}
-            disabled={submitting}
-            className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+      <div>
+        <div className="flex items-center gap-3">
+          {trip.planMeta.status === 'idle' && (
+            <button
+              type="button"
+              data-testid="generate-plan-button"
+              onClick={generatePlan}
+              disabled={submitting}
+              className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+            >
+              Generate plan
+            </button>
+          )}
+          {trip.planMeta.status === 'stale' && (
+            <button
+              type="button"
+              data-testid="generate-plan-button"
+              onClick={generatePlan}
+              disabled={submitting}
+              className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+            >
+              Re-plan trip
+            </button>
+          )}
+          {trip.planMeta.status === 'error' && (
+            <button
+              type="button"
+              data-testid="generate-plan-button"
+              onClick={generatePlan}
+              disabled={submitting}
+              className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+            >
+              Retry
+            </button>
+          )}
+          <span
+            className="text-sm text-neutral-500 dark:text-neutral-400"
+            data-testid="plan-status"
           >
-            Generate plan
-          </button>
-        )}
-        {trip.planMeta.status === 'stale' && (
-          <button
-            type="button"
-            data-testid="generate-plan-button"
-            onClick={generatePlan}
-            disabled={submitting}
-            className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+            {trip.planMeta.status}
+          </span>
+        </div>
+        {trip.planMeta.status === 'error' && trip.planMeta.error && (
+          <p
+            className="mt-2 text-sm text-red-600 dark:text-red-400"
+            data-testid="plan-error"
           >
-            Re-plan trip
-          </button>
+            {trip.planMeta.error}
+          </p>
         )}
-        <span
-          className="text-sm text-neutral-500 dark:text-neutral-400"
-          data-testid="plan-status"
-        >
-          {trip.planMeta.status}
-        </span>
       </div>
     </div>
   )
