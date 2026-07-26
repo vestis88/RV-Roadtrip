@@ -28,6 +28,17 @@ function textFromResponse(response: Anthropic.Message): string {
     .join('')
 }
 
+// Surfaces enough of the raw response to diagnose a parse failure from the
+// planRequests error field alone — this function has no log access from the
+// browser/Firestore console, so the error message itself is the only
+// diagnostic channel available after the fact.
+function describeResponse(response: Anthropic.Message, text: string): string {
+  const blockTypes = response.content.map((block) => block.type).join(',')
+  const preview =
+    text.length > 300 ? `${text.slice(0, 150)}…${text.slice(-150)}` : text
+  return `stop_reason=${response.stop_reason} blocks=[${blockTypes}] textLength=${text.length} preview=${JSON.stringify(preview)}`
+}
+
 export async function planTrip(input: {
   settings: TripSettings
   notesFreeText: string
@@ -49,7 +60,7 @@ export async function planTrip(input: {
     try {
       return parsePlanTripSkeleton(text)
     } catch (error) {
-      lastError = error
+      lastError = new Error(`${String(error)} | ${describeResponse(response, text)}`)
       messages.push({ role: 'assistant', content: text })
       messages.push({
         role: 'user',
