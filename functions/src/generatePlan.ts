@@ -136,6 +136,9 @@ async function resolveSkeletonDay(
         ...(skDay.extraTimeReason
           ? { extraTimeReason: skDay.extraTimeReason }
           : {}),
+        ...(skDay.highlightReason
+          ? { highlightReason: skDay.highlightReason }
+          : {}),
       },
       activities,
       restaurants: [...breakfast, ...lunch, ...dinner],
@@ -286,12 +289,15 @@ export const generatePlan = onDocumentCreated(
 
       const days = await generateRealPlan(trip, tripRef)
 
-      // Section 5 pacing rules: no day > 1.4x target, final 2 days <= 1.0x
-      // target, rest days stay put. Unlike a replan (which only re-paces
-      // the remainder), a fresh generation has no prior plan to preserve —
-      // if Claude's route violates pacing, there's nothing to salvage, so
-      // this is a hard failure rather than a retry (never show a bad plan).
-      const violation = validatePacing(days.map((d) => d.day))
+      // Structural check only: no day may exceed the traveler's own
+      // maxDriveHoursPerDay by more than the tolerance, and rest days stay
+      // put. Unlike a replan (which only re-paces the remainder), a fresh
+      // generation has no prior plan to preserve — if it fails this, there's
+      // nothing to salvage, so this is a hard failure rather than a retry.
+      const violation = validatePacing(
+        days.map((d) => d.day),
+        trip.settings.maxDriveHoursPerDay,
+      )
       if (violation) {
         throw new Error(`Pacing validation failed: ${violation.reason}`)
       }

@@ -55,10 +55,40 @@ describe('validatePacing', () => {
       }),
     ]
 
-    expect(validatePacing(days)).toBeNull()
+    expect(validatePacing(days, 4)).toBeNull()
   })
 
-  it('rejects a day that drives more than 1.4x the target', () => {
+  it('allows a single long day driven to reach a worthwhile stop, as long as it stays within tolerance of the requested max drive hours', () => {
+    const days: TripDay[] = [
+      day({
+        index: 0,
+        drive: {
+          fromName: 'A',
+          toName: 'B',
+          distanceKm: 100,
+          durationMin: 90,
+          slot: 'morning',
+        },
+      }),
+      day({
+        index: 1,
+        drive: {
+          fromName: 'B',
+          toName: 'C',
+          distanceKm: 291,
+          durationMin: 291,
+          slot: 'morning',
+        },
+        highlightReason: 'Detour to a must-see fjord viewpoint.',
+      }),
+    ]
+
+    // maxDriveHoursPerDay=4 (240min) x 1.5 tolerance = 360min — day 1's
+    // 291min fits, even though it's far above day 0's own distance/time.
+    expect(validatePacing(days, 4)).toBeNull()
+  })
+
+  it('rejects a day that drives more than 1.5x the requested max drive hours', () => {
     const days: TripDay[] = [
       day({
         index: 0,
@@ -82,48 +112,9 @@ describe('validatePacing', () => {
       }),
     ]
 
-    const violation = validatePacing(days)
+    const violation = validatePacing(days, 4)
     expect(violation).not.toBeNull()
-    expect(violation?.reason).toContain('1.4x')
-  })
-
-  it('rejects a monster final day', () => {
-    const days: TripDay[] = [
-      day({
-        index: 0,
-        drive: {
-          fromName: 'A',
-          toName: 'B',
-          distanceKm: 150,
-          durationMin: 120,
-          slot: 'morning',
-        },
-      }),
-      day({
-        index: 1,
-        drive: {
-          fromName: 'B',
-          toName: 'C',
-          distanceKm: 150,
-          durationMin: 120,
-          slot: 'morning',
-        },
-      }),
-      day({
-        index: 2,
-        drive: {
-          fromName: 'C',
-          toName: 'D',
-          distanceKm: 200,
-          durationMin: 170,
-          slot: 'morning',
-        },
-      }),
-    ]
-
-    const violation = validatePacing(days)
-    expect(violation).not.toBeNull()
-    expect(violation?.reason).toContain('relaxed finish')
+    expect(violation?.reason).toContain('4h/day max')
   })
 
   it('rejects a rest day placed in a fresh transit town', () => {
@@ -146,7 +137,7 @@ describe('validatePacing', () => {
       }),
     ]
 
-    const violation = validatePacing(days)
+    const violation = validatePacing(days, 4)
     expect(violation).not.toBeNull()
     expect(violation?.reason).toContain('rest day')
   })

@@ -7,6 +7,7 @@ import {
   type LatLng,
   type NamedPoint,
   type Restaurant,
+  type Trip,
   type TripDay,
 } from '@rv/shared'
 import { computeMultiLegTotals } from './routesApi.js'
@@ -140,6 +141,9 @@ export async function runReplan(
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
 
+  const tripSnapBeforeReplan = await tripRef.get()
+  const trip = tripSnapBeforeReplan.data() as Trip
+
   await tripRef.update({ 'planMeta.status': 'generating' })
 
   const lockedDayIds = new Set(context.lockedDayIds ?? [])
@@ -188,7 +192,10 @@ export async function runReplan(
   // Past days are historical fact and can't be re-paced; per 6.2, only the
   // regenerated remainder needs to satisfy Section 5's pacing rules.
   const remainderDays = remainder.map((r) => r.day)
-  const violation = validatePacing(remainderDays)
+  const violation = validatePacing(
+    remainderDays,
+    trip.settings.maxDriveHoursPerDay,
+  )
   if (violation) {
     throw new Error(`Pacing validation failed: ${violation.reason}`)
   }

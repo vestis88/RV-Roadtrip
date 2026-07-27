@@ -4,46 +4,38 @@ export interface PacingViolation {
   reason: string
 }
 
-const MAX_DAY_FACTOR = 1.4
-const FINAL_DAYS_FACTOR = 1.0
-const FINAL_DAYS_COUNT = 2
+// The trip-average-based 1.4x/1.0x targets this used to hard-enforce were
+// an internal artifact of the generated route, not something the traveler
+// asked for — a single day that legitimately needs more driving to reach a
+// worthwhile stop (see each day's highlightReason) would kill the entire
+// generation with no way to accept the tradeoff. The only drive-length
+// constraint enforced as a hard failure now is the one the traveler
+// actually set: maxDriveHoursPerDay. TOLERANCE gives Claude/Routes some
+// slack (traffic, rounding) before treating it as broken rather than just
+// "longer than requested".
+const MAX_DRIVE_HOURS_TOLERANCE = 1.5
 
 /**
- * Validates a generated plan against Section 5's pacing rules: no day may
- * exceed 1.4x the target daily drive, the final two days must each be at
- * or under 1.0x the target (a relaxed finish), and rest days must stay at
- * the previous day's overnight rather than a fresh transit stop.
+ * Validates a generated plan's structural correctness: no day may drive
+ * more than MAX_DRIVE_HOURS_TOLERANCE x the traveler's own stated
+ * maxDriveHoursPerDay, and rest days must stay at the previous day's
+ * overnight rather than land in a fresh transit stop. Softer pacing
+ * preferences (the outline's own target distance, a relaxed finish) are
+ * left as prompt guidance for the generator rather than a hard post-hoc
+ * gate — see each day's highlightReason for why a longer day was chosen.
  */
-export function validatePacing(days: TripDay[]): PacingViolation | null {
+export function validatePacing(
+  days: TripDay[],
+  maxDriveHoursPerDay: number,
+): PacingViolation | null {
   const driveDays = days.filter((day) => day.type === 'drive' && day.drive)
+  const maxDriveMinutes = maxDriveHoursPerDay * 60 * MAX_DRIVE_HOURS_TOLERANCE
 
-  if (driveDays.length > 0) {
-    const totalKm = driveDays.reduce(
-      (sum, day) => sum + (day.drive?.distanceKm ?? 0),
-      0,
-    )
-    const target = totalKm / driveDays.length
-
-    for (const day of driveDays) {
-      const distanceKm = day.drive?.distanceKm ?? 0
-      if (distanceKm > target * MAX_DAY_FACTOR) {
-        return {
-          reason: `Day ${day.index} (${day.date}) drives ${distanceKm.toFixed(0)}km, exceeding ${MAX_DAY_FACTOR}x the ${target.toFixed(0)}km target daily drive.`,
-        }
-      }
-    }
-
-    const finalDays = days.slice(-FINAL_DAYS_COUNT)
-    for (const day of finalDays) {
-      const distanceKm = day.drive?.distanceKm ?? 0
-      if (
-        day.type === 'drive' &&
-        day.drive &&
-        distanceKm > target * FINAL_DAYS_FACTOR
-      ) {
-        return {
-          reason: `Day ${day.index} (${day.date}) is one of the final ${FINAL_DAYS_COUNT} days but drives ${distanceKm.toFixed(0)}km, exceeding the ${target.toFixed(0)}km target required for a relaxed finish.`,
-        }
+  for (const day of driveDays) {
+    const durationMin = day.drive?.durationMin ?? 0
+    if (durationMin > maxDriveMinutes) {
+      return {
+        reason: `Day ${day.index} (${day.date}) drives ${(durationMin / 60).toFixed(1)}h, exceeding ${MAX_DRIVE_HOURS_TOLERANCE}x the requested ${maxDriveHoursPerDay}h/day max.`,
       }
     }
   }

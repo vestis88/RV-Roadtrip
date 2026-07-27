@@ -143,7 +143,7 @@ describe('replanTrip', () => {
       staleSnap.data() as TripDay,
       finalDaySnap.data() as TripDay,
     ]
-    expect(validatePacing(remainderDays)).toBeNull()
+    expect(validatePacing(remainderDays, 4)).toBeNull()
   }, 15_000)
 
   it('preserves locked days from the "Request changes" flow, even when they fall in the future', async () => {

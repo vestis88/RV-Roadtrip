@@ -118,6 +118,7 @@ export const tripDaySchema = z.object({
   drive: driveLegSchema.optional(),
   summary: z.string(),
   extraTimeReason: z.string().optional(),
+  highlightReason: z.string().optional(),
 })
 
 export const activityCategorySchema = z.enum([

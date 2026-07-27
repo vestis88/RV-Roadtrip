@@ -183,6 +183,15 @@ export function DayViewScreen() {
           {day.summary}
         </p>
 
+        {(day.highlightReason ?? day.extraTimeReason) && (
+          <p
+            className="mx-4 mt-2 text-sm text-neutral-500 italic dark:text-neutral-400"
+            data-testid="day-highlight-reason"
+          >
+            Why here: {day.highlightReason ?? day.extraTimeReason}
+          </p>
+        )}
+
         {day.type === 'rest' ? (
           <p
             className="mx-4 mt-4 rounded bg-orange-50 p-3 text-orange-800 dark:bg-orange-950 dark:text-orange-200"

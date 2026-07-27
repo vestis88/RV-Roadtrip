@@ -38,6 +38,7 @@ export const planTripSkeletonDaySchema = z.object({
   drive: skeletonDriveSchema.optional(),
   summary: z.string(),
   extraTimeReason: z.string().optional(),
+  highlightReason: z.string().optional(),
   activities: z.array(skeletonActivitySchema).length(5),
   restaurants: z.array(skeletonRestaurantSchema).length(9),
 })

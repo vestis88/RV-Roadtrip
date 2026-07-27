@@ -193,6 +193,7 @@ export async function planTrip(input: {
       drive: outlineDay.drive,
       summary: detail.summary,
       extraTimeReason: detail.extraTimeReason,
+      highlightReason: outlineDay.highlightReason,
       activities: detail.activities,
       restaurants: detail.restaurants,
     }
