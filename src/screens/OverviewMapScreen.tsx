@@ -63,7 +63,7 @@ export function OverviewMapScreen() {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
   return (
-    <div className="flex h-[calc(100svh-14rem)] w-full flex-col">
+    <div className="flex h-full w-full flex-col">
       <div
         className="flex justify-center gap-6 border-y border-neutral-200 bg-neutral-50 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-950"
         data-testid="map-header"

@@ -78,7 +78,7 @@ export function DayViewScreen() {
 
   return (
     <div
-      className="flex h-[calc(100svh-14rem)] w-full flex-col lg:flex-row"
+      className="flex h-full w-full flex-col lg:flex-row"
       data-testid="day-view"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
