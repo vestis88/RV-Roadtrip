@@ -273,6 +273,18 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           >
             {trip.planMeta.status}
           </span>
+          {trip.planMeta.status === 'generating' && (
+            <span
+              className="text-sm text-neutral-500 dark:text-neutral-400"
+              data-testid="plan-progress"
+            >
+              {trip.planMeta.progressTotal
+                ? `${trip.planMeta.progressCurrent ?? 0}/${trip.planMeta.progressTotal} days (${Math.round(
+                    ((trip.planMeta.progressCurrent ?? 0) / trip.planMeta.progressTotal) * 100,
+                  )}%)`
+                : 'planning your route…'}
+            </span>
+          )}
         </div>
         {trip.planMeta.status === 'error' && trip.planMeta.error && (
           <p

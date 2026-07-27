@@ -71,6 +71,12 @@ export const planMetaSchema = z.object({
   generatedAt: isoDateTime.optional(),
   lastReplanAt: isoDateTime.optional(),
   error: z.string().optional(),
+  // Set while status is 'generating': progressTotal is unset/0 during the
+  // initial Claude call (route shape not known yet), then both are set once
+  // per-day resolution (Places/Routes enrichment) starts — this is the
+  // slow, sequential part of generation the progress bar is really for.
+  progressCurrent: z.number().nonnegative().optional(),
+  progressTotal: z.number().nonnegative().optional(),
 })
 
 export const tripSchema = z.object({

@@ -6,7 +6,7 @@ import { planTripSkeletonSchema, type PlanTripSkeleton } from './planTripSchema.
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-5'
 const MAX_ATTEMPTS = 2
 
 function stripCodeFences(text: string): string {
@@ -51,7 +51,7 @@ export async function planTrip(input: {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: 32000,
       system,
       messages,
     })

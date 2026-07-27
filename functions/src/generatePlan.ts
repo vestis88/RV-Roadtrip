@@ -1,4 +1,8 @@
-import { getFirestore } from 'firebase-admin/firestore'
+import {
+  FieldValue,
+  getFirestore,
+  type DocumentReference,
+} from 'firebase-admin/firestore'
 import { onDocumentCreated } from 'firebase-functions/firestore'
 import {
   activitySchema,
@@ -146,10 +150,21 @@ async function resolveSkeletonDay(
  * multi-week trip can mean hundreds of sequential Places calls; see the
  * generatePlan timeout for how that's accommodated.
  */
-async function generateRealPlan(trip: Trip): Promise<GeneratedDay[]> {
+async function generateRealPlan(
+  trip: Trip,
+  tripRef: DocumentReference,
+): Promise<GeneratedDay[]> {
   const skeleton = await planTrip({
     settings: trip.settings,
     notesFreeText: trip.notes.freeText,
+  })
+
+  // Reported from here on — this is the slow, sequential part (a Places/
+  // Routes round-trip per day) that a "generating" spinner alone gives no
+  // sense of progress through on a multi-week trip.
+  await tripRef.update({
+    'planMeta.progressCurrent': 0,
+    'planMeta.progressTotal': skeleton.days.length,
   })
 
   const days: GeneratedDay[] = []
@@ -161,6 +176,7 @@ async function generateRealPlan(trip: Trip): Promise<GeneratedDay[]> {
     )
     days.push(generated)
     currentLocation = nextLocation
+    await tripRef.update({ 'planMeta.progressCurrent': days.length })
   }
   return days
 }
@@ -232,12 +248,19 @@ export const generatePlan = onDocumentCreated(
     }
 
     try {
-      await tripRef.update({ 'planMeta.status': 'generating' })
+      // Clear any progress left over from a previous run so the UI doesn't
+      // briefly show a stale percentage before this run reaches the point
+      // where it reports its own.
+      await tripRef.update({
+        'planMeta.status': 'generating',
+        'planMeta.progressCurrent': FieldValue.delete(),
+        'planMeta.progressTotal': FieldValue.delete(),
+      })
 
       const tripSnap = await tripRef.get()
       const trip = tripSnap.data() as Trip
 
-      const days = await generateRealPlan(trip)
+      const days = await generateRealPlan(trip, tripRef)
 
       // Section 5 pacing rules: no day > 1.4x target, final 2 days <= 1.0x
       // target, rest days stay put. Unlike a replan (which only re-paces
@@ -282,6 +305,8 @@ export const generatePlan = onDocumentCreated(
         'planMeta.totalKm': totalKm,
         'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
         'planMeta.generatedAt': new Date().toISOString(),
+        'planMeta.progressCurrent': FieldValue.delete(),
+        'planMeta.progressTotal': FieldValue.delete(),
       })
       await snap.ref.update({ status: 'done' })
     } catch (error) {
@@ -289,6 +314,8 @@ export const generatePlan = onDocumentCreated(
       await tripRef.update({
         'planMeta.status': 'error',
         'planMeta.error': String(error),
+        'planMeta.progressCurrent': FieldValue.delete(),
+        'planMeta.progressTotal': FieldValue.delete(),
       })
       await snap.ref.update({ status: 'error', error: String(error) })
     }
