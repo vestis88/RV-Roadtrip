@@ -155,9 +155,14 @@ async function resolveSkeletonDay(
  * generatePlan timeout for how that's accommodated.
  */
 function describePlanTripProgress(progress: PlanTripProgress): string {
-  return progress.phase === 'outline'
-    ? 'Planning your route…'
-    : `Planning day-by-day details (${progress.chunkIndex}/${progress.chunkCount})…`
+  switch (progress.phase) {
+    case 'highlights':
+      return 'Researching the best stops along your route…'
+    case 'outline':
+      return 'Planning your route…'
+    case 'detail':
+      return `Planning day-by-day details (${progress.chunkIndex}/${progress.chunkCount})…`
+  }
 }
 
 async function generateRealPlan(

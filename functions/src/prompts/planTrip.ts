@@ -1,14 +1,20 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { defineSecret } from 'firebase-functions/params'
 import type { TripSettings } from '@rv/shared'
-import { buildChunkDetailPrompt, buildRouteOutlinePrompt } from './planTripPrompt.js'
+import {
+  buildChunkDetailPrompt,
+  buildRegionHighlightsPrompt,
+  buildRouteOutlinePrompt,
+} from './planTripPrompt.js'
 import {
   chunkDetailResponseSchema,
   planTripSkeletonSchema,
+  regionHighlightsResponseSchema,
   routeOutlineSchema,
   type ChunkDetailResponse,
   type PlanTripSkeleton,
   type PlanTripSkeletonDay,
+  type RegionHighlightsResponse,
   type RouteOutline,
 } from './planTripSchema.js'
 
@@ -26,6 +32,7 @@ const MAX_ATTEMPTS = 2
 const CHUNK_SIZE = 7
 
 export type PlanTripProgress =
+  | { phase: 'highlights' }
   | { phase: 'outline' }
   | { phase: 'detail'; chunkIndex: number; chunkCount: number }
 
@@ -35,6 +42,10 @@ function stripCodeFences(text: string): string {
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/```\s*$/, '')
     .trim()
+}
+
+export function parseRegionHighlights(text: string): RegionHighlightsResponse {
+  return regionHighlightsResponseSchema.parse(JSON.parse(stripCodeFences(text)))
 }
 
 export function parseRouteOutline(text: string): RouteOutline {
@@ -97,15 +108,27 @@ async function callWithRetry<T>(
 }
 
 /**
- * Plans a trip in two phases: a small "outline" call decides the whole
- * route's shape (which town each day overnights in, from the real start
- * point to the real end point) so pacing and the final destination are
- * solved with the whole trip in view, exactly as before. Then the route is
- * split into fixed-size chunks and each chunk's activities/restaurants are
- * filled in by a separate call that's given the full outline for context
- * but can only elaborate on its own days — it cannot redirect the route.
- * This keeps every individual call small regardless of trip length, unlike
- * asking for the whole detailed itinerary in one shot.
+ * Plans a trip in three phases, each with a narrower job than the last:
+ *
+ * 1. "highlights" — pure curation, no dates or pacing involved. Reasons
+ *    region-by-region about what's actually worth seeing for these
+ *    travelers' interests and produces a ranked shortlist of candidate
+ *    stops. This is what makes route selection interest-driven rather than
+ *    defaulting to whatever's closest to the direct line — the model
+ *    decides what's good BEFORE it's under any pressure to make the
+ *    schedule fit.
+ * 2. "outline" — selects from that shortlist (prioritizing must-sees) and
+ *    sequences the selections into an actual day-by-day route from the real
+ *    start point to the real end point, so pacing and the final destination
+ *    are still solved with the whole trip in view.
+ * 3. "detail" (chunked) — the route is split into fixed-size chunks and
+ *    each chunk's activities/restaurants are filled in by a separate call
+ *    that's given the full outline for context but can only elaborate on
+ *    its own days — it cannot redirect the route.
+ *
+ * Every individual call stays small and fast regardless of trip length,
+ * unlike asking for the whole curated, scheduled, detailed itinerary in one
+ * shot.
  */
 export async function planTrip(input: {
   settings: TripSettings
@@ -114,8 +137,21 @@ export async function planTrip(input: {
 }): Promise<PlanTripSkeleton> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
 
+  input.onProgress?.({ phase: 'highlights' })
+  const { system: highlightsSystem, user: highlightsUser } = buildRegionHighlightsPrompt(input)
+  const highlights = await callWithRetry(
+    client,
+    highlightsSystem,
+    highlightsUser,
+    8000,
+    parseRegionHighlights,
+  )
+
   input.onProgress?.({ phase: 'outline' })
-  const { system: outlineSystem, user: outlineUser } = buildRouteOutlinePrompt(input)
+  const { system: outlineSystem, user: outlineUser } = buildRouteOutlinePrompt({
+    ...input,
+    highlights,
+  })
   const outline = await callWithRetry(
     client,
     outlineSystem,

@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseChunkDetail, parseRouteOutline } from './planTrip.js'
+import { parseChunkDetail, parseRegionHighlights, parseRouteOutline } from './planTrip.js'
+
+const RECORDED_HIGHLIGHTS = `\`\`\`json
+{
+  "regions": [
+    {
+      "region": "Norwegian fjord country",
+      "country": "NO",
+      "reasoning": "Dramatic scenery and family-friendly Olympic-era attractions, great for active families with kids.",
+      "candidateStops": [
+        { "town": "Lillehammer", "country": "NO", "why": "Olympic sights and the Hunderfossen family theme park.", "priority": "must-see" },
+        { "town": "Geiranger", "country": "NO", "why": "World-famous fjord viewpoints.", "priority": "worth-a-detour" }
+      ]
+    }
+  ]
+}
+\`\`\``
 
 const RECORDED_OUTLINE = `\`\`\`json
 {
@@ -60,6 +76,20 @@ function dayDetailResponseFor(indices: number[]): string {
 
 const RECORDED_CHUNK_DETAIL = dayDetailResponseFor([0, 1])
 
+describe('parseRegionHighlights', () => {
+  it('parses a recorded highlights response', () => {
+    const highlights = parseRegionHighlights(RECORDED_HIGHLIGHTS)
+    expect(highlights.regions).toHaveLength(1)
+    expect(highlights.regions[0].candidateStops[0].town).toBe('Lillehammer')
+    expect(highlights.regions[0].candidateStops[0].priority).toBe('must-see')
+  })
+
+  it('throws on a response that violates the schema', () => {
+    expect(() => parseRegionHighlights('{"regions": []}')).toThrow()
+    expect(() => parseRegionHighlights('{"regions": [{"region": "x"}]}')).toThrow()
+  })
+})
+
 describe('parseRouteOutline', () => {
   it('parses a recorded outline response', () => {
     const outline = parseRouteOutline(RECORDED_OUTLINE)
@@ -100,25 +130,30 @@ function textResponse(text: string) {
 }
 
 describe('planTrip', () => {
-  it('assembles the outline and a single chunk into one skeleton', async () => {
+  it('assembles the highlights, outline, and a single chunk into one skeleton', async () => {
     createMock.mockReset()
     createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
       .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
 
     const { planTrip } = await import('./planTrip.js')
+    const onProgress = vi.fn()
     const result = await planTrip({
       settings: {} as never,
       notesFreeText: 'no allergies',
+      onProgress,
     })
 
-    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(createMock).toHaveBeenCalledTimes(3)
     expect(result.days).toHaveLength(2)
     // Route fields come from the outline, detail fields from the chunk call.
     expect(result.days[0].overnight.name).toBe('Lillehammer Camping')
     expect(result.days[0].drive?.toTown).toBe('Lillehammer')
     expect(result.days[0].activities).toHaveLength(5)
     expect(result.days[1].type).toBe('rest')
+    expect(onProgress).toHaveBeenCalledWith({ phase: 'highlights' })
+    expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
   })
 
   it('splits a longer route into multiple chunk calls and reassembles them in order', async () => {
@@ -134,6 +169,7 @@ describe('planTrip', () => {
       })),
     }
     createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse(JSON.stringify(tenDayOutline)))
       // CHUNK_SIZE is 7, so 10 days split into a 7-day and a 3-day call.
       .mockResolvedValueOnce(textResponse(dayDetailResponseFor([0, 1, 2, 3, 4, 5, 6])))
@@ -147,10 +183,11 @@ describe('planTrip', () => {
       onProgress,
     })
 
-    expect(createMock).toHaveBeenCalledTimes(3)
+    expect(createMock).toHaveBeenCalledTimes(4)
     expect(result.days).toHaveLength(10)
     expect(result.days.map((d) => d.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
     expect(result.days[9].overnight.name).toBe('Stop 9')
+    expect(onProgress).toHaveBeenCalledWith({ phase: 'highlights' })
     expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
     expect(onProgress).toHaveBeenCalledWith({ phase: 'detail', chunkIndex: 1, chunkCount: 2 })
     expect(onProgress).toHaveBeenCalledWith({ phase: 'detail', chunkIndex: 2, chunkCount: 2 })
@@ -159,6 +196,7 @@ describe('planTrip', () => {
   it('retries the outline call once on a schema failure and succeeds on the second attempt', async () => {
     createMock.mockReset()
     createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse('not valid json'))
       .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
       .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
@@ -166,11 +204,25 @@ describe('planTrip', () => {
     const { planTrip } = await import('./planTrip.js')
     const result = await planTrip({ settings: {} as never, notesFreeText: '' })
 
-    expect(createMock).toHaveBeenCalledTimes(3)
+    expect(createMock).toHaveBeenCalledTimes(4)
     expect(result.days).toHaveLength(2)
   })
 
   it('throws after the outline retry also fails schema validation', async () => {
+    createMock.mockReset()
+    createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+      .mockResolvedValue(textResponse('still not valid json'))
+
+    const { planTrip } = await import('./planTrip.js')
+    await expect(
+      planTrip({ settings: {} as never, notesFreeText: '' }),
+    ).rejects.toThrow()
+
+    expect(createMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('throws after the highlights retry also fails schema validation', async () => {
     createMock.mockReset()
     createMock.mockResolvedValue(textResponse('still not valid json'))
 
@@ -185,6 +237,7 @@ describe('planTrip', () => {
   it('throws if Claude never returns detail for one of the outline days', async () => {
     createMock.mockReset()
     createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
       // Only returns day 0's detail, missing day 1.
       .mockResolvedValueOnce(textResponse(dayDetailResponseFor([0])))

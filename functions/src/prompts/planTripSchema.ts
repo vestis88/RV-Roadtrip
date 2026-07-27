@@ -49,7 +49,37 @@ export const planTripSkeletonSchema = z.object({
 export type PlanTripSkeletonDay = z.infer<typeof planTripSkeletonDaySchema>
 export type PlanTripSkeleton = z.infer<typeof planTripSkeletonSchema>
 
-// Phase 1 of planTrip's two-phase generation: just the route shape (which
+// Phase 0 of planTrip's three-phase generation: a pure curation pass, before
+// any dates or pacing are considered. For each region/country the trip is
+// likely to pass through, Claude reasons at a high level about what's
+// genuinely worth seeing for these travelers and produces a ranked
+// shortlist. The route outline (phase 1) then SELECTS from this shortlist
+// under real time/distance constraints, instead of trying to both curate
+// and schedule in a single call — which is what previously biased routes
+// toward whatever town was closest to the direct line.
+export const regionHighlightCandidateSchema = z.object({
+  town: z.string(),
+  country: z.string().length(2),
+  why: z.string(),
+  priority: z.enum(['must-see', 'worth-a-detour', 'nice-if-convenient']),
+})
+
+export const regionHighlightSchema = z.object({
+  region: z.string(),
+  country: z.string().length(2),
+  reasoning: z.string(),
+  candidateStops: z.array(regionHighlightCandidateSchema).min(1),
+})
+
+export const regionHighlightsResponseSchema = z.object({
+  regions: z.array(regionHighlightSchema).min(1),
+})
+
+export type RegionHighlightCandidate = z.infer<typeof regionHighlightCandidateSchema>
+export type RegionHighlight = z.infer<typeof regionHighlightSchema>
+export type RegionHighlightsResponse = z.infer<typeof regionHighlightsResponseSchema>
+
+// Phase 1 of planTrip's three-phase generation: just the route shape (which
 // town each day overnights in, and the drive legs between them) for the
 // WHOLE trip in one small call — this is where Claude solves the global
 // routing/pacing problem (landing on the real end point by the real end

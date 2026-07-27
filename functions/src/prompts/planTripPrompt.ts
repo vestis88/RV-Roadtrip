@@ -1,5 +1,5 @@
 import type { TripSettings } from '@rv/shared'
-import type { RouteOutline, RouteOutlineDay } from './planTripSchema.js'
+import type { RegionHighlightsResponse, RouteOutline, RouteOutlineDay } from './planTripSchema.js'
 
 const PACING_RULES = `Pacing rules (follow exactly):
 1. Available drive days = total trip days − rest days.
@@ -8,21 +8,63 @@ const PACING_RULES = `Pacing rules (follow exactly):
 4. The final 2 days of the trip must each be at most 1.0x the target distance (a relaxed finish).
 5. Rest days must be placed in high-interest locations, never transit towns, roughly one per restDayFrequency days (0 means no rest days).`
 
+const HIGHLIGHTS_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families. Your ONLY job right now is curation, not scheduling: figure out what's genuinely worth seeing along this trip, before anyone worries about dates or drive times.
+
+You will be given the trip's settings (start/finish points, preferred countries, travelers, interests) and the traveler's freeform notes. ALWAYS take the freeform notes into account — they may name specific places, regions, or must-sees that override the defaults.
+
+Step 1: work out the rough geographic corridor of countries/regions the trip is likely to pass through, from startPoint to endPoint (favoring preferredCountries where given).
+
+Step 2: for each region/country in that corridor, THINK about what this specific group of travelers — given their interests, ages, and any freeform notes — would consider the best things to see. Write a short "reasoning" sentence per region explaining what kind of traveler it's good for and why. This is you actually reasoning about the region's character (e.g. "fjord country, best for hiking and dramatic viewpoints" or "big cities with world-class museums, best for older kids"), not a generic list.
+
+Step 3: for each region, list candidate overnight towns as a ranked shortlist:
+- "must-see": genuinely exceptional and worth real detour/time cost for these travelers' interests.
+- "worth-a-detour": strong candidates if the schedule allows.
+- "nice-if-convenient": fine to include only if it's already roughly on the way.
+
+Do NOT worry about the trip's exact dates, total length, or drive-time limits — that scheduling problem is solved in a later step, by selecting from what you produce here. List more candidates than a typical trip could actually fit; being generous here gives the scheduling step real choices instead of one path.
+
+Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences:
+{
+  "regions": [
+    {
+      "region": string (a short descriptive name, e.g. "Norwegian fjord country"),
+      "country": string (ISO 2-letter code),
+      "reasoning": string (one to two sentences on what this region is good for, for these travelers),
+      "candidateStops": [
+        { "town": string, "country": string (ISO 2-letter code), "why": string (one sentence, tied to interests/notes), "priority": "must-see" | "worth-a-detour" | "nice-if-convenient" }
+      ]
+    }
+  ]
+}`
+
+export function buildRegionHighlightsPrompt(input: {
+  settings: TripSettings
+  notesFreeText: string
+}): { system: string; user: string } {
+  const user = JSON.stringify({
+    settings: input.settings,
+    notes: input.notesFreeText,
+  })
+  return { system: HIGHLIGHTS_SYSTEM_PROMPT, user }
+}
+
 const OUTLINE_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families, planning the ROUTE SHAPE of a trip — which towns to overnight in, and in what order, from startPoint to endPoint. You are not planning day-by-day activities yet (that happens separately), but WHICH towns you route through is the single biggest thing that makes or breaks a trip, so treat it as the most important decision you make here.
 
-You will be given the trip's settings (dates, travelers, interests, start/finish points, preferred countries, rest-day frequency, max drive hours/day, vehicle) and the traveler's freeform notes. ALWAYS take the freeform notes into account — they may name specific places or regions to prioritize, allergies, or driving preferences that override the defaults.
+You will be given the trip's settings (dates, travelers, interests, start/finish points, preferred countries, rest-day frequency, max drive hours/day, vehicle), the traveler's freeform notes, and "candidateHighlights" — a prioritized shortlist of the best regions and overnight towns already researched for this trip in a prior pass. ALWAYS take the freeform notes into account too — they may override the defaults.
 
-THIS IS NOT A SHORTEST-PATH ITINERARY. Do not simply connect startPoint to endPoint along the most direct line. For every leg, actively consider which nearby towns put travelers within easy reach of that country's best sights, hidden gems, and must-not-miss experiences matching the stated interests — then choose overnight stops accordingly, even when that means a real detour off the direct line.
+THIS IS NOT A SHORTEST-PATH ITINERARY. Your job is to SELECT from candidateHighlights and sequence the selections into an actual day-by-day route — not to invent a new route from scratch and not to just connect startPoint to endPoint along the most direct line.
 
-When choosing each overnight stop, balance three things:
-1. Attraction quality: how well the stop positions travelers near noteworthy sights/experiences matching their interests (and anything named in the freeform notes) for that country or region.
-2. Available time: the trip must still reach endPoint by the final day, so weigh a detour's cost in extra driving days against what it's worth seeing.
+When deciding which candidates to include and which to skip, balance three things:
+1. Attraction quality: prioritize "must-see" candidates, then "worth-a-detour", then "nice-if-convenient" — but a lower-priority stop that fits perfectly into the schedule can beat a "must-see" that would blow the pacing budget.
+2. Available time: the trip must still reach endPoint by the final day, so weigh each candidate's cost in extra driving days against what it's worth seeing. It's fine — expected, even — to skip candidates that don't fit.
 3. Overall heading: net progress should trend toward endPoint across the trip as a whole — a detour off the direct line is fine, as long as it doesn't strand the trip too far from finishing on schedule.
+
+You are not limited to candidateHighlights for every single night — where two selected highlights are too far apart for one day's drive, add a plain connecting overnight stop between them (choose somewhere sensible, ideally still near something worthwhile).
 
 ${PACING_RULES}
 6. The route must start at startPoint on the trip's first day and end at endPoint on the trip's last day — every day in between must be accounted for.
 
-Prefer the traveler's preferredCountries when shaping the route. Choose overnight stops in or near towns with genuinely worthwhile things to do — not arbitrary halfway points — and prefer stops with nearby campsites.
+Choose overnight stops with nearby campsites where possible.
 
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences, no activities or restaurants (those are planned separately):
 {
@@ -33,7 +75,7 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
       "type": "drive" | "rest",
       "overnight": { "name": string, "town": string, "country": string (ISO 2-letter code), "campsiteSuggestion"?: string },
       "drive"?: { "fromTown": string, "toTown": string, "slot": "morning" | "midday" | "evening" },
-      "highlightReason": string (one sentence: why THIS town — tied to the travelers' interests or notes, not "it's on the way")
+      "highlightReason": string (one sentence: which candidateHighlight this is / why this connecting stop, tied to interests — not "it's on the way")
     }
   ]
 }`
@@ -41,10 +83,12 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
 export function buildRouteOutlinePrompt(input: {
   settings: TripSettings
   notesFreeText: string
+  highlights: RegionHighlightsResponse
 }): { system: string; user: string } {
   const user = JSON.stringify({
     settings: input.settings,
     notes: input.notesFreeText,
+    candidateHighlights: input.highlights.regions,
   })
   return { system: OUTLINE_SYSTEM_PROMPT, user }
 }
