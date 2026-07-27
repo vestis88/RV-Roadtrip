@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseChunkDetail, parseRegionHighlights, parseRouteOutline } from './planTrip.js'
+import {
+  parseAndValidateRouteOutline,
+  parseChunkDetail,
+  parseRegionHighlights,
+  parseRouteOutline,
+} from './planTrip.js'
 
 const RECORDED_HIGHLIGHTS = `\`\`\`json
 {
@@ -101,6 +106,29 @@ describe('parseRouteOutline', () => {
   it('throws on a response that violates the schema', () => {
     expect(() => parseRouteOutline('{"days": []}')).toThrow()
     expect(() => parseRouteOutline('{"days": [{"index": 0}]}')).toThrow()
+  })
+})
+
+describe('parseAndValidateRouteOutline', () => {
+  it('accepts a recorded outline with contiguous 0-based indices', () => {
+    const outline = parseAndValidateRouteOutline(RECORDED_OUTLINE)
+    expect(outline.days.map((d) => d.index)).toEqual([0, 1])
+  })
+
+  it('rejects 1-based day numbering', () => {
+    const oneBased = RECORDED_OUTLINE.replace('"index": 0', '"index": 1').replace(
+      '"index": 1,\n      "date": "2026-07-11"',
+      '"index": 2,\n      "date": "2026-07-11"',
+    )
+    expect(() => parseAndValidateRouteOutline(oneBased)).toThrow(/0-based/)
+  })
+
+  it('rejects a gap in indices', () => {
+    const gapped = RECORDED_OUTLINE.replace(
+      '"index": 1,\n      "date": "2026-07-11"',
+      '"index": 2,\n      "date": "2026-07-11"',
+    )
+    expect(() => parseAndValidateRouteOutline(gapped)).toThrow(/0-based/)
   })
 })
 
@@ -206,6 +234,26 @@ describe('planTrip', () => {
 
     expect(createMock).toHaveBeenCalledTimes(4)
     expect(result.days).toHaveLength(2)
+  })
+
+  it('retries the outline call when Claude numbers days 1-based instead of 0-based', async () => {
+    createMock.mockReset()
+    const oneBasedOutline = JSON.stringify({
+      days: JSON.parse(RECORDED_OUTLINE.replace(/```json|```/g, '')).days.map(
+        (day: { index: number }) => ({ ...day, index: day.index + 1 }),
+      ),
+    })
+    createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+      .mockResolvedValueOnce(textResponse(oneBasedOutline))
+      .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
+      .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
+
+    const { planTrip } = await import('./planTrip.js')
+    const result = await planTrip({ settings: {} as never, notesFreeText: '' })
+
+    expect(createMock).toHaveBeenCalledTimes(4)
+    expect(result.days.map((d) => d.index)).toEqual([0, 1])
   })
 
   it('throws after the outline retry also fails schema validation', async () => {

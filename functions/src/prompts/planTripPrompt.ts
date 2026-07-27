@@ -66,6 +66,8 @@ ${PACING_RULES}
 
 Choose overnight stops with nearby campsites where possible.
 
+"index" is 0-based: the first day of the trip is index 0, the second is index 1, and so on with no gaps — NOT 1-based day numbering.
+
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences, no activities or restaurants (those are planned separately):
 {
   "days": [
@@ -100,6 +102,8 @@ You will be given the trip's settings and freeform notes (for context on interes
 For each of those days, propose exactly 5 activities (a mix of famous sights and hidden gems, flagging which are kid-friendly given the ages of any child travelers) and exactly 9 restaurants (3 breakfast, 3 lunch, 3 dinner). Match activities to the stated interests and the ages of any child travelers.
 
 CRITICAL: for every activity and restaurant, provide ONLY a name, town, category (or meal), and a one-sentence blurb. Do NOT invent ratings, review counts, opening hours, or URLs — those are resolved separately from Google Places data after you respond.
+
+CRITICAL: each day in "daysNeedingDetail" carries the "highlightReason" that justified routing through that town in the first place (from the outline in "fullRouteOutline"). If that highlightReason names a specific place (e.g. "Gateway to the Hunderfossen family park"), that place MUST be one of that day's 5 activities — don't let the day's activities drift away from the reason the stop was chosen.
 
 Also write a one-sentence "summary" for each day, and an "extraTimeReason" only when that day's location deserves more than one day.
 

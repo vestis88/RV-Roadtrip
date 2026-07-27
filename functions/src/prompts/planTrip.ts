@@ -52,6 +52,26 @@ export function parseRouteOutline(text: string): RouteOutline {
   return routeOutlineSchema.parse(JSON.parse(stripCodeFences(text)))
 }
 
+// The schema only requires indices to be non-negative integers — nothing
+// stops Claude from numbering days 1-based (the "natural" way a human
+// would), which every display site silently mis-renders as "Day 2" for the
+// actual first day. Validated separately from the schema itself so a
+// contiguous-0-based violation retries through the same
+// correct-and-resubmit loop as a schema failure, rather than only being
+// caught by every downstream renderer assuming it.
+export function parseAndValidateRouteOutline(text: string): RouteOutline {
+  const outline = parseRouteOutline(text)
+  const indices = outline.days.map((day) => day.index)
+  const expected = indices.map((_, i) => i)
+  const isContiguousFromZero = indices.every((index, i) => index === expected[i])
+  if (!isContiguousFromZero) {
+    throw new Error(
+      `"index" must be 0-based and contiguous (0, 1, 2, …) with no gaps — got [${indices.join(', ')}]`,
+    )
+  }
+  return outline
+}
+
 export function parseChunkDetail(text: string): ChunkDetailResponse {
   return chunkDetailResponseSchema.parse(JSON.parse(stripCodeFences(text)))
 }
@@ -166,7 +186,7 @@ export async function planTrip(input: {
     outlineSystem,
     outlineUser,
     8000,
-    parseRouteOutline,
+    parseAndValidateRouteOutline,
   )
 
   const chunks: RouteOutline['days'][] = []
