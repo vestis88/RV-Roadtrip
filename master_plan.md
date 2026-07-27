@@ -406,6 +406,10 @@ Recommendation (agreed with the user 2026-07-27): land the current baseline as a
 
 - [x] **Diary export** — confirmed already implemented (`src/screens/DiaryScreen.tsx`), not a gap: native share sheet with a text-file download fallback. Noted here only because it was re-requested without realizing it existed — if the format itself (currently a bare `date — type: note` line per entry) needs to be richer, that's a small follow-up, not a new feature.
 
+- [ ] **Deploy-time maintenance warnings (not yet blocking)** — surfaced during a `firebase deploy` on 2026-07-27, not urgent but with a real deadline:
+  - `functions` runtime is Node.js 20 (`functions/package.json`'s `engines.node: "20"`). Google deprecated it 2026-04-30 and will **decommission it 2026-10-30** — after that date, deploys fail outright until the runtime is bumped (a currently-supported Cloud Functions Gen 2 runtime, e.g. Node 22, per https://cloud.google.com/functions/docs/runtime-support). Do this as its own deliberate upgrade-and-test pass, not a drive-by bump — Node major version changes can have real behavioral differences worth running the full test suite against before trusting.
+  - `firebase-functions` is pinned to `^7.2.5`; npm's `latest` dist-tag was `7.3.2-rc.0` as of this check. Worth bumping alongside the runtime upgrade (`npm install --save firebase-functions@latest` in `functions/`) rather than as a separate change, since a runtime bump is the natural time to also pick up SDK fixes.
+
 ---
 
 **END OF MASTER PLAN — keep this file in the repo root as `MASTER_PLAN.md` and update checkboxes with every commit.**
