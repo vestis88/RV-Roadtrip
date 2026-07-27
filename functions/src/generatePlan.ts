@@ -8,28 +8,18 @@ import {
   activitySchema,
   restaurantSchema,
   tripDaySchema,
-  type Activity,
-  type NamedPoint,
-  type OvernightStop,
-  type Restaurant,
   type Trip,
-  type TripDay,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
-import { computeRouteLeg, googleRoutesApiKey } from './routesApi.js'
+import { googleRoutesApiKey } from './routesApi.js'
+import { claudeApiKey, planTrip } from './prompts/planTrip.js'
+import { googlePlacesApiKey } from './placesApi.js'
 import {
-  claudeApiKey,
-  planTrip,
-  type PlanTripProgress,
-} from './prompts/planTrip.js'
-import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
-import {
-  enrichActivities,
-  enrichRestaurantsForMeal,
-  geocodeQuery,
-  googlePlacesApiKey,
-} from './placesApi.js'
+  describePlanTripProgress,
+  resolveSkeletonDays,
+  type GeneratedDay,
+} from './planPipeline.js'
 
 interface PlanRequestData {
   tripId: string
@@ -38,136 +28,11 @@ interface PlanRequestData {
   status: string
 }
 
-interface GeneratedDay {
-  day: Omit<TripDay, 'drive'> & { drive?: TripDay['drive'] }
-  activities: Activity[]
-  restaurants: Restaurant[]
-}
-
 /**
- * Turns one skeleton day (town names only, per 6.1's contract — Claude
- * never invents ratings/URLs/coordinates) into a fully resolved day: real
- * coordinates for the overnight stop (geocoded via Places, biased near the
- * previous stop so same-named towns in different countries don't collide),
- * a real drive leg via the Routes API for 'drive' days, and Places-enriched
- * activities/restaurants. Rest days reuse the previous stop's exact
- * coordinates rather than re-geocoding — they're the same physical place.
+ * Runs the real planning pipeline for a fresh trip: Claude proposes the
+ * route shape (planTrip), then resolveSkeletonDays turns it into real,
+ * enriched days (Routes + Places).
  */
-async function resolveSkeletonDay(
-  skDay: PlanTripSkeletonDay,
-  currentLocation: NamedPoint,
-): Promise<{ generated: GeneratedDay; nextLocation: NamedPoint }> {
-  let overnight: OvernightStop
-  let drive: TripDay['drive']
-
-  if (skDay.type === 'drive') {
-    const geocoded = await geocodeQuery(
-      `${skDay.overnight.name}, ${skDay.overnight.town}, ${skDay.overnight.country}`,
-      currentLocation,
-    )
-    if (!geocoded) {
-      throw new Error(
-        `Could not geocode overnight stop "${skDay.overnight.name}, ${skDay.overnight.town}"`,
-      )
-    }
-    overnight = {
-      name: skDay.overnight.name,
-      lat: geocoded.lat,
-      lng: geocoded.lng,
-      country: skDay.overnight.country,
-      ...(skDay.overnight.campsiteSuggestion
-        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
-        : {}),
-    }
-    const leg = await computeRouteLeg(currentLocation, geocoded)
-    drive = {
-      fromName: currentLocation.name,
-      toName: overnight.name,
-      distanceKm: leg.distanceKm,
-      durationMin: leg.durationMin,
-      slot: skDay.drive?.slot ?? 'morning',
-      ...(leg.polyline ? { polyline: leg.polyline } : {}),
-    }
-  } else {
-    overnight = {
-      name: skDay.overnight.name || currentLocation.name,
-      lat: currentLocation.lat,
-      lng: currentLocation.lng,
-      country: skDay.overnight.country,
-      ...(skDay.overnight.campsiteSuggestion
-        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
-        : {}),
-    }
-  }
-
-  const near = { lat: overnight.lat, lng: overnight.lng }
-  const excludeIds = new Set<string>()
-  const [activities, breakfast, lunch, dinner] = await Promise.all([
-    enrichActivities(skDay.activities, near),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'breakfast'),
-      'breakfast',
-      near,
-      excludeIds,
-    ),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'lunch'),
-      'lunch',
-      near,
-      excludeIds,
-    ),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'dinner'),
-      'dinner',
-      near,
-      excludeIds,
-    ),
-  ])
-
-  return {
-    generated: {
-      day: {
-        index: skDay.index,
-        date: skDay.date,
-        type: skDay.type,
-        overnight,
-        drive,
-        summary: skDay.summary,
-        ...(skDay.extraTimeReason
-          ? { extraTimeReason: skDay.extraTimeReason }
-          : {}),
-        ...(skDay.highlightReason
-          ? { highlightReason: skDay.highlightReason }
-          : {}),
-      },
-      activities,
-      restaurants: [...breakfast, ...lunch, ...dinner],
-    },
-    nextLocation: { name: overnight.name, lat: overnight.lat, lng: overnight.lng },
-  }
-}
-
-/**
- * Runs the real planning pipeline for a trip: Claude proposes the route
- * shape (planTrip), then each day is resolved to real coordinates/distances
- * (Routes + Places geocoding) and enriched with real activities/restaurants
- * (Places). Days are resolved in order — each one's geocoding bias and
- * drive-leg origin depend on the previous day's resolved location — but
- * enrichment (Places lookups) is NOT parallelized across days, since a
- * multi-week trip can mean hundreds of sequential Places calls; see the
- * generatePlan timeout for how that's accommodated.
- */
-function describePlanTripProgress(progress: PlanTripProgress): string {
-  switch (progress.phase) {
-    case 'highlights':
-      return 'Researching the best stops along your route…'
-    case 'outline':
-      return 'Planning your route…'
-    case 'detail':
-      return `Planning day-by-day details (${progress.chunkIndex}/${progress.chunkCount})…`
-  }
-}
-
 async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
@@ -193,18 +58,13 @@ async function generateRealPlan(
     'planMeta.progressTotal': skeleton.days.length,
   })
 
-  const days: GeneratedDay[] = []
-  let currentLocation: NamedPoint = trip.settings.startPoint
-  for (const skDay of skeleton.days) {
-    const { generated, nextLocation } = await resolveSkeletonDay(
-      skDay,
-      currentLocation,
-    )
-    days.push(generated)
-    currentLocation = nextLocation
-    await tripRef.update({ 'planMeta.progressCurrent': days.length })
-  }
-  return days
+  return resolveSkeletonDays(skeleton.days, trip.settings.startPoint, (count) => {
+    tripRef
+      .update({ 'planMeta.progressCurrent': count })
+      .catch((error: unknown) =>
+        console.error('Failed to report day-resolution progress', error),
+      )
+  })
 }
 
 export const generatePlan = onDocumentCreated(
@@ -267,6 +127,9 @@ export const generatePlan = onDocumentCreated(
         await tripRef.update({
           'planMeta.status': 'error',
           'planMeta.error': String(error),
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
         })
         await snap.ref.update({ status: 'error', error: String(error) })
       }

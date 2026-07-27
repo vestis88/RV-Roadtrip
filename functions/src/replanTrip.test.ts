@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { initializeApp } from 'firebase-admin/app'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTripForUser } from './trips.js'
 import { validatePacing } from './pacingValidator.js'
 import type { TripDay } from '@rv/shared'
@@ -12,27 +12,72 @@ beforeAll(() => {
   getFirestore().settings({ ignoreUndefinedProperties: true })
 })
 
-async function waitFor<T>(
-  fn: () => Promise<T | undefined>,
-  timeoutMs = 10_000,
-): Promise<T> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    const result = await fn()
-    if (result !== undefined) return result
-    await new Promise((resolve) => setTimeout(resolve, 200))
+// runReplan now drives the real planTrip + resolveSkeletonDays pipeline
+// (Claude + Places/Routes), same as a fresh generation — these tests mock
+// both at the module level (same approach planTrip.test.ts and
+// placesApi.test.ts already use for their own dependencies) so replanTrip's
+// own orchestration logic — reindexing, preserving past/locked days,
+// generate-before-delete ordering, pacing — is verified deterministically
+// against the real Firestore emulator, without needing real credentials.
+const planTripMock = vi.fn()
+vi.mock('./prompts/planTrip.js', () => ({
+  planTrip: (...args: unknown[]) => planTripMock(...args),
+}))
+
+const resolveSkeletonDaysMock = vi.fn()
+vi.mock('./planPipeline.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./planPipeline.js')>()
+  return {
+    ...actual,
+    resolveSkeletonDays: (...args: unknown[]) => resolveSkeletonDaysMock(...args),
   }
-  throw new Error('Timed out waiting for condition')
+})
+
+function placeholderActivity(lat: number, lng: number) {
+  return {
+    name: 'placeholder',
+    category: 'sight',
+    lat,
+    lng,
+    blurb: 'placeholder',
+    kidFriendly: true,
+    status: 'suggested',
+  }
+}
+
+// A fixture GeneratedDay standing in for a real resolveSkeletonDay() result.
+function fixtureGeneratedDay(index: number, date: string, summary: string) {
+  return {
+    day: {
+      index,
+      date,
+      type: 'drive' as const,
+      overnight: {
+        name: `Stop ${index}`,
+        lat: 61 + index,
+        lng: 9 + index,
+        country: 'NO',
+      },
+      drive: {
+        fromName: 'Current location',
+        toName: `Stop ${index}`,
+        distanceKm: 100,
+        durationMin: 90,
+        slot: 'morning' as const,
+      },
+      summary,
+    },
+    activities: [],
+    restaurants: [],
+  }
 }
 
 describe('replanTrip', () => {
-  it('leaves past days untouched, regenerates the remainder, and keeps the plan well-paced', async () => {
+  it('regenerates the remainder via the real pipeline, leaves past days untouched, and keeps the plan well-paced', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidA')
     const tripRef = db.collection('trips').doc(tripId)
 
-    // Seed a fixture trip "mid-way": two past days (with a marker so we can
-    // detect if replan touches them) and one future day due to be replaced.
     const pastDay1: TripDay = {
       index: 0,
       date: '2026-07-10',
@@ -79,45 +124,41 @@ describe('replanTrip', () => {
     for (const day of [pastDay1, pastDay2, staleFutureDay]) {
       const dayRef = tripRef.collection('days').doc(day.date)
       await dayRef.set(day)
-      await dayRef.collection('activities').add({
-        name: 'placeholder',
-        category: 'sight',
-        lat: day.overnight.lat,
-        lng: day.overnight.lng,
-        blurb: 'placeholder',
-        kidFriendly: true,
-        status: 'suggested',
-      })
+      await dayRef.collection('activities').add(placeholderActivity(day.overnight.lat, day.overnight.lng))
     }
     await tripRef.update({ 'planMeta.status': 'ready' })
 
-    await db.collection('planRequests').add({
-      tripId,
-      kind: 'replan',
-      status: 'pending',
-      replanContext: {
-        currentLocation: { lat: 61.77, lng: 9.54 },
-        today: '2026-07-12',
-        completedRefPaths: [
-          `trips/${tripId}/days/2026-07-10`,
-          `trips/${tripId}/days/2026-07-11`,
-        ],
-        remainingEndDate: '2026-07-13',
-        remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+    planTripMock.mockReset().mockResolvedValue({
+      days: [{ index: 0 }, { index: 1 }],
+    })
+    resolveSkeletonDaysMock.mockReset().mockImplementation(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+      ) => {
+        const dates = ['2026-07-12', '2026-07-13']
+        const result = skeletonDays.map((d, i) =>
+          fixtureGeneratedDay(d.index, dates[i], `REPLANNED day ${d.index}`),
+        )
+        onDayResolved?.(result.length)
+        return result
       },
+    )
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.77, lng: 9.54 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-13',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
     })
 
-    // Guard against matching the seed's own 'ready' write before the
-    // replan has actually run: wait specifically for lastReplanAt.
-    const trip = await waitFor(async () => {
-      const snap = await tripRef.get()
-      const data = snap.data()
-      return data?.planMeta?.status === 'ready' && data.planMeta.lastReplanAt
-        ? data
-        : undefined
-    })
-
-    expect(trip.planMeta.lastReplanAt).toBeDefined()
+    const tripSnap = await tripRef.get()
+    const trip = tripSnap.data()
+    expect(trip?.planMeta.status).toBe('ready')
+    expect(trip?.planMeta.lastReplanAt).toBeDefined()
 
     // Past days: untouched.
     const day1Snap = await tripRef.collection('days').doc('2026-07-10').get()
@@ -125,27 +166,33 @@ describe('replanTrip', () => {
     expect(day1Snap.data()?.summary).toBe('ORIGINAL day 1')
     expect(day2Snap.data()?.summary).toBe('ORIGINAL day 2')
 
-    // Stale future day: replaced, not left in place.
+    // Stale future day: replaced, not left in place, and reindexed to
+    // continue from pastDocs.length (2) rather than the skeleton's own 0.
     const staleSnap = await tripRef.collection('days').doc('2026-07-12').get()
-    expect(staleSnap.data()?.summary).not.toBe(
-      'STALE — should be replaced by replan',
+    expect(staleSnap.data()?.summary).toBe('REPLANNED day 2')
+    expect(staleSnap.data()?.index).toBe(2)
+
+    // New remainder day at the requested end date exists, also reindexed.
+    const finalDaySnap = await tripRef.collection('days').doc('2026-07-13').get()
+    expect(finalDaySnap.data()?.summary).toBe('REPLANNED day 3')
+    expect(finalDaySnap.data()?.index).toBe(3)
+
+    // planTrip was actually invoked, scoped to the remainder only.
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          startDate: '2026-07-12',
+          endDate: '2026-07-13',
+          endPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+        }),
+      }),
     )
 
-    // New remainder day at the requested end date exists.
-    const finalDaySnap = await tripRef
-      .collection('days')
-      .doc('2026-07-13')
-      .get()
-    expect(finalDaySnap.exists).toBe(true)
-
     // The regenerated remainder (past days are historical fact and aren't
-    // re-paced) respects Section 5's pacing rules.
-    const remainderDays = [
-      staleSnap.data() as TripDay,
-      finalDaySnap.data() as TripDay,
-    ]
+    // re-paced) respects the pacing rules.
+    const remainderDays = [staleSnap.data() as TripDay, finalDaySnap.data() as TripDay]
     expect(validatePacing(remainderDays, 4)).toBeNull()
-  }, 15_000)
+  })
 
   it('preserves locked days from the "Request changes" flow, even when they fall in the future', async () => {
     const db = getFirestore()
@@ -180,7 +227,9 @@ describe('replanTrip', () => {
       },
       summary: 'STALE — should be replaced by replan',
     }
-    const lockedFutureDay: TripDay = {
+    // Locked day sits strictly BETWEEN today and remainingEndDate — the
+    // "Request changes" UI allows locking any day, not just boundary ones.
+    const lockedMidRangeDay: TripDay = {
       index: 2,
       date: '2026-07-13',
       type: 'rest',
@@ -188,46 +237,52 @@ describe('replanTrip', () => {
       summary: 'LOCKED — should survive replan untouched',
     }
 
-    for (const day of [pastDay, staleFutureDay, lockedFutureDay]) {
+    for (const day of [pastDay, staleFutureDay, lockedMidRangeDay]) {
       const dayRef = tripRef.collection('days').doc(day.date)
       await dayRef.set(day)
-      await dayRef.collection('activities').add({
-        name: 'placeholder',
-        category: 'sight',
-        lat: day.overnight.lat,
-        lng: day.overnight.lng,
-        blurb: 'placeholder',
-        kidFriendly: true,
-        status: 'suggested',
-      })
+      await dayRef.collection('activities').add(placeholderActivity(day.overnight.lat, day.overnight.lng))
     }
     await tripRef.update({ 'planMeta.status': 'ready' })
 
-    await db.collection('planRequests').add({
-      tripId,
-      kind: 'replan',
-      status: 'pending',
-      replanContext: {
-        currentLocation: { lat: 61.1, lng: 10.5 },
-        today: '2026-07-12',
-        completedRefPaths: [`trips/${tripId}/days/2026-07-10`],
-        remainingEndDate: '2026-07-14',
-        remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
-        changeRequestText: 'more beaches, skip big cities',
-        lockedDayIds: ['2026-07-13'],
+    // The mocked skeleton spans the FULL today..remainingEndDate range
+    // (2026-07-12, 13, 14) — exactly like a real planTrip() call would,
+    // with no awareness that 07-13 is already locked. This is what proves
+    // the collision-safety filter: day 3 (07-13) must be dropped rather
+    // than overwriting the locked day, while days 2 and 4 still land.
+    planTripMock.mockReset().mockResolvedValue({
+      days: [{ index: 0 }, { index: 1 }, { index: 2 }],
+    })
+    resolveSkeletonDaysMock.mockReset().mockImplementation(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+      ) => {
+        const dates = ['2026-07-12', '2026-07-13', '2026-07-14']
+        const result = skeletonDays.map((d, i) =>
+          fixtureGeneratedDay(d.index, dates[i], `REPLANNED day ${d.index}`),
+        )
+        onDayResolved?.(result.length)
+        return result
       },
+    )
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.1, lng: 10.5 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-14',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+      changeRequestText: 'more beaches, skip big cities',
+      lockedDayIds: ['2026-07-13'],
     })
 
-    const trip = await waitFor(async () => {
-      const snap = await tripRef.get()
-      const data = snap.data()
-      return data?.planMeta?.status === 'ready' && data.planMeta.lastReplanAt
-        ? data
-        : undefined
-    })
-    expect(trip.planMeta.lastReplanAt).toBeDefined()
+    const tripSnap = await tripRef.get()
+    expect(tripSnap.data()?.planMeta.lastReplanAt).toBeDefined()
 
-    // Locked day: untouched, even though it's in the future.
+    // Locked day: untouched, even though it's in the future AND the
+    // generated remainder proposed a colliding day for that same date.
     const lockedSnap = await tripRef.collection('days').doc('2026-07-13').get()
     expect(lockedSnap.data()?.summary).toBe(
       'LOCKED — should survive replan untouched',
@@ -235,10 +290,67 @@ describe('replanTrip', () => {
     const lockedActivities = await lockedSnap.ref.collection('activities').get()
     expect(lockedActivities.size).toBe(1)
 
-    // Stale, unlocked future day: still replaced as normal.
+    // Stale, unlocked future day: still replaced as normal. pastDocs is
+    // [pastDay, lockedMidRangeDay] (locked counts as "preserved" regardless
+    // of date), so reindexing starts at 2 — this is skeleton position 0.
     const staleSnap = await tripRef.collection('days').doc('2026-07-12').get()
-    expect(staleSnap.data()?.summary).not.toBe(
-      'STALE — should be replaced by replan',
+    expect(staleSnap.data()?.summary).toBe('REPLANNED day 2')
+
+    // The day after the locked one still gets written normally, at
+    // skeleton position 2 → reindexed to 4.
+    const afterLockedSnap = await tripRef.collection('days').doc('2026-07-14').get()
+    expect(afterLockedSnap.data()?.summary).toBe('REPLANNED day 4')
+
+    // planTrip received the change request text folded into the notes.
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notesFreeText: expect.stringContaining('more beaches, skip big cities'),
+      }),
     )
-  }, 15_000)
+  })
+
+  it('leaves the trip untouched if planTrip fails, rather than deleting future days with nothing to replace them', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidC')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    const futureDay: TripDay = {
+      index: 0,
+      date: '2026-07-12',
+      type: 'drive',
+      overnight: { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' },
+      drive: {
+        fromName: 'Lillehammer',
+        toName: 'Otta',
+        distanceKm: 140,
+        durationMin: 120,
+        slot: 'morning',
+      },
+      summary: 'ORIGINAL — must survive a failed replan',
+    }
+    const dayRef = tripRef.collection('days').doc(futureDay.date)
+    await dayRef.set(futureDay)
+    await tripRef.update({ 'planMeta.status': 'ready' })
+
+    planTripMock.mockReset().mockRejectedValue(new Error('Claude API unavailable'))
+    resolveSkeletonDaysMock.mockReset()
+
+    const { runReplan } = await import('./replanTrip.js')
+    await expect(
+      runReplan(tripId, {
+        currentLocation: { lat: 61.77, lng: 9.54 },
+        today: '2026-07-12',
+        completedRefPaths: [],
+        remainingEndDate: '2026-07-12',
+        remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+      }),
+    ).rejects.toThrow('Claude API unavailable')
+
+    const survivingSnap = await dayRef.get()
+    expect(survivingSnap.exists).toBe(true)
+    expect(survivingSnap.data()?.summary).toBe(
+      'ORIGINAL — must survive a failed replan',
+    )
+    expect(resolveSkeletonDaysMock).not.toHaveBeenCalled()
+  })
 })

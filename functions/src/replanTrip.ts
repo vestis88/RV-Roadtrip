@@ -1,17 +1,17 @@
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import {
   activitySchema,
   restaurantSchema,
   tripDaySchema,
-  type Activity,
   type LatLng,
   type NamedPoint,
-  type Restaurant,
   type Trip,
   type TripDay,
+  type TripSettings,
 } from '@rv/shared'
-import { computeMultiLegTotals } from './routesApi.js'
 import { validatePacing } from './pacingValidator.js'
+import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
+import { planTrip } from './prompts/planTrip.js'
 
 export interface ReplanContext {
   currentLocation: LatLng
@@ -23,117 +23,20 @@ export interface ReplanContext {
   lockedDayIds?: string[]
 }
 
-interface FixtureDay {
-  day: TripDay
-  activities: Activity[]
-  restaurants: Restaurant[]
-}
-
 /**
- * Builds a minimal remainder itinerary from today's location to the
- * remaining end point. This is a stand-in for the real day-by-day Claude
- * generation (T-14), which isn't wired into this pipeline yet — same
- * caveat as generatePlan's fixture. It's enough to prove replanTrip's own
- * job: preserving past days and re-pacing only what's left.
+ * Re-plans the remainder of a trip from the traveler's current location to
+ * the remaining end point/date, running the same real Claude + Places/Routes
+ * pipeline generatePlan.ts uses for a fresh trip (planTrip + resolveSkeletonDays)
+ * rather than a placeholder. Past days and any explicitly locked days are
+ * preserved untouched; everything else in the future is replaced.
+ *
+ * Generation happens BEFORE any existing day is deleted: a failure partway
+ * through planTrip/resolution/pacing validation throws with the trip's
+ * existing days still fully intact, rather than leaving the trip with its
+ * future chopped off and nothing to replace it (the exact failure mode a
+ * hard-coded, near-infallible fixture could never hit, but real generation
+ * can).
  */
-async function buildRemainderFixture(
-  context: ReplanContext,
-  startIndex: number,
-): Promise<FixtureDay[]> {
-  const from: NamedPoint = {
-    name: 'Current location',
-    lat: context.currentLocation.lat,
-    lng: context.currentLocation.lng,
-  }
-  const { legs } = await computeMultiLegTotals([from, context.remainingEndPoint])
-  const leg = legs[0]
-
-  const driveDay: FixtureDay = {
-    day: {
-      index: startIndex,
-      date: context.today,
-      type: 'drive',
-      overnight: {
-        name: context.remainingEndPoint.name,
-        lat: context.remainingEndPoint.lat,
-        lng: context.remainingEndPoint.lng,
-        country: 'NO',
-      },
-      drive: {
-        fromName: from.name,
-        toName: context.remainingEndPoint.name,
-        distanceKm: leg.distanceKm,
-        durationMin: leg.durationMin,
-        slot: 'morning',
-      },
-      summary: 'Re-planned leg to the finish.',
-    },
-    activities: [
-      {
-        name: 'Local viewpoint',
-        category: 'sight',
-        lat: context.remainingEndPoint.lat,
-        lng: context.remainingEndPoint.lng,
-        blurb: 'A worthwhile stop along the re-planned route.',
-        kidFriendly: true,
-        status: 'suggested',
-      },
-    ],
-    restaurants: [
-      {
-        name: 'Roadside restaurant',
-        meal: 'dinner',
-        lat: context.remainingEndPoint.lat,
-        lng: context.remainingEndPoint.lng,
-        blurb: 'Convenient dinner stop at the end of the day.',
-        status: 'suggested',
-      },
-    ],
-  }
-
-  const days = [driveDay]
-
-  if (context.remainingEndDate !== context.today) {
-    days.push({
-      day: {
-        index: startIndex + 1,
-        date: context.remainingEndDate,
-        type: 'rest',
-        overnight: {
-          name: context.remainingEndPoint.name,
-          lat: context.remainingEndPoint.lat,
-          lng: context.remainingEndPoint.lng,
-          country: 'NO',
-        },
-        summary: 'Rest day at the finish — no driving today.',
-      },
-      activities: [
-        {
-          name: 'Town square stroll',
-          category: 'sight',
-          lat: context.remainingEndPoint.lat,
-          lng: context.remainingEndPoint.lng,
-          blurb: 'Easy wandering to close out the trip.',
-          kidFriendly: true,
-          status: 'suggested',
-        },
-      ],
-      restaurants: [
-        {
-          name: 'Celebration dinner spot',
-          meal: 'dinner',
-          lat: context.remainingEndPoint.lat,
-          lng: context.remainingEndPoint.lng,
-          blurb: 'A nice place to mark the end of the trip.',
-          status: 'suggested',
-        },
-      ],
-    })
-  }
-
-  return days
-}
-
 export async function runReplan(
   tripId: string,
   context: ReplanContext,
@@ -144,7 +47,12 @@ export async function runReplan(
   const tripSnapBeforeReplan = await tripRef.get()
   const trip = tripSnapBeforeReplan.data() as Trip
 
-  await tripRef.update({ 'planMeta.status': 'generating' })
+  await tripRef.update({
+    'planMeta.status': 'generating',
+    'planMeta.progressLabel': FieldValue.delete(),
+    'planMeta.progressCurrent': FieldValue.delete(),
+    'planMeta.progressTotal': FieldValue.delete(),
+  })
 
   const lockedDayIds = new Set(context.lockedDayIds ?? [])
   const daysSnap = await tripRef.collection('days').orderBy('date').get()
@@ -159,46 +67,114 @@ export async function runReplan(
       (doc.data() as TripDay).date >= context.today && !lockedDayIds.has(doc.id),
   )
 
+  const currentLocationPoint: NamedPoint = {
+    name: 'Current location',
+    lat: context.currentLocation.lat,
+    lng: context.currentLocation.lng,
+  }
+  const remainderSettings: TripSettings = {
+    ...trip.settings,
+    startDate: context.today,
+    endDate: context.remainingEndDate,
+    startPoint: currentLocationPoint,
+    endPoint: context.remainingEndPoint,
+  }
+  const notesFreeText = context.changeRequestText
+    ? `${trip.notes.freeText}\n\nChange request for the remainder of the trip: ${context.changeRequestText}`
+    : trip.notes.freeText
+
+  const skeleton = await planTrip({
+    settings: remainderSettings,
+    notesFreeText,
+    onProgress: (progress) => {
+      tripRef
+        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+        .catch((error: unknown) =>
+          console.error('Failed to report replan progress', error),
+        )
+    },
+  })
+
+  // Reported from here on — this is the slow, sequential part (a Places/
+  // Routes round-trip per day) that a "generating" spinner alone gives no
+  // sense of progress through on a multi-day remainder.
+  await tripRef.update({
+    'planMeta.progressLabel': FieldValue.delete(),
+    'planMeta.progressCurrent': 0,
+    'planMeta.progressTotal': skeleton.days.length,
+  })
+
+  // The skeleton's own indices start at 0 (it has no idea past/locked days
+  // already occupy 0..startIndex-1) — offset them to continue the trip's
+  // real day numbering.
+  const startIndex = pastDocs.length
+  const reindexedDays = skeleton.days.map((day, i) => ({
+    ...day,
+    index: startIndex + i,
+  }))
+
+  const resolved = await resolveSkeletonDays(
+    reindexedDays,
+    currentLocationPoint,
+    (count) => {
+      tripRef
+        .update({ 'planMeta.progressCurrent': count })
+        .catch((error: unknown) =>
+          console.error('Failed to report replan day-resolution progress', error),
+        )
+    },
+  )
+
+  // remainderSettings spans every calendar day from today through
+  // remainingEndDate, but a locked day can legitimately sit anywhere in
+  // that range (the "Request changes" UI lets the user lock any day, not
+  // just ones at the boundary) — planTrip has no notion of "skip this
+  // date", so the outline may propose a day that lands on an already-locked
+  // date. Locked must mean untouched, no exceptions, so any such collision
+  // is dropped here rather than allowed to overwrite it. (Known limitation:
+  // the route itself isn't planned around the locked day's location, since
+  // Claude isn't told about it — only protected from being overwritten.)
+  const preservedDates = new Set(pastDocs.map((doc) => doc.id))
+  const daysToWrite = resolved.filter((r) => !preservedDates.has(r.day.date))
+  if (daysToWrite.length !== resolved.length) {
+    console.warn(
+      `runReplan: dropped ${resolved.length - daysToWrite.length} generated day(s) that collided with an already-locked/past date`,
+    )
+  }
+
+  // Past days are historical fact and can't be re-paced; per 6.2, only the
+  // regenerated remainder needs to satisfy the pacing check.
+  const remainderDays = daysToWrite.map((r) => r.day)
+  const violation = validatePacing(remainderDays, trip.settings.maxDriveHoursPerDay)
+  if (violation) {
+    throw new Error(`Pacing validation failed: ${violation.reason}`)
+  }
+
+  // Only now — once the replacement is known-good — touch existing docs.
+  const batch = db.batch()
   for (const doc of futureDocs) {
     const [activities, restaurants] = await Promise.all([
       doc.ref.collection('activities').get(),
       doc.ref.collection('restaurants').get(),
     ])
-    const deleteBatch = db.batch()
-    activities.docs.forEach((a) => deleteBatch.delete(a.ref))
-    restaurants.docs.forEach((r) => deleteBatch.delete(r.ref))
-    deleteBatch.delete(doc.ref)
-    await deleteBatch.commit()
+    activities.docs.forEach((a) => batch.delete(a.ref))
+    restaurants.docs.forEach((r) => batch.delete(r.ref))
+    batch.delete(doc.ref)
   }
-
-  const remainder = await buildRemainderFixture(context, pastDocs.length)
-
-  const writeBatch = db.batch()
-  for (const { day, activities, restaurants } of remainder) {
+  for (const { day, activities, restaurants } of daysToWrite) {
     tripDaySchema.parse(day)
     const dayRef = tripRef.collection('days').doc(day.date)
-    writeBatch.set(dayRef, day)
+    batch.set(dayRef, day)
     for (const activity of activities) {
       activitySchema.parse(activity)
-      writeBatch.set(dayRef.collection('activities').doc(), activity)
+      batch.set(dayRef.collection('activities').doc(), activity)
     }
     for (const restaurant of restaurants) {
       restaurantSchema.parse(restaurant)
-      writeBatch.set(dayRef.collection('restaurants').doc(), restaurant)
+      batch.set(dayRef.collection('restaurants').doc(), restaurant)
     }
   }
-  await writeBatch.commit()
-
-  // Past days are historical fact and can't be re-paced; per 6.2, only the
-  // regenerated remainder needs to satisfy Section 5's pacing rules.
-  const remainderDays = remainder.map((r) => r.day)
-  const violation = validatePacing(
-    remainderDays,
-    trip.settings.maxDriveHoursPerDay,
-  )
-  if (violation) {
-    throw new Error(`Pacing validation failed: ${violation.reason}`)
-  }
+  await batch.commit()
 
   const allDays: TripDay[] = [
     ...pastDocs.map((doc) => doc.data() as TripDay),
@@ -222,5 +198,8 @@ export async function runReplan(
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
     'planMeta.generatedAt': now,
     'planMeta.lastReplanAt': now,
+    'planMeta.progressLabel': FieldValue.delete(),
+    'planMeta.progressCurrent': FieldValue.delete(),
+    'planMeta.progressTotal': FieldValue.delete(),
   })
 }
