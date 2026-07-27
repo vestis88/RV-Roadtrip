@@ -18,9 +18,7 @@ export function CountriesScreen() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 text-left">
-      <h2 className="mb-4 text-xl font-semibold text-neutral-900 dark:text-white">
-        Countries
-      </h2>
+      <h2 className="heading-md mb-4">Countries</h2>
       {codes.length === 0 ? (
         <p
           className="text-neutral-500 dark:text-neutral-400"
@@ -35,10 +33,16 @@ export function CountriesScreen() {
               <Link
                 to={`/countries/${code}`}
                 data-testid={`country-link-${code}`}
-                className="flex items-center gap-2 rounded border border-neutral-200 p-3 text-orange-700 underline dark:border-neutral-800 dark:text-orange-400"
+                className="card-interactive flex items-center gap-3 p-3 font-medium text-neutral-900 dark:text-white"
               >
-                <span>{isoCountryFlag(code)}</span>
+                <span className="text-2xl">{isoCountryFlag(code)}</span>
                 <span>{countryName(code)}</span>
+                <span
+                  aria-hidden
+                  className="ml-auto text-blue-600 dark:text-blue-400"
+                >
+                  →
+                </span>
               </Link>
             </li>
           ))}

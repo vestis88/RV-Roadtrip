@@ -56,29 +56,38 @@ export function OverviewMapScreen() {
 
   const path = days
     .filter((d) => d.drive)
-    .flatMap((d) => [
-      { lat: d.overnight.lat, lng: d.overnight.lng },
-    ])
+    .flatMap((d) => [{ lat: d.overnight.lat, lng: d.overnight.lng }])
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
   return (
     <div className="flex h-full w-full flex-col">
       <div
-        className="flex justify-center gap-6 border-y border-neutral-200 bg-neutral-50 py-2 text-sm dark:border-neutral-800 dark:bg-neutral-950"
+        className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
         data-testid="map-header"
       >
-        <span data-testid="header-total-km">
+        <span
+          data-testid="header-total-km"
+          className="chip chip-neutral px-3 py-1"
+        >
           {(trip.planMeta.totalKm ?? 0).toFixed(0)} km
         </span>
-        <span data-testid="header-avg-drive-minutes">
+        <span
+          data-testid="header-avg-drive-minutes"
+          className="chip chip-neutral px-3 py-1"
+        >
           {(trip.planMeta.avgDriveMinutesPerDay ?? 0).toFixed(0)} min/day avg
         </span>
-        <span data-testid="header-day-count">{days.length} days</span>
+        <span
+          data-testid="header-day-count"
+          className="chip chip-blue px-3 py-1"
+        >
+          {days.length} days
+        </span>
         <button
           type="button"
           data-testid="request-changes-button"
-          className="inline-flex min-h-11 items-center text-orange-700 underline dark:text-orange-400"
+          className="btn btn-ghost"
           onClick={() => setChangeRequestOpen(true)}
         >
           Request changes
@@ -99,20 +108,21 @@ export function OverviewMapScreen() {
         <div className="border-b border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
           <textarea
             data-testid="change-request-text"
-            className="w-full rounded border border-neutral-300 p-2 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+            className="field"
             placeholder="e.g. more beaches, skip big cities"
             value={changeText}
             onChange={(event) => setChangeText(event.target.value)}
           />
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {days.map((day) => (
               <label
                 key={day.id}
-                className="flex items-center gap-1 text-sm text-neutral-900 dark:text-white"
+                className="flex cursor-pointer items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
                 data-testid={`lock-toggle-${day.id}`}
               >
                 <input
                   type="checkbox"
+                  className="accent-blue-600"
                   checked={lockedDayIds.has(day.id)}
                   onChange={() => toggleLock(day.id)}
                 />
@@ -123,7 +133,7 @@ export function OverviewMapScreen() {
           <button
             type="button"
             data-testid="submit-change-request"
-            className="mt-2 rounded bg-orange-600 px-4 py-2 text-white"
+            className="btn btn-primary mt-3"
             onClick={submitChangeRequest}
           >
             Submit
@@ -177,7 +187,7 @@ export function OverviewMapScreen() {
                   data-testid={`day-badge-${day.id}`}
                   onClick={() => navigate(`/map/day/${day.id}`)}
                 >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-xs font-semibold text-white shadow">
+                  <div className="flex h-8 items-center justify-center gap-0.5 rounded-full border-2 border-white bg-emerald-700 px-2 text-xs font-semibold text-white shadow-md dark:border-neutral-900">
                     {OVERNIGHT_ICON} {day.index + 1}
                   </div>
                 </AdvancedMarker>
@@ -189,9 +199,7 @@ export function OverviewMapScreen() {
                 if (!dayPlaces) return []
                 const activities: Activity[] = tiers.showAllPlaces
                   ? dayPlaces.activities
-                  : dayPlaces.activities.filter(
-                      (a) => a.status === 'selected',
-                    )
+                  : dayPlaces.activities.filter((a) => a.status === 'selected')
                 return activities.map((activity, i) => (
                   <AdvancedMarker
                     key={`${day.id}-activity-${i}`}

@@ -23,15 +23,13 @@ function DiaryEntryRow({ entry }: { entry: LogEntryWithId }) {
   }, [entry.refPath])
 
   return (
-    <li
-      className="rounded border border-neutral-200 p-3 dark:border-neutral-800"
-      data-testid="diary-entry"
-    >
-      <p className="text-sm font-medium text-neutral-900 dark:text-white">
+    <li className="card p-3" data-testid="diary-entry">
+      <p className="text-sm font-semibold text-neutral-900 dark:text-white">
         {name ?? '…'}
       </p>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        {entry.date} · {entry.refType}
+      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+        <span>{entry.date}</span>
+        <span className="chip chip-blue">{entry.refType}</span>
       </p>
       {entry.note && (
         <p
@@ -51,7 +49,10 @@ export function DiaryScreen() {
 
   function exportDiary() {
     const text = entries
-      .map((entry) => `${entry.date} — ${entry.refType}${entry.note ? `: ${entry.note}` : ''}`)
+      .map(
+        (entry) =>
+          `${entry.date} — ${entry.refType}${entry.note ? `: ${entry.note}` : ''}`,
+      )
       .join('\n')
 
     if (navigator.share) {
@@ -72,15 +73,13 @@ export function DiaryScreen() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 text-left">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">
-          Diary
-        </h2>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="heading-md">Diary</h2>
         <button
           type="button"
           data-testid="diary-export"
           onClick={exportDiary}
-          className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+          className="btn btn-sm btn-secondary"
         >
           Export
         </button>

@@ -45,33 +45,34 @@ export function ChipMultiSelect({
         {label}
       </legend>
       <div className="flex flex-wrap gap-2">
-        {[...options, ...extraSelected.map((value) => ({ value, label: value }))].map(
-          (option) => {
-            const isSelected = selected.includes(option.value)
-            return (
-              <button
-                key={option.value}
-                type="button"
-                data-testid={`${testIdPrefix}-chip-${option.value}`}
-                aria-pressed={isSelected}
-                onClick={() => toggle(option.value)}
-                className={
-                  isSelected
-                    ? 'rounded-full bg-orange-600 px-3 py-1 text-sm text-white'
-                    : 'rounded-full border border-neutral-300 px-3 py-1 text-sm text-neutral-700 dark:border-neutral-600 dark:text-neutral-300'
-                }
-              >
-                {option.label}
-              </button>
-            )
-          },
-        )}
+        {[
+          ...options,
+          ...extraSelected.map((value) => ({ value, label: value })),
+        ].map((option) => {
+          const isSelected = selected.includes(option.value)
+          return (
+            <button
+              key={option.value}
+              type="button"
+              data-testid={`${testIdPrefix}-chip-${option.value}`}
+              aria-pressed={isSelected}
+              onClick={() => toggle(option.value)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                isSelected
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {option.label}
+            </button>
+          )
+        })}
       </div>
       {allowFreeEntry && (
         <div className="mt-2 flex gap-2">
           <input
             data-testid={`${testIdPrefix}-free-entry`}
-            className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+            className="field field-sm flex-1"
             value={freeEntry}
             onChange={(event) => setFreeEntry(event.target.value)}
             onKeyDown={(event) => {
@@ -86,7 +87,7 @@ export function ChipMultiSelect({
             type="button"
             data-testid={`${testIdPrefix}-free-entry-add`}
             onClick={addFreeEntry}
-            className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+            className="btn btn-sm btn-secondary"
           >
             Add
           </button>

@@ -34,7 +34,7 @@ export function ShareTripMenu({ trip }: { trip: Trip }) {
     <details className="mx-auto max-w-xs text-center" data-testid="share-menu">
       <summary
         data-testid="share-menu-toggle"
-        className="cursor-pointer text-sm text-orange-700 underline dark:text-orange-400"
+        className="link inline-block cursor-pointer py-2 text-sm"
       >
         Share / join trip
       </summary>
@@ -51,7 +51,7 @@ export function ShareTripMenu({ trip }: { trip: Trip }) {
               type="button"
               data-testid="copy-share-link"
               onClick={() => copyShareLink().catch(console.error)}
-              className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+              className="btn btn-secondary"
             >
               {linkCopied ? 'Copied!' : 'Copy link'}
             </button>
@@ -62,7 +62,7 @@ export function ShareTripMenu({ trip }: { trip: Trip }) {
           className="flex items-center justify-center gap-2"
         >
           <input
-            className="w-full max-w-40 rounded border border-neutral-300 px-3 py-2 text-center text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+            className="field field-sm max-w-40 text-center"
             data-testid="join-code-input"
             placeholder="Enter a share code"
             value={joinCodeDraft}
@@ -71,7 +71,7 @@ export function ShareTripMenu({ trip }: { trip: Trip }) {
           <button
             type="submit"
             data-testid="join-code-submit"
-            className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+            className="btn btn-secondary"
           >
             Join
           </button>

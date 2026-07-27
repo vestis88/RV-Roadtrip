@@ -32,30 +32,30 @@ export function NotesScreen({ tripId, trip }: NotesScreenProps) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-1 p-4 text-left">
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-          Notes
-        </span>
-        <textarea
-          data-testid="notes-textarea"
-          className="h-40 w-full rounded border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
-          value={text}
-          onFocus={() => setIsEditing(true)}
-          onChange={(event) => {
-            setText(event.target.value)
-            scheduleSave(event.target.value)
-          }}
-          onBlur={() => setIsEditing(false)}
-          placeholder="Anything here is read by the planner on every generation — allergies, must-sees, driving preferences…"
-        />
-      </label>
-      <p
-        className="text-xs text-neutral-500 dark:text-neutral-400"
-        data-testid="notes-updated-at"
-      >
-        Last updated: {new Date(trip.notes.updatedAt).toLocaleString()}
-      </p>
+    <div className="mx-auto max-w-2xl p-4 text-left">
+      <div className="card space-y-1 p-4">
+        <label className="block">
+          <span className="field-label">Notes</span>
+          <textarea
+            data-testid="notes-textarea"
+            className="field h-40 resize-y"
+            value={text}
+            onFocus={() => setIsEditing(true)}
+            onChange={(event) => {
+              setText(event.target.value)
+              scheduleSave(event.target.value)
+            }}
+            onBlur={() => setIsEditing(false)}
+            placeholder="Anything here is read by the planner on every generation — allergies, must-sees, driving preferences…"
+          />
+        </label>
+        <p
+          className="text-xs text-neutral-500 dark:text-neutral-400"
+          data-testid="notes-updated-at"
+        >
+          Last updated: {new Date(trip.notes.updatedAt).toLocaleString()}
+        </p>
+      </div>
     </div>
   )
 }

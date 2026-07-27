@@ -48,7 +48,7 @@ export function RequestChangesForDay({
           type="button"
           data-testid="request-changes-for-day-button"
           onClick={() => setOpen(true)}
-          className="text-sm text-orange-700 underline dark:text-orange-400"
+          className="btn btn-sm btn-ghost -ml-3"
         >
           Request changes for this day
         </button>
@@ -59,7 +59,7 @@ export function RequestChangesForDay({
   return (
     <div
       data-testid="request-changes-for-day-form"
-      className="mx-4 mt-2 space-y-2 rounded border border-neutral-200 p-3 dark:border-neutral-800"
+      className="card mx-4 mt-2 space-y-2 p-3"
     >
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
         Change requested for Day {dayNumber} only — every other day stays as
@@ -67,7 +67,7 @@ export function RequestChangesForDay({
       </p>
       <textarea
         data-testid="change-request-text-for-day"
-        className="w-full rounded border border-neutral-300 p-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+        className="field field-sm"
         placeholder="e.g. less driving today, add a beach stop"
         value={changeText}
         onChange={(event) => setChangeText(event.target.value)}
@@ -78,7 +78,7 @@ export function RequestChangesForDay({
           data-testid="submit-change-request-for-day"
           disabled={submitting}
           onClick={submit}
-          className="rounded bg-orange-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          className="btn btn-sm btn-primary"
         >
           Submit
         </button>
@@ -86,7 +86,7 @@ export function RequestChangesForDay({
           type="button"
           data-testid="cancel-change-request-for-day"
           onClick={() => setOpen(false)}
-          className="rounded border border-neutral-300 px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+          className="btn btn-sm btn-secondary"
         >
           Cancel
         </button>

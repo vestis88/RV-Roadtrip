@@ -21,10 +21,7 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <details
-      className="rounded border border-neutral-200 p-3 dark:border-neutral-800"
-      data-testid={testId}
-    >
+    <details className="card p-3" data-testid={testId}>
       <summary className="cursor-pointer font-medium text-neutral-900 dark:text-white">
         {title}
       </summary>
@@ -77,15 +74,12 @@ export function CountryDetailScreen() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 text-left">
-      <Link
-        to="/countries"
-        className="text-sm text-orange-700 underline dark:text-orange-400"
-      >
+      <Link to="/countries" className="link text-sm">
         ← Back to countries
       </Link>
 
       <div className="mt-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">
+        <h2 className="heading-md">
           {isoCountryFlag(code ?? '')} {countryName(code ?? '')}
         </h2>
         <button
@@ -93,7 +87,7 @@ export function CountryDetailScreen() {
           data-testid="refresh-country-guide"
           onClick={refresh}
           disabled={refreshing}
-          className="rounded border border-neutral-300 px-3 py-1 text-sm text-neutral-900 disabled:opacity-50 dark:border-neutral-700 dark:text-white"
+          className="btn btn-sm btn-secondary"
         >
           {refreshing ? 'Refreshing…' : 'Refresh info'}
         </button>
@@ -109,9 +103,7 @@ export function CountryDetailScreen() {
       )}
 
       {loading ? (
-        <p className="mt-4 text-neutral-500 dark:text-neutral-400">
-          Loading…
-        </p>
+        <p className="mt-4 text-neutral-500 dark:text-neutral-400">Loading…</p>
       ) : !guide ? (
         <p
           className="mt-4 text-neutral-500 dark:text-neutral-400"
@@ -120,7 +112,7 @@ export function CountryDetailScreen() {
           No guide yet. Tap "Refresh info" to generate one.
         </p>
       ) : (
-        <div className="mt-4 space-y-2" data-testid="country-guide">
+        <div className="mt-4 space-y-3" data-testid="country-guide">
           <p
             className="text-xs text-neutral-500 dark:text-neutral-400"
             data-testid="country-guide-generated-at"
@@ -163,7 +155,7 @@ export function CountryDetailScreen() {
                 href={guide.roadFees.vignetteUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-1 inline-block text-orange-700 underline dark:text-orange-400"
+                className="link mt-1 inline-block"
               >
                 Buy a vignette
               </a>

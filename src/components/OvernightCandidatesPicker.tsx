@@ -76,7 +76,10 @@ export function OvernightCandidatesPicker({
     window.localStorage.setItem(WILD_TOOLTIP_SEEN_KEY, '1')
   }
 
-  async function pickCandidate(candidate: OvernightStopCandidate, index: number) {
+  async function pickCandidate(
+    candidate: OvernightStopCandidate,
+    index: number,
+  ) {
     setSubmittingIndex(index)
     setError(null)
     try {
@@ -106,7 +109,7 @@ export function OvernightCandidatesPicker({
           type="button"
           data-testid="change-overnight-toggle"
           onClick={loadCandidates}
-          className="text-sm text-orange-700 underline dark:text-orange-400"
+          className="btn btn-sm btn-ghost -ml-3"
         >
           Change overnight stop
         </button>
@@ -117,7 +120,7 @@ export function OvernightCandidatesPicker({
   return (
     <div
       data-testid="overnight-candidates-panel"
-      className="mx-4 mt-2 space-y-3 rounded border border-neutral-200 p-3 dark:border-neutral-800"
+      className="card mx-4 mt-2 space-y-3 p-3"
     >
       {loading && (
         <p
@@ -164,7 +167,7 @@ export function OvernightCandidatesPicker({
               {type === 'wild' && showWildTooltip && (
                 <p
                   data-testid="wild-camping-caveat"
-                  className="mt-1 rounded bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                  className="mt-1 rounded-lg bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100"
                 >
                   Wild camping legality varies a lot by country and region —
                   verify locally before relying on any of these.{' '}
@@ -183,7 +186,7 @@ export function OvernightCandidatesPicker({
                   <div
                     key={i}
                     data-testid={`overnight-candidate-${type}-${i}`}
-                    className="rounded border border-neutral-200 p-2 text-sm dark:border-neutral-800"
+                    className="surface rounded-lg border border-neutral-200 p-2 text-sm dark:border-neutral-800"
                   >
                     <p className="font-medium text-neutral-900 dark:text-white">
                       {c.name}
@@ -201,7 +204,7 @@ export function OvernightCandidatesPicker({
                       data-testid={`overnight-candidate-pick-${type}-${i}`}
                       disabled={submittingIndex !== null}
                       onClick={() => pickCandidate(c, i)}
-                      className="mt-1 rounded bg-orange-600 px-2 py-1 text-xs text-white disabled:opacity-50"
+                      className="btn btn-sm btn-primary mt-2"
                     >
                       {submittingIndex === i ? 'Submitting…' : 'Use this stop'}
                     </button>
@@ -225,7 +228,7 @@ export function OvernightCandidatesPicker({
         type="button"
         data-testid="change-overnight-cancel"
         onClick={() => setOpen(false)}
-        className="text-sm text-neutral-500 underline dark:text-neutral-400"
+        className="btn btn-sm btn-secondary"
       >
         Cancel
       </button>

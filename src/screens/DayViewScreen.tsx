@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AdvancedMarker, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps'
+import {
+  AdvancedMarker,
+  Map as GoogleMap,
+  useMap,
+} from '@vis.gl/react-google-maps'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail } from '../hooks/useDayDetail'
@@ -66,9 +70,7 @@ export function DayViewScreen() {
 
   if (loading || !day || !dayId) {
     return (
-      <p className="p-4 text-neutral-500 dark:text-neutral-400">
-        Loading day…
-      </p>
+      <p className="p-4 text-neutral-500 dark:text-neutral-400">Loading day…</p>
     )
   }
 
@@ -162,26 +164,26 @@ export function DayViewScreen() {
         {selectedPlace && (
           <p
             data-testid="map-selected-caption"
-            className="absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-xs font-medium text-neutral-900 shadow dark:bg-neutral-900/90 dark:text-white"
+            className="absolute bottom-3 left-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-neutral-900 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-white"
           >
             Showing: {selectedPlace.name}
           </p>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto text-left lg:w-1/2">
-        <div className="flex items-center justify-between p-4">
+      <div className="flex-1 overflow-y-auto bg-white text-left lg:w-1/2 dark:bg-neutral-900">
+        <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
           <button
             type="button"
             data-testid="prev-day"
             disabled={!prevDayId}
             onClick={() => goToDay(prevDayId)}
-            className="rounded px-3 py-1 text-sm text-orange-700 underline disabled:opacity-30 disabled:no-underline dark:text-orange-400"
+            className="btn btn-sm btn-ghost"
           >
             ← Prev
           </button>
           <h2
-            className="text-lg font-semibold text-neutral-900 dark:text-white"
+            className="text-center text-base font-semibold tracking-tight text-neutral-900 dark:text-white"
             data-testid="day-view-date"
           >
             Day {day.index + 1} — {day.date}
@@ -191,19 +193,19 @@ export function DayViewScreen() {
             data-testid="next-day"
             disabled={!nextDayId}
             onClick={() => goToDay(nextDayId)}
-            className="rounded px-3 py-1 text-sm text-orange-700 underline disabled:opacity-30 disabled:no-underline dark:text-orange-400"
+            className="btn btn-sm btn-ghost"
           >
             Next →
           </button>
         </div>
 
-        <p className="px-4 text-neutral-500 dark:text-neutral-400">
+        <p className="px-4 text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">
           {day.summary}
         </p>
 
         {(day.highlightReason ?? day.extraTimeReason) && (
           <p
-            className="mx-4 mt-2 text-sm text-neutral-500 italic dark:text-neutral-400"
+            className="mx-4 mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900 italic dark:bg-blue-950 dark:text-blue-200"
             data-testid="day-highlight-reason"
           >
             Why here: {day.highlightReason ?? day.extraTimeReason}
@@ -228,7 +230,7 @@ export function DayViewScreen() {
 
         {day.type === 'rest' ? (
           <p
-            className="mx-4 mt-4 rounded bg-orange-50 p-3 text-orange-800 dark:bg-orange-950 dark:text-orange-200"
+            className="mx-4 mt-4 rounded-xl bg-orange-50 p-3 font-medium text-orange-800 dark:bg-orange-950 dark:text-orange-200"
             data-testid="rest-day-banner"
           >
             No driving today 🎉
@@ -236,16 +238,21 @@ export function DayViewScreen() {
         ) : (
           day.drive && (
             <div
-              className="mx-4 mt-4 rounded border border-neutral-200 p-3 text-sm dark:border-neutral-800"
+              className="card mx-4 mt-4 p-3 text-sm"
               data-testid="drive-card"
             >
-              <p className="font-medium text-neutral-900 dark:text-white">
+              <p className="font-semibold text-neutral-900 dark:text-white">
                 {day.drive.fromName} → {day.drive.toName}
               </p>
-              <p className="text-neutral-600 dark:text-neutral-300">
-                {day.drive.distanceKm.toFixed(0)}km,{' '}
-                {day.drive.durationMin.toFixed(0)}min · {day.drive.slot}
-              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="chip chip-neutral">
+                  {day.drive.distanceKm.toFixed(0)} km
+                </span>
+                <span className="chip chip-neutral">
+                  {day.drive.durationMin.toFixed(0)} min
+                </span>
+                <span className="chip chip-blue">{day.drive.slot}</span>
+              </div>
             </div>
           )
         )}
@@ -333,9 +340,12 @@ export function DayViewScreen() {
                   })
                 }
                 onMarkSelected={() =>
-                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
+                  markSelected(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                  ).catch(console.error)
                 }
                 onMarkDone={(note) =>
                   markDone(
@@ -381,9 +391,12 @@ export function DayViewScreen() {
                   })
                 }
                 onMarkSelected={() =>
-                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
+                  markSelected(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                  ).catch(console.error)
                 }
                 onMarkDone={(note) =>
                   markDone(
@@ -429,9 +442,12 @@ export function DayViewScreen() {
                   })
                 }
                 onMarkSelected={() =>
-                  markSelected(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
+                  markSelected(
+                    tripId,
+                    dayId,
+                    'restaurant',
+                    restaurant.id,
+                  ).catch(console.error)
                 }
                 onMarkDone={(note) =>
                   markDone(

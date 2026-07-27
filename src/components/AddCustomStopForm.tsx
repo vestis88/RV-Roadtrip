@@ -103,7 +103,7 @@ export function AddCustomStopForm({
           type="button"
           data-testid="add-custom-stop-toggle"
           onClick={() => setOpen(true)}
-          className="rounded border border-dashed border-neutral-300 px-3 py-1.5 text-sm text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
+          className="btn btn-sm w-full border border-dashed border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           + Add custom stop
         </button>
@@ -114,14 +114,14 @@ export function AddCustomStopForm({
   return (
     <div
       data-testid="add-custom-stop-form"
-      className="mx-4 mt-4 space-y-3 rounded border border-neutral-200 p-3 dark:border-neutral-800"
+      className="card mx-4 mt-4 space-y-3 p-3"
     >
       <div className="flex gap-2 text-sm">
         <button
           type="button"
           data-testid="custom-stop-kind-activity"
           onClick={() => setKind('activity')}
-          className={`rounded px-2 py-1 ${kind === 'activity' ? 'bg-orange-600 text-white' : 'border border-neutral-300 text-neutral-900 dark:border-neutral-700 dark:text-white'}`}
+          className={`btn btn-sm ${kind === 'activity' ? 'btn-primary' : 'btn-secondary'}`}
         >
           Activity
         </button>
@@ -129,7 +129,7 @@ export function AddCustomStopForm({
           type="button"
           data-testid="custom-stop-kind-restaurant"
           onClick={() => setKind('restaurant')}
-          className={`rounded px-2 py-1 ${kind === 'restaurant' ? 'bg-orange-600 text-white' : 'border border-neutral-300 text-neutral-900 dark:border-neutral-700 dark:text-white'}`}
+          className={`btn btn-sm ${kind === 'restaurant' ? 'btn-primary' : 'btn-secondary'}`}
         >
           Restaurant
         </button>
@@ -141,7 +141,7 @@ export function AddCustomStopForm({
         </span>
         <input
           data-testid="custom-stop-name"
-          className="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+          className="field field-sm"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="e.g. Sjoa river rafting"
@@ -163,7 +163,7 @@ export function AddCustomStopForm({
             </span>
             <select
               data-testid="custom-stop-category"
-              className="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+              className="field field-sm w-auto"
               value={category}
               onChange={(event) =>
                 setCategory(event.target.value as ActivityCategory)
@@ -179,6 +179,7 @@ export function AddCustomStopForm({
           <label className="flex items-center gap-1 text-sm text-neutral-700 dark:text-neutral-300">
             <input
               type="checkbox"
+              className="accent-blue-600"
               data-testid="custom-stop-kid-friendly"
               checked={kidFriendly}
               onChange={(event) => setKidFriendly(event.target.checked)}
@@ -194,7 +195,7 @@ export function AddCustomStopForm({
             </span>
             <select
               data-testid="custom-stop-meal"
-              className="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+              className="field field-sm w-auto"
               value={meal}
               onChange={(event) => setMeal(event.target.value as Meal)}
             >
@@ -211,7 +212,7 @@ export function AddCustomStopForm({
             </span>
             <input
               data-testid="custom-stop-cuisine"
-              className="rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+              className="field field-sm w-auto"
               value={cuisine}
               onChange={(event) => setCuisine(event.target.value)}
             />
@@ -225,7 +226,7 @@ export function AddCustomStopForm({
         </span>
         <input
           data-testid="custom-stop-blurb"
-          className="w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+          className="field field-sm"
           value={blurb}
           onChange={(event) => setBlurb(event.target.value)}
           placeholder="Why it's worth the stop"
@@ -247,7 +248,7 @@ export function AddCustomStopForm({
           data-testid="custom-stop-submit"
           disabled={submitting}
           onClick={submit}
-          className="rounded bg-orange-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          className="btn btn-sm btn-primary"
         >
           Add stop
         </button>
@@ -258,7 +259,7 @@ export function AddCustomStopForm({
             reset()
             setOpen(false)
           }}
-          className="rounded border border-neutral-300 px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+          className="btn btn-sm btn-secondary"
         >
           Cancel
         </button>

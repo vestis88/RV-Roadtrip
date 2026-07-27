@@ -128,10 +128,7 @@ export function HighlightsReviewPanel({
   }
 
   return (
-    <div
-      data-testid="highlights-review-panel"
-      className="space-y-4 rounded border border-neutral-200 p-4 dark:border-neutral-800"
-    >
+    <div data-testid="highlights-review-panel" className="card space-y-4 p-4">
       <p className="text-sm text-neutral-600 dark:text-neutral-300">
         Here's what stood out region by region, before dates and pacing come
         into it. Re-rank or remove anything before generating the full route.
@@ -166,7 +163,7 @@ export function HighlightsReviewPanel({
                   if (!source || source.regionIndex !== regionIndex) return
                   reorderStop(regionIndex, source.stopIndex, stopIndex)
                 }}
-                className="flex items-center gap-2 rounded border border-neutral-200 bg-white p-2 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+                className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-white p-2 text-sm transition hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
               >
                 <span
                   aria-hidden
@@ -184,7 +181,7 @@ export function HighlightsReviewPanel({
                 </div>
                 <span
                   data-testid={`highlights-stop-priority-${regionIndex}-${stopIndex}`}
-                  className="shrink-0 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                  className="chip chip-neutral shrink-0"
                 >
                   {PRIORITY_LABEL[stop.priority]}
                 </span>
@@ -214,7 +211,7 @@ export function HighlightsReviewPanel({
                   type="button"
                   data-testid={`highlights-stop-remove-${regionIndex}-${stopIndex}`}
                   onClick={() => removeStop(regionIndex, stopIndex)}
-                  className="shrink-0 text-xs text-red-600 underline dark:text-red-400"
+                  className="shrink-0 text-xs text-red-600 underline underline-offset-2 dark:text-red-400"
                 >
                   Remove
                 </button>
@@ -225,12 +222,12 @@ export function HighlightsReviewPanel({
       ))}
 
       <label className="block">
-        <span className="mb-1 block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+        <span className="field-label">
           Anything else to make sure gets included?
         </span>
         <textarea
           data-testid="highlights-review-note"
-          className="w-full rounded border border-neutral-300 p-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+          className="field field-sm"
           placeholder="e.g. must include a waterfall stop"
           value={note}
           onChange={(event) => setNote(event.target.value)}
@@ -251,7 +248,7 @@ export function HighlightsReviewPanel({
         data-testid="highlights-review-continue"
         disabled={submitting}
         onClick={submit}
-        className="rounded bg-orange-600 px-4 py-2 text-white disabled:opacity-50"
+        className="btn btn-primary"
       >
         {submitting ? 'Continuing…' : 'Continue generating'}
       </button>
