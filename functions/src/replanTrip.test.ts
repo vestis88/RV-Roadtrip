@@ -353,4 +353,66 @@ describe('replanTrip', () => {
     )
     expect(resolveSkeletonDaysMock).not.toHaveBeenCalled()
   })
+
+  // Bug fix, reported 2026-07-27: a behind-schedule replan's outline used to
+  // get no signal distinguishing it from a normal remainder, so the pacing
+  // rule's flat "remaining distance / remaining days" target — now higher,
+  // since falling behind doesn't shrink the remaining distance but does
+  // shrink the remaining days — could make day 1 of the "fix" suggest an
+  // even longer drive than before.
+  it('asks for an easy first day when the replan is triggered by falling behind schedule', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidBehindSchedule')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.update({ 'planMeta.status': 'ready' })
+
+    planTripMock.mockReset().mockResolvedValue({ days: [{ index: 0 }] })
+    resolveSkeletonDaysMock
+      .mockReset()
+      .mockResolvedValue([fixtureGeneratedDay(0, '2026-07-12', 'REPLANNED')])
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.1, lng: 10.5 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-14',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+      behindScheduleKm: 337,
+    })
+
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notesFreeText: expect.stringMatching(/337km behind.*easy, short day/s),
+      }),
+    )
+  })
+
+  it('does not mention falling behind when the replan is a voluntary "Request changes" edit', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidVoluntaryReplan')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.update({ 'planMeta.status': 'ready' })
+
+    planTripMock.mockReset().mockResolvedValue({ days: [{ index: 0 }] })
+    resolveSkeletonDaysMock
+      .mockReset()
+      .mockResolvedValue([fixtureGeneratedDay(0, '2026-07-12', 'REPLANNED')])
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.1, lng: 10.5 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-14',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+      changeRequestText: 'more beaches',
+    })
+
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notesFreeText: expect.not.stringContaining('behind the original plan'),
+      }),
+    )
+  })
 })

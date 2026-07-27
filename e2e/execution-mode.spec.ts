@@ -66,6 +66,51 @@ test('shows a replan prompt when >50km behind, and Snooze suppresses it for the 
   await expect(page.getByTestId('replan-prompt')).toHaveCount(0)
 })
 
+test('clicking Re-plan submits a replan request carrying the measured behindScheduleKm', async ({
+  page,
+  context,
+}) => {
+  // Bug fix, reported 2026-07-27: the replan pipeline needs to know this
+  // was triggered by falling behind schedule (not a voluntary "Request
+  // changes" edit) so it can ask for an easy first day instead of pacing
+  // it the same as the rest of the remainder — see replanTrip.ts.
+  await context.grantPermissions(['geolocation'])
+  await context.setGeolocation({ latitude: 59.9139, longitude: 10.7522 })
+
+  const tripId = await createTripAndSeedTodayDay(page)
+
+  await expect(page.getByTestId('replan-prompt')).toBeVisible({
+    timeout: 10_000,
+  })
+  await page.getByTestId('replan-prompt-replan').click()
+  await expect(page.getByTestId('replan-prompt')).toHaveCount(0)
+
+  await expect
+    .poll(
+      async () => {
+        const snap = await adminDb
+          .collection('planRequests')
+          .where('tripId', '==', tripId)
+          .where('kind', '==', 'replan')
+          .get()
+        return snap.size
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(1)
+
+  const [requestDoc] = (
+    await adminDb
+      .collection('planRequests')
+      .where('tripId', '==', tripId)
+      .where('kind', '==', 'replan')
+      .get()
+  ).docs
+  const behindScheduleKm = requestDoc.data().replanContext?.behindScheduleKm
+  expect(typeof behindScheduleKm).toBe('number')
+  expect(behindScheduleKm).toBeGreaterThan(50)
+})
+
 test('does not prompt when within 50km of the planned stop', async ({
   page,
   context,

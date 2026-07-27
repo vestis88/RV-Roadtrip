@@ -98,6 +98,11 @@ export function useExecutionMode(
         completedRefPaths: [],
         remainingEndDate: trip.settings.endDate,
         remainingEndPoint: trip.settings.endPoint,
+        // Distinguishes this from a voluntary "Request changes" edit so the
+        // replan asks for an easy first day instead of pacing it the same
+        // as the rest of the remainder (bug fix, reported 2026-07-27 — see
+        // replanTrip.ts's notesFreeText construction).
+        ...(behindKm != null ? { behindScheduleKm: behindKm } : {}),
       },
     })
     setBehindKm(null)

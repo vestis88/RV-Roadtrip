@@ -21,6 +21,10 @@ export interface ReplanContext {
   remainingEndPoint: NamedPoint
   changeRequestText?: string
   lockedDayIds?: string[]
+  // Set when this replan was triggered by the execution-mode "you're behind
+  // plan" prompt, rather than a voluntary "Request changes" edit — see the
+  // notesFreeText construction below for why this matters.
+  behindScheduleKm?: number
 }
 
 /**
@@ -79,8 +83,30 @@ export async function runReplan(
     startPoint: currentLocationPoint,
     endPoint: context.remainingEndPoint,
   }
-  const notesFreeText = context.changeRequestText
-    ? `${trip.notes.freeText}\n\nChange request for the remainder of the trip: ${context.changeRequestText}`
+  // Bug fix, reported 2026-07-27: the outline phase's pacing rule computes
+  // one flat target distance across the WHOLE remainder (total remaining
+  // distance / remaining days) with a relaxed cap only on the trip's final
+  // 2 days — nothing made day 1 of a remainder any easier. So a traveler
+  // who's fallen behind (same remaining distance, now fewer days to cover
+  // it in) got a HIGHER target distance, and the very first suggested day
+  // could land at or above that inflated pace — recreating the "behind
+  // schedule" condition the replan exists to fix. Distinguishing this from
+  // a voluntary "Request changes" edit lets the prompt ask for an easy,
+  // short first day specifically, mirroring the existing final-days
+  // relaxation but at the start instead of the end.
+  const extraNotes: string[] = []
+  if (context.changeRequestText) {
+    extraNotes.push(
+      `Change request for the remainder of the trip: ${context.changeRequestText}`,
+    )
+  }
+  if (context.behindScheduleKm) {
+    extraNotes.push(
+      `The traveler is currently ${Math.round(context.behindScheduleKm)}km behind the original plan, and this remainder starts from their real current location (not a planned stop) after they've already been driving today. The FIRST day of this remainder must be an easy, short day to a realistic nearby stop — at or below the remainder's own average daily distance, never stretched to catch up. Making up lost time should happen gradually across the later days of the remainder, not by extending today's drive.`,
+    )
+  }
+  const notesFreeText = extraNotes.length
+    ? `${trip.notes.freeText}\n\n${extraNotes.join('\n\n')}`
     : trip.notes.freeText
 
   const skeleton = await planTrip({

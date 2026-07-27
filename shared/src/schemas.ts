@@ -272,6 +272,12 @@ export const planRequestSchema = z.object({
       remainingEndPoint: namedPointSchema,
       changeRequestText: z.string().optional(),
       lockedDayIds: z.array(z.string()).optional(),
+      // Set when this replan was triggered by the execution-mode "you're
+      // behind plan" prompt (bug fix, reported 2026-07-27) — distinguishes
+      // it from a voluntary "Request changes" edit so the outline phase can
+      // be told the remainder's first day needs to be an easy catch-up day,
+      // not paced the same as the rest of the remainder.
+      behindScheduleKm: z.number().positive().optional(),
     })
     .optional(),
   // Set on a 'full' request to pause after the highlights phase for review
