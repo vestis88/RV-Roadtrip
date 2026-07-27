@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import type { Trip } from '@rv/shared'
-import { db } from '../lib/firebase'
+import { auth, db } from '../lib/firebase'
 import { useTripStore } from '../store/tripStore'
 
 export function useTrip(tripId: string | null) {
@@ -18,21 +18,28 @@ export function useTrip(tripId: string | null) {
         }
       },
       (error) => {
-        console.error('[useTrip] onSnapshot error', tripId, error)
+        console.error(
+          '[useTrip] onSnapshot error',
+          tripId,
+          'currentUid=',
+          auth.currentUser?.uid,
+          error,
+        )
         // A permission-denied read means this browser's anonymous auth
-        // identity is no longer a recognized member of the stored trip —
-        // e.g. Firebase Auth's session was cleared independently of the
-        // `tripId` in localStorage (two separate storage mechanisms that
-        // can fall out of sync). Without recovery, the app freezes forever
-        // on whatever was last cached, with no way for the user to fix it
-        // short of clearing all site data themselves. Self-heal by
-        // dropping the now-inaccessible trip ID and starting fresh — guard
-        // against a reload loop if this somehow keeps happening.
+        // identity is not a recognized member of the stored trip. This can
+        // legitimately happen once (e.g. Firebase Auth's session was
+        // cleared independently of the `tripId` in localStorage), so it's
+        // worth one automatic recovery attempt rather than freezing forever
+        // on stale cached data. But it must NEVER attempt more than once
+        // per tab session — if the same failure recurs (e.g. a stuck
+        // multi-tab persistence lock from another open tab, or a genuinely
+        // broken auth session), repeatedly reloading traps the user in an
+        // unusable loop, which is worse than the original silent freeze.
         if (
           error.code === 'permission-denied' &&
-          sessionStorage.getItem('recoveredFromPermissionDenied') !== tripId
+          sessionStorage.getItem('permissionRecoveryAttempted') !== 'true'
         ) {
-          sessionStorage.setItem('recoveredFromPermissionDenied', tripId)
+          sessionStorage.setItem('permissionRecoveryAttempted', 'true')
           localStorage.removeItem('tripId')
           window.location.reload()
         }
