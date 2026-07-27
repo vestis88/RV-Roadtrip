@@ -6,6 +6,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Baked in at build time so the deployed app can show travelers when the
+  // running build was produced (see SettingsScreen's "App build" line).
+  define: {
+    __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     tailwindcss(),

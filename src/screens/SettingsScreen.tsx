@@ -295,6 +295,13 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           </p>
         )}
       </div>
+
+      <p
+        className="text-xs text-neutral-400 dark:text-neutral-500"
+        data-testid="app-build-time"
+      >
+        App build: {new Date(__APP_BUILD_TIME__).toLocaleString()}
+      </p>
     </div>
   )
 }
