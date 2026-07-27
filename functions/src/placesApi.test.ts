@@ -152,7 +152,7 @@ describe('enrichRestaurantsForMeal', () => {
     blurb: 'Good food.',
   }))
 
-  it('resolves exactly 3 restaurants for a meal, each with rating and a maps link', async () => {
+  it('resolves exactly 3 restaurants for a meal, each with rating, a maps link, and a photo', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
@@ -170,6 +170,10 @@ describe('enrichRestaurantsForMeal', () => {
     for (const restaurant of restaurants) {
       expect(restaurant.rating).toBeGreaterThanOrEqual(3.8)
       expect(restaurant.googleMapsUrl).toMatch(/^https:\/\//)
+      // Regression: restaurants used to be built without photoUrl at all
+      // (only activities carried it through), so every meal card silently
+      // rendered without a photo.
+      expect(restaurant.photoUrl).toMatch(/^https:\/\//)
       expect(restaurant.meal).toBe('dinner')
     }
   })

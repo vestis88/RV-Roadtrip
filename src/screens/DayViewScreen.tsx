@@ -272,6 +272,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                photoUrl={restaurant.photoUrl}
                 status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
@@ -314,6 +315,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                photoUrl={restaurant.photoUrl}
                 status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>
@@ -356,6 +358,7 @@ export function DayViewScreen() {
                 ratingCount={restaurant.ratingCount}
                 blurb={restaurant.blurb}
                 googleMapsUrl={restaurant.googleMapsUrl}
+                photoUrl={restaurant.photoUrl}
                 status={restaurant.status}
                 selected={selectedPlace?.id === testId}
                 onTap={() =>

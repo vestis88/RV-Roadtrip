@@ -164,6 +164,7 @@ export const restaurantSchema = z.object({
   rating: z.number().min(0).max(5).optional(),
   ratingCount: z.number().int().nonnegative().optional(),
   googleMapsUrl: z.string().url().optional(),
+  photoUrl: z.string().url().optional(),
   priceLevel: z.number().int().min(0).max(4).optional(),
   cuisine: z.string().optional(),
   blurb: z.string(),
