@@ -22,8 +22,8 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 | Maps | Google Maps JavaScript API |
 | Place data | Google Places API (New) |
 | Routing | Google Routes API |
-| AI planning | Claude API (claude-sonnet-4-6), called ONLY from Firebase Cloud Functions |
-| Repo | GitHub, CI via GitHub Actions → Firebase deploy |
+| AI planning | Claude API (`claude-sonnet-5` — switched from `claude-sonnet-4-6`; cheaper under intro pricing through 2026-08-31, same 1M context), called ONLY from Firebase Cloud Functions |
+| Repo | GitHub, CI via GitHub Actions → Firebase deploy. Fully automated: Workload Identity Federation (keyless GCP auth, no service-account JSON key — blocked by org policy) authenticates the deploy job; push to `main` or the working branch builds, tests (incl. E2E against the Firebase Emulator Suite), and deploys automatically. No manual `firebase deploy` needed. |
 | Cloud region | `europe-west1` for Firestore and all Cloud Functions (set via `setGlobalOptions` in `functions/src/index.ts`). Do NOT use `europe-north2` (Stockholm) — Cloud Functions triggers are not supported there, causes deploy failures. |
 
 ---
@@ -154,7 +154,18 @@ planRequests/{requestId}                // write-only queue for Cloud Functions
 
 ## 5. PACING ALGORITHM (the "no monster last day" rule)
 
-Implemented inside the Claude Planning Prompt + validated in code:
+**Revised from v1.0.** The original design (below, kept for history) hard-failed the *entire* generated plan whenever any day exceeded 1.4× the trip's own computed average distance — an internal artifact of that specific route, not a constraint the traveler actually asked for. In production this rejected legitimate plans (e.g. a day that needed extra driving to reach a worthwhile stop) with no way to accept the tradeoff, and raising `maxDriveHoursPerDay` in Settings did nothing because that field was never checked at all.
+
+**Current design:**
+1. The 1.4×/1.0×-of-target shape below is still given to Claude as *generation guidance* (Section 6.1's outline prompt) — a soft aim, not a post-hoc gate.
+2. The only **hard** validation (`functions/src/pacingValidator.ts`) left after generation:
+   - No day's actual resolved drive duration may exceed **1.5 × the traveler's own `maxDriveHoursPerDay`** (some tolerance for traffic/rounding) — this is the one real constraint the user set, so it's the one that's enforced.
+   - Rest days must stay at the previous day's overnight (a genuine structural bug if violated, not a pacing tradeoff) — unchanged.
+3. Every day's `highlightReason` (see 6.1) is persisted and shown in the Day View, so a day that's longer than the trip's own average is *explained*, not silently rejected or silently allowed with no context.
+4. If the hard check still fails, the plan generation fails with a clear error (never show a bad plan) — same behavior as before, just gated on the right thing.
+
+<details>
+<summary>Original v1.0 design (superseded, kept for history)</summary>
 
 1. Compute total route distance (Routes API, start → mandatory waypoints → end).
 2. Available drive days = total days − rest days (1 per `restDayFrequency`) − extra-time days Claude assigns to standout places.
@@ -162,15 +173,29 @@ Implemented inside the Claude Planning Prompt + validated in code:
 4. Code-side validator checks every generated plan against rule 3. If violated → automatic one-shot retry with violation fed back to Claude → if still violated, mark plan `error` with details (never show a bad plan).
 5. Rest days are placed in high-interest locations, never in transit towns.
 
+</details>
+
 ---
 
 ## 6. CLAUDE PROMPT CONTRACTS (Cloud Functions)
 
 Three prompt templates live in `functions/src/prompts/`. All must demand **JSON-only output** matching a zod schema; parse with `JSON.parse` after stripping code fences; on schema failure retry once with the error appended.
 
-### 6.1 `planTrip` prompt — inputs
-- All of `settings` + the full `notes.freeText` (ALWAYS include notes — this is the user's requirement that the text file is "checked at every update")
-- Instruction block: role = expert European tour guide specializing in RV travel and hidden gems; respect pacing rules (Section 5); prefer `preferredCountries`; match `interests` and kids' ages; assign `extraTimeReason` where a place deserves >1 day; place rest days per settings; choose overnight stops near campsites; for each day propose 5 activities (mix of famous + hidden gems, flag kid-friendly) and 3 restaurants per meal — as NAME + TOWN + CATEGORY only (Places API resolves the details, ratings and links afterwards; Claude must not invent ratings or URLs).
+### 6.1 `planTrip` — **revised: now three sequential Claude calls, not one**
+
+**Original design (superseded):** a single Claude call did curation, route-scheduling, and day-by-day detail all at once. Two problems this caused in production: (a) a single call covering a long/multi-week trip could exceed the Anthropic SDK's ~10-minute non-streaming guard, and (b) doing curation and scheduling in the same pass biased route selection toward whatever town was geographically closest to the direct line — interests only ever influenced which *activities* got picked in towns already locked in, never *which towns* the route passed through. So "plan the best route for our interests" wasn't actually implemented, even though interests were an input.
+
+**Current design** (`functions/src/prompts/planTrip.ts`, `planTripPrompt.ts`, `planTripSchema.ts`):
+
+1. **Highlights phase** (`buildRegionHighlightsPrompt`) — pure curation, no dates/pacing involved. Given `settings` + `notes.freeText`, Claude reasons region-by-region about what's genuinely worth seeing for these travelers' interests and returns a ranked shortlist per region: `must-see` / `worth-a-detour` / `nice-if-convenient`, each with a one-sentence "why". Deliberately generous — more candidates than any one trip could fit.
+2. **Outline phase** (`buildRouteOutlinePrompt`) — given the highlights shortlist, *selects* from it (prioritizing must-sees) and sequences the selections into an actual day-by-day route from the real `startPoint` to the real `endPoint`, balancing attraction quality against time remaining and overall heading. Free to skip lower-priority candidates or add a plain connecting overnight where two highlights are too far apart for one day's drive. Every day gets a required `highlightReason` (why this town, tied to interests/notes — forces justification instead of defaulting to "closest on the way"). This is where pacing/global-routing correctness is solved, with the whole trip in view, same as the old single call.
+3. **Detail phase** (`buildChunkDetailPrompt`, chunked) — the route is split into fixed-size chunks (7 days each); each chunk gets a separate call, given the full outline for context but only asked to fill in that chunk's 5 activities + 9 restaurants (NAME + TOWN + CATEGORY only — Places API resolves details/ratings/links afterwards, Claude must not invent them) and a day `summary` + optional `extraTimeReason`. Cannot redirect the route the outline already committed to.
+
+Every individual call stays small regardless of trip length — this is what actually fixed the 10-minute-guard problem, not just raising `max_tokens`. `onProgress` callbacks report which phase is running (`{phase: 'highlights'}` / `{phase: 'outline'}` / `{phase: 'detail', chunkIndex, chunkCount}`) so the UI can show real progress instead of a bare "generating" spinner.
+
+All three calls: JSON-only output, zod-validated, one retry on parse/schema failure with the error fed back to Claude.
+
+**Known gap (see Section 11):** none of this is currently resumable — a failure at any phase (including the final pacing check, which runs after all Places/Routes enrichment too) discards everything and a retry redoes all three Claude phases plus all Places/Routes lookups from zero.
 
 ### 6.2 `replanTrip` prompt — extra inputs
 - Current GPS location, today's date, list of completed/skipped items, remaining end date/point. Instruction: preserve completed history, re-pace the remainder under the same rules.
@@ -180,6 +205,8 @@ Three prompt templates live in `functions/src/prompts/`. All must demand **JSON-
 
 ### 6.4 Places enrichment (code, not Claude)
 For each Claude-proposed name+town: Places Text Search → take top match within 30 km of the day's route → fetch rating, ratingCount, googleMapsUri, photo, opening hours, priceLevel. If no match ≥3.8 rating with ≥50 reviews, drop it and backfill from Places Nearby Search by category so the counts (5 activities, 3×3 restaurants) always hold.
+
+**Gotcha (fixed):** the Places API (New) rejects `point_of_interest` as an `includedTypes` value for `searchNearby` — it's a Text-Search-only generic type. The `other` activity category used to map to it, so any "other"-category activity that missed the quality bar on text search and fell back to nearby search 400'd and failed the *whole* plan generation. Fixed by omitting the type filter entirely for that category instead of sending an invalid one (`functions/src/placesApi.ts`).
 
 ---
 
@@ -359,5 +386,26 @@ This completes Phase 5 (Day view & execution).
 - [ ] Same plan live on two phones (T-07, T-09)
 - [ ] iPad compatible / responsive (T-23, T-28)
 - [ ] GitHub + Firebase (T-01–T-03)
+
+---
+
+## 11. BACKLOG — discussed, not yet implemented
+
+Recommendation (agreed with the user 2026-07-27): land the current baseline as a PR first, then work these incrementally rather than bolting them onto an ongoing bugfix session. Each is a real, separately-scoped design problem.
+
+- [ ] **Multi-trip support ("trip library")** — today there is no "New Trip" button at all: `useTripSession` (`src/hooks/useTripSession.ts`) creates exactly one trip per browser on first load and permanently reuses it via `localStorage.tripId`; the only way to start a second trip today is manually clearing that key. Needs:
+  - A "New Trip" action that calls the existing `createTrip` callable again (already reusable server-side — `createTripForUser` in `functions/src/trips.ts` — this part needs no backend change) and switches the active `tripId`.
+  - A way to list "my trips": membership today is only a one-way subcollection (`trips/{tripId}/members/{uid}`, checked by `firestore.rules`'s `isMember()`), with no reverse index from uid → trips. Cleanest fix: maintain `users/{uid}/trips/{tripId}` (minimal doc, e.g. `{joinedAt}`) written in the same transaction as the existing `members` doc in both `createTripForUser` and `joinTripByCode`, with a rule `allow read: if request.auth.uid == uid`. A library screen queries that collection, then fetches each trip's `meta`/`planMeta` to render a list (trip count is small — per-trip reads are fine).
+  - A trip switcher in `AppShell`/nav.
+
+- [ ] **Resumable / checkpointed plan generation** — `generatePlan.ts` currently builds the whole plan in memory (all three `planTrip` phases, then every day's Places/Routes resolution in `resolveSkeletonDay`) and writes to Firestore exactly once, in a single batch, at the very end. Any failure at any point — including the pacing check, which runs *after* all Places/Routes enrichment — discards everything, and "Retry" reruns the entire pipeline from zero: all three Claude phases (highlights, outline, every detail chunk) plus every Places/Routes lookup, even for days that had already resolved fine. This directly compounds the cost/timeout problems that motivated the chunked-generation redesign (Section 6.1) — a late failure on a long trip is the *expensive* kind to redo. Needs its own design pass: what gets persisted after each phase (raw highlights/outline/chunk JSON? resolved per-day docs incrementally instead of one final batch?), and how a retry decides "resume from the last completed step" vs. "settings changed since last attempt, start over."
+
+- [ ] **Interactive / transparent route planning** — current generation is a black box: settings in, finished plan out, no visibility into *why* particular towns were chosen beyond the newly-added per-day `highlightReason` (Section 6.1). The user's ask: surface the planning stage's reasoning and let the traveler choose between options (e.g. candidate highlights per region, or alternate routes trading off drive time vs. attractions) rather than accepting whatever the single generation run committed to. Explicitly flagged as "a hard nut to crack" — needs a dedicated UX design pass (what to expose, at what granularity, without overwhelming the user with route-planning minutiae) before implementation, not a reactive bolt-on.
+
+- [x] **GPS-based execution tracking** — confirmed already implemented, not a gap: `useExecutionMode` (`src/hooks/useExecutionMode.ts`, mounted trip-wide in `AppShell`) polls `navigator.geolocation` every 30 min while the trip is active, compares position to today's planned overnight stop, and prompts a replan past the 50km threshold (Section 7.4). No action needed.
+
+- [x] **Diary export** — confirmed already implemented (`src/screens/DiaryScreen.tsx`), not a gap: native share sheet with a text-file download fallback. Noted here only because it was re-requested without realizing it existed — if the format itself (currently a bare `date — type: note` line per entry) needs to be richer, that's a small follow-up, not a new feature.
+
+---
 
 **END OF MASTER PLAN — keep this file in the repo root as `MASTER_PLAN.md` and update checkboxes with every commit.**
