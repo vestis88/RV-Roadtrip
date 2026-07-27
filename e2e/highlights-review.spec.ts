@@ -7,6 +7,9 @@ const PROJECT_ID = 'demo-rv-trip-planner'
 if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
 const adminDb = getFirestore()
 
+// No lat/lng on these candidates on purpose — that's the shape the panel
+// gets whenever server-side geocoding degraded (no Places key, a town that
+// didn't resolve), and it must still render, just without detour figures.
 const FIXTURE_HIGHLIGHTS = {
   regions: [
     {
@@ -31,7 +34,64 @@ const FIXTURE_HIGHLIGHTS = {
   ],
 }
 
-async function getTripId(page: import('@playwright/test').Page): Promise<string> {
+// A long enough "why" that a single-line CSS truncation would visibly eat
+// most of it — the exact failure the traveler hit on a real phone.
+const LONG_WHY =
+  "Sitting at the head of a long lake under forested ridges, this town pairs the 1994 Olympic ski-jump arena and bobsleigh track with Maihaugen, one of Europe's largest open-air museums. The Hunderfossen family park is a short drive north. For a family with an eight-year-old who likes castles and being outdoors, it is the rare stop where the adults and the kid both get a full day they wanted."
+
+// Coordinates chosen to be hand-checkable against a start/end laid out along
+// a single meridian below: the must-see and one candidate sit exactly on the
+// line, one candidate sits off to the side.
+const FIXTURE_LOCATED_HIGHLIGHTS = {
+  regions: [
+    {
+      region: 'Meridian country',
+      country: 'NO',
+      reasoning: 'A synthetic corridor with predictable geometry.',
+      candidateStops: [
+        {
+          town: 'Midpoint',
+          country: 'NO',
+          why: LONG_WHY,
+          priority: 'must-see',
+          lat: 52,
+          lng: 10,
+        },
+        {
+          town: 'On The Line',
+          country: 'NO',
+          why: 'Sits exactly on the route between the start and the must-see.',
+          priority: 'worth-a-detour',
+          lat: 51,
+          lng: 10,
+        },
+        {
+          town: 'Off To The Side',
+          country: 'NO',
+          why: 'A degree east of the corridor, so it costs real extra driving.',
+          priority: 'worth-a-detour',
+          lat: 51,
+          lng: 11,
+        },
+        {
+          town: 'Unlocatable',
+          country: 'NO',
+          why: 'Geocoding never resolved this one, so it has no coordinates.',
+          priority: 'nice-if-convenient',
+        },
+      ],
+    },
+  ],
+}
+
+const MERIDIAN_ENDPOINTS = {
+  'settings.startPoint': { name: 'South end', lat: 50, lng: 10 },
+  'settings.endPoint': { name: 'North end', lat: 54, lng: 10 },
+}
+
+async function getTripId(
+  page: import('@playwright/test').Page,
+): Promise<string> {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
   const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
@@ -65,12 +125,12 @@ test('the highlights review panel renders regions, supports re-ranking, removing
   await expect(page.getByTestId('highlights-region-0')).toContainText(
     'Dramatic scenery',
   )
-  await expect(
-    page.getByTestId('highlights-stop-0-0'),
-  ).toContainText('Lillehammer')
-  await expect(
-    page.getByTestId('highlights-stop-priority-0-0'),
-  ).toHaveText('Nice if convenient')
+  await expect(page.getByTestId('highlights-stop-0-0')).toContainText(
+    'Lillehammer',
+  )
+  await expect(page.getByTestId('highlights-stop-priority-0-0')).toHaveText(
+    'Nice if convenient',
+  )
 
   // Promote Lillehammer up two tiers to must-see.
   await page.getByTestId('highlights-stop-up-0-0').click()
@@ -84,21 +144,9 @@ test('the highlights review panel renders regions, supports re-ranking, removing
   // Already at the top tier — further "up" clicks must be a no-op.
   await expect(page.getByTestId('highlights-stop-up-0-0')).toBeDisabled()
 
-  // Reorder within the region via drag-and-drop: drag Lillehammer (index 0)
-  // onto Geiranger (index 1) — my component tracks drag source via a ref,
-  // not event.dataTransfer, so plain dragstart/drop events are enough.
-  await page.getByTestId('highlights-stop-0-0').dispatchEvent('dragstart')
-  await page.getByTestId('highlights-stop-0-1').dispatchEvent('drop')
-  // Geiranger is now first.
-  await expect(page.getByTestId('highlights-stop-0-0')).toContainText(
-    'Geiranger',
-  )
-  await expect(page.getByTestId('highlights-stop-0-1')).toContainText(
-    'Lillehammer',
-  )
-
-  // Remove Geiranger (now at index 0), leaving only Lillehammer.
-  await page.getByTestId('highlights-stop-remove-0-0').click()
+  // Remove Geiranger (index 1 — nothing reorders any more), leaving only
+  // Lillehammer.
+  await page.getByTestId('highlights-stop-remove-0-1').click()
   await expect(page.getByTestId('highlights-stop-0-0')).toContainText(
     'Lillehammer',
   )
@@ -143,5 +191,95 @@ test('the highlights review panel renders regions, supports re-ranking, removing
   )
   expect(data.editedHighlights.regions[0].candidateStops[0].priority).toBe(
     'must-see',
+  )
+})
+
+test('the panel shows a map and no drag-to-reorder affordance at all', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+
+  await adminDb.collection('trips').doc(tripId).update({
+    'planMeta.status': 'awaiting-highlights-review',
+    'planMeta.pendingHighlights': FIXTURE_HIGHLIGHTS,
+  })
+
+  await page.getByTestId('highlights-review-panel').waitFor()
+
+  // The map container mounts even in this sandbox, where the Google Maps JS
+  // API itself is network-blocked (see e2e/map.spec.ts) — so this asserts the
+  // panel reserves and renders the map slot, not that tiles paint.
+  await expect(page.getByTestId('highlights-map')).toBeVisible()
+
+  // Native HTML5 drag-and-drop never worked on a touch device, so both the
+  // behaviour and the grip glyph that advertised it are gone.
+  const panel = page.getByTestId('highlights-review-panel')
+  await expect(panel.locator('[draggable="true"]')).toHaveCount(0)
+  await expect(panel.locator('.cursor-grab')).toHaveCount(0)
+  await expect(panel.getByText('⠿')).toHaveCount(0)
+})
+
+test('a stop description is shown in full rather than truncated to one line', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      ...MERIDIAN_ENDPOINTS,
+      'planMeta.status': 'awaiting-highlights-review',
+      'planMeta.pendingHighlights': FIXTURE_LOCATED_HIGHLIGHTS,
+    })
+
+  await page.getByTestId('highlights-review-panel').waitFor()
+
+  const firstStop = page.getByTestId('highlights-stop-0-0')
+  // The whole multi-sentence description is in the DOM …
+  await expect(firstStop).toContainText(LONG_WHY)
+  // … and nothing inside the row clips it to a single ellipsised line.
+  await expect(firstStop.locator('.truncate')).toHaveCount(0)
+})
+
+test('each stop shows its estimated detour off the ideal route, and it updates live', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      ...MERIDIAN_ENDPOINTS,
+      'planMeta.status': 'awaiting-highlights-review',
+      'planMeta.pendingHighlights': FIXTURE_LOCATED_HIGHLIGHTS,
+    })
+
+  await page.getByTestId('highlights-review-panel').waitFor()
+
+  // Backbone is start (50,10) → the must-see (52,10) → end (54,10): a
+  // straight meridian.
+  await expect(page.getByTestId('highlights-stop-detour-0-0')).toHaveText(
+    'On route',
+  )
+  // (51,10) lies exactly on the first leg — nothing extra to drive.
+  await expect(page.getByTestId('highlights-stop-detour-0-1')).toHaveText(
+    '≈+0 km detour',
+  )
+  // (51,11) is a degree of longitude east of the corridor; the cheapest
+  // insertion into leg (50,10)→(52,10) costs ~40 km.
+  await expect(page.getByTestId('highlights-stop-detour-0-2')).toHaveText(
+    '≈+40 km detour',
+  )
+  // No coordinates means no figure can honestly be shown — not "+0 km".
+  await expect(page.getByTestId('highlights-stop-detour-0-3')).toHaveCount(0)
+
+  // Promoting a stop to must-see puts it INTO the backbone, so it stops
+  // being a detour and starts being part of what everything else is
+  // measured against.
+  await page.getByTestId('highlights-stop-up-0-2').click()
+  await expect(page.getByTestId('highlights-stop-detour-0-2')).toHaveText(
+    'On route',
   )
 })

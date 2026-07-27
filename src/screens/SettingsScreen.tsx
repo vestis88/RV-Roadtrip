@@ -319,6 +319,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         <HighlightsReviewPanel
           tripId={tripId}
           pendingHighlights={trip.planMeta.pendingHighlights}
+          startPoint={trip.settings.startPoint}
+          endPoint={trip.settings.endPoint}
         />
       )}
 
