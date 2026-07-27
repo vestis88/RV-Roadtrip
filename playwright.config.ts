@@ -3,7 +3,13 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
-  retries: 0,
+  // CI runs 27+ specs sequentially against one shared webServer + Firestore
+  // emulator on a 2-core runner — an occasional page-load hiccup under that
+  // contention shows up as a single spec blowing the 30s test timeout with
+  // no code-level cause (see the countries.spec.ts flake this addresses).
+  // A retry re-runs only the failed spec and is reported as "flaky" rather
+  // than silently green, so a genuine regression still fails after 3 tries.
+  retries: process.env.CI ? 2 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
   use: {
