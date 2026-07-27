@@ -87,7 +87,14 @@ function AppShell() {
 
   return (
     <APIProvider apiKey={mapsApiKey}>
-      <main className="surface flex min-h-svh flex-col">
+      {/* A fixed h-svh (not min-h-svh) so this flex column has a definite
+       * height for its flex-1 content pane to actually fill — Chromium will
+       * grow a flex-1 child to fill a min-height container's leftover space,
+       * but WebKit/Safari (i.e. real iPhones) does not reliably do the same,
+       * so the map/day-view screens' own `h-full` resolved to ~0px there and
+       * Google Maps silently rendered nothing. Content taller than one
+       * viewport still scrolls fine via the inner overflow-y-auto pane. */}
+      <main className="surface flex h-svh flex-col">
         {loading || !trip || !tripId ? (
           <div className="mx-auto max-w-2xl px-4 py-10 text-center">
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 dark:text-white">
