@@ -4,7 +4,6 @@ import { ensureSignedIn, functions } from '../lib/firebase'
 
 export function useTripSession() {
   const [tripId, setTripId] = useState<string | null>(null)
-  const [shareCode, setShareCode] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -42,7 +41,6 @@ export function useTripSession() {
       if (cancelled) return
       localStorage.setItem('tripId', data.tripId)
       setTripId(data.tripId)
-      setShareCode(data.shareCode)
     }
 
     run().catch((error: unknown) => console.error('Trip session failed', error))
@@ -51,5 +49,5 @@ export function useTripSession() {
     }
   }, [])
 
-  return { tripId, shareCode }
+  return { tripId }
 }

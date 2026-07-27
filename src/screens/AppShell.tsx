@@ -28,7 +28,7 @@ function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
 }
 
 function AppShell() {
-  const { tripId, shareCode } = useTripSession()
+  const { tripId } = useTripSession()
   const { trip, loading } = useTrip(tripId)
   const [nameDraft, setNameDraft] = useState('')
   const [isEditingName, setIsEditingName] = useState(false)
@@ -72,12 +72,12 @@ function AppShell() {
                   onFocus={() => setIsEditingName(true)}
                   onBlur={saveName}
                 />
-                {shareCode && (
+                {trip.meta.shareCode && (
                   <p
                     className="text-sm text-neutral-500 dark:text-neutral-400"
                     data-testid="share-code"
                   >
-                    Share code: {shareCode}
+                    Share code: {trip.meta.shareCode}
                   </p>
                 )}
               </div>
