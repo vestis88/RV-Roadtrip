@@ -16,13 +16,17 @@ const ACTIVITIES_PER_DAY = 5
 const RESTAURANTS_PER_MEAL = 3
 const MAX_BACKFILL_ATTEMPTS = 8
 
-const ACTIVITY_PLACE_TYPE: Record<ActivityCategory, string> = {
+// Places API (New) rejects 'point_of_interest'/'establishment' as an
+// includedTypes value for searchNearby (they're Text-Search-only generic
+// types) — 'other' maps to undefined so nearbySearch omits the type filter
+// entirely instead of sending an invalid value and getting a 400.
+const ACTIVITY_PLACE_TYPE: Record<ActivityCategory, string | undefined> = {
   sight: 'tourist_attraction',
   hike: 'hiking_area',
   museum: 'museum',
   beach: 'beach',
   playground: 'playground',
-  other: 'point_of_interest',
+  other: undefined,
 }
 
 const MEAL_PLACE_TYPE: Record<Meal, string> = {
@@ -121,14 +125,17 @@ async function textSearch(
     },
   )
   if (!response.ok) {
-    throw new Error(`Places text search failed with ${response.status}`)
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `Places text search failed with ${response.status}: ${body.slice(0, 500)}`,
+    )
   }
   const data = (await response.json()) as PlacesSearchResponse
   return (data.places ?? []).map((place) => mapRawPlace(place, apiKey))
 }
 
 async function nearbySearch(
-  includedType: string,
+  includedType: string | undefined,
   near: LatLng,
   apiKey: string,
 ): Promise<PlaceCandidate[]> {
@@ -142,7 +149,7 @@ async function nearbySearch(
         'X-Goog-FieldMask': FIELD_MASK,
       },
       body: JSON.stringify({
-        includedTypes: [includedType],
+        ...(includedType ? { includedTypes: [includedType] } : {}),
         maxResultCount: 10,
         locationRestriction: {
           circle: {
@@ -154,7 +161,10 @@ async function nearbySearch(
     },
   )
   if (!response.ok) {
-    throw new Error(`Places nearby search failed with ${response.status}`)
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `Places nearby search failed with ${response.status}: ${body.slice(0, 500)}`,
+    )
   }
   const data = (await response.json()) as PlacesSearchResponse
   return (data.places ?? []).map((place) => mapRawPlace(place, apiKey))
@@ -162,7 +172,7 @@ async function nearbySearch(
 
 async function resolveOne(
   query: string,
-  fallbackType: string,
+  fallbackType: string | undefined,
   near: LatLng,
   excludeIds: Set<string>,
   apiKey: string,

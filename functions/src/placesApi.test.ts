@@ -96,6 +96,42 @@ describe('enrichActivities', () => {
       /GOOGLE_PLACES_API_KEY/,
     )
   })
+
+  // Regression test for a real production 400: the Places API (New) rejects
+  // 'point_of_interest' as an includedTypes value for searchNearby (it's a
+  // Text-Search-only generic type). The 'other' category's nearby-search
+  // fallback must omit includedTypes entirely rather than send it.
+  it('omits includedTypes from the nearby-search fallback for the "other" category', async () => {
+    const otherProposed: ProposedActivity[] = [
+      {
+        name: 'Mystery spot',
+        town: 'Lillehammer',
+        category: 'other',
+        kidFriendly: true,
+        blurb: 'A curious find.',
+      },
+    ]
+    const fetchMock = vi
+      .fn()
+      // text search: below quality bar, forces the nearby-search fallback
+      .mockImplementationOnce(() =>
+        jsonResponse({ places: [goodPlace({ rating: 3.0, userRatingCount: 10 })] }),
+      )
+      .mockImplementationOnce(() => jsonResponse({ places: [goodPlace()] }))
+      // remaining backfill attempts (only 1 of 5 activities was proposed)
+      .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const activities = await enrichActivities(otherProposed, NEAR)
+
+    expect(activities.length).toBeGreaterThanOrEqual(1)
+    const nearbySearchCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('searchNearby'),
+    )
+    expect(nearbySearchCall).toBeDefined()
+    const body = JSON.parse(nearbySearchCall![1].body as string) as Record<string, unknown>
+    expect(body).not.toHaveProperty('includedTypes')
+  })
 })
 
 describe('enrichRestaurantsForMeal', () => {
