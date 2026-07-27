@@ -91,6 +91,27 @@ test('add-custom-stop form requires a name and description', async ({
   await expect(page.getByTestId('add-custom-stop-form')).toBeVisible()
 })
 
+test('selecting an activity gives it a distinct look from tapping it', async ({
+  page,
+}) => {
+  await createTripWithPlan(page)
+  await page.goto('/map/day/2026-07-10')
+  await page.getByTestId('day-view').waitFor()
+
+  const card = page.getByTestId('activity-card-0')
+  await expect(card).not.toHaveClass(/border-sky-600/)
+  await expect(card).not.toHaveClass(/border-orange-600/)
+
+  await page.getByTestId('activity-card-0-mark-selected').click()
+  await expect(card).toHaveClass(/border-sky-600/)
+
+  // Tap-to-view is a separate, distinct highlight (orange) from the
+  // data-level "selected" state (blue) — selecting alone must not trigger it.
+  await expect(card).not.toHaveClass(/border-orange-600/)
+  await card.click()
+  await expect(card).toHaveClass(/border-orange-600/)
+})
+
 test('request changes for this day submits a replan locking every other day', async ({
   page,
 }) => {

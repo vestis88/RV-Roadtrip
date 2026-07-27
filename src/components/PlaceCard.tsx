@@ -54,7 +54,9 @@ export function PlaceCard({
       className={`flex w-56 shrink-0 flex-col overflow-hidden rounded-lg border bg-white text-left shadow-sm dark:bg-neutral-900 ${
         selected
           ? 'border-orange-600 ring-2 ring-orange-600'
-          : 'border-neutral-200 dark:border-neutral-800'
+          : status === 'selected'
+            ? 'border-sky-600 ring-2 ring-sky-400'
+            : 'border-neutral-200 dark:border-neutral-800'
       }`}
     >
       {photoUrl ? (

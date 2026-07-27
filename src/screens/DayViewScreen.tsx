@@ -8,6 +8,7 @@ import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
+import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { markDone, markSelected, markSkipped } from '../lib/placeStatus'
 
@@ -97,46 +98,60 @@ export function DayViewScreen() {
               position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
               title={day.overnight.name}
             >
-              <span>{OVERNIGHT_ICON}</span>
+              <MarkerBadge icon={OVERNIGHT_ICON} />
             </AdvancedMarker>
 
-            {activities.map((activity, i) => (
-              <AdvancedMarker
-                key={`activity-${i}`}
-                position={{ lat: activity.lat, lng: activity.lng }}
-                title={activity.name}
-                onClick={() =>
-                  setSelectedPlace({
-                    id: `activity-card-${i}`,
-                    name: activity.name,
-                    lat: activity.lat,
-                    lng: activity.lng,
-                  })
-                }
-              >
-                <span>{CATEGORY_ICON[activity.category]}</span>
-              </AdvancedMarker>
-            ))}
+            {activities.map((activity, i) => {
+              const placeId = `activity-card-${i}`
+              return (
+                <AdvancedMarker
+                  key={`activity-${i}`}
+                  position={{ lat: activity.lat, lng: activity.lng }}
+                  title={activity.name}
+                  onClick={() =>
+                    setSelectedPlace({
+                      id: placeId,
+                      name: activity.name,
+                      lat: activity.lat,
+                      lng: activity.lng,
+                    })
+                  }
+                >
+                  <MarkerBadge
+                    icon={CATEGORY_ICON[activity.category]}
+                    selected={activity.status === 'selected'}
+                    highlighted={selectedPlace?.id === placeId}
+                  />
+                </AdvancedMarker>
+              )
+            })}
 
-            {restaurants.map((restaurant, i) => (
-              <AdvancedMarker
-                key={`restaurant-${i}`}
-                position={{ lat: restaurant.lat, lng: restaurant.lng }}
-                title={restaurant.name}
-                onClick={() =>
-                  setSelectedPlace({
-                    id: `${restaurant.meal}-card-${restaurants
-                      .filter((r) => r.meal === restaurant.meal)
-                      .indexOf(restaurant)}`,
-                    name: restaurant.name,
-                    lat: restaurant.lat,
-                    lng: restaurant.lng,
-                  })
-                }
-              >
-                <span>{RESTAURANT_ICON}</span>
-              </AdvancedMarker>
-            ))}
+            {restaurants.map((restaurant, i) => {
+              const placeId = `${restaurant.meal}-card-${restaurants
+                .filter((r) => r.meal === restaurant.meal)
+                .indexOf(restaurant)}`
+              return (
+                <AdvancedMarker
+                  key={`restaurant-${i}`}
+                  position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                  title={restaurant.name}
+                  onClick={() =>
+                    setSelectedPlace({
+                      id: placeId,
+                      name: restaurant.name,
+                      lat: restaurant.lat,
+                      lng: restaurant.lng,
+                    })
+                  }
+                >
+                  <MarkerBadge
+                    icon={RESTAURANT_ICON}
+                    selected={restaurant.status === 'selected'}
+                    highlighted={selectedPlace?.id === placeId}
+                  />
+                </AdvancedMarker>
+              )
+            })}
           </GoogleMap>
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-neutral-200 p-4 text-center text-neutral-500 dark:bg-neutral-800">

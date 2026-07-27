@@ -15,6 +15,7 @@ import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
+import { MarkerBadge } from '../components/MarkerBadge'
 
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()
@@ -198,7 +199,10 @@ export function OverviewMapScreen() {
                     title={activity.name}
                     data-testid="activity-marker"
                   >
-                    <span>{CATEGORY_ICON[activity.category]}</span>
+                    <MarkerBadge
+                      icon={CATEGORY_ICON[activity.category]}
+                      selected={activity.status === 'selected'}
+                    />
                   </AdvancedMarker>
                 ))
               })}
@@ -214,7 +218,10 @@ export function OverviewMapScreen() {
                     title={restaurant.name}
                     data-testid="restaurant-marker"
                   >
-                    <span>{RESTAURANT_ICON}</span>
+                    <MarkerBadge
+                      icon={RESTAURANT_ICON}
+                      selected={restaurant.status === 'selected'}
+                    />
                   </AdvancedMarker>
                 ))
               })}
