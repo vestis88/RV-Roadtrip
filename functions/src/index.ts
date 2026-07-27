@@ -18,3 +18,4 @@ getFirestore().settings({ ignoreUndefinedProperties: true })
 export { createTrip, joinTrip } from './trips.js'
 export { generatePlan } from './generatePlan.js'
 export { refreshCountryGuide } from './countryGuideCallable.js'
+export { getOvernightCandidates } from './overnightCandidatesCallable.js'

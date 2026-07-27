@@ -114,6 +114,30 @@ export const overnightStopSchema = z.object({
   campsiteSuggestion: z.string().optional(),
 })
 
+// Overnight-stop type & candidate selection (implemented 2026-07-27):
+// TripDay.overnight stays a single committed point (unchanged below) —
+// switching overnight stops ripples into every following day's drive leg,
+// so candidates are resolved lazily, on demand, and offered as a choice
+// that (if taken) triggers a scoped replan rather than a client-side patch.
+// Not stored on TripDay; returned directly by the getOvernightCandidates
+// callable.
+export const overnightStopCandidateSchema = z.object({
+  name: z.string(),
+  type: z.enum(['campsite', 'stellplatz', 'wild']),
+  lat: z.number(),
+  lng: z.number(),
+  country: z.string().length(2),
+  description: z.string(),
+  // 'places' = Google Places (commercial campsites); 'osm' = OpenStreetMap
+  // via Overpass (stellplatz — Places has weak-to-no coverage there); 'claude'
+  // = Claude + web search (wild camping always, stellplatz only when OSM has
+  // no coverage nearby) — surfaced in the UI so a traveler knows which
+  // suggestions are Places/OSM-verified vs. AI-suggested and worth
+  // double-checking locally.
+  source: z.enum(['places', 'osm', 'claude']),
+})
+export type OvernightStopCandidate = z.infer<typeof overnightStopCandidateSchema>
+
 export const driveLegSchema = z.object({
   fromName: z.string(),
   toName: z.string(),

@@ -45,6 +45,11 @@ export async function generateCountryGuide(input: {
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4000,
+      // See planTrip.ts's callWithRetry: Sonnet 5 runs adaptive thinking by
+      // default when this is omitted, which can exhaust max_tokens before
+      // any JSON is emitted. This is schema-constrained extraction, not
+      // open-ended reasoning, so thinking is disabled.
+      thinking: { type: 'disabled' },
       system,
       messages,
       tools: [{ type: 'web_search_20260209', name: 'web_search' }],

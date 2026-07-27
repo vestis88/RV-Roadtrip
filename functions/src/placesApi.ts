@@ -4,6 +4,7 @@ import type {
   ActivityCategory,
   LatLng,
   Meal,
+  OvernightStopCandidate,
   Restaurant,
 } from '@rv/shared'
 
@@ -380,4 +381,48 @@ export async function enrichRestaurantsForMeal(
   }
 
   return resolved.slice(0, RESTAURANTS_PER_MEAL)
+}
+
+/**
+ * Overnight-stop candidates, commercial-campsite type (implemented
+ * 2026-07-27): unlike activities/restaurants, `rv_park` and `campground`
+ * are both valid Places (New) includedTypes — rv_park specifically excludes
+ * tent-only sites, the right match for an RV, so it's searched first and
+ * campground fills in the rest. Same quality bar as activities/restaurants.
+ */
+export async function searchCampsiteCandidates(
+  near: LatLng,
+  country: string,
+  limit: number,
+): Promise<OvernightStopCandidate[]> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — campsite lookup requires real data and has no synthetic fallback.',
+    )
+  }
+
+  const seenIds = new Set<string>()
+  const candidates: OvernightStopCandidate[] = []
+  for (const placeType of ['rv_park', 'campground']) {
+    if (candidates.length >= limit) break
+    const results = await nearbySearch(placeType, near, apiKey)
+    for (const result of results) {
+      if (candidates.length >= limit) break
+      if (seenIds.has(result.id) || !meetsQualityBar(result)) continue
+      seenIds.add(result.id)
+      candidates.push({
+        name: result.name,
+        type: 'campsite',
+        lat: result.lat,
+        lng: result.lng,
+        country,
+        description: result.rating
+          ? `Rated ${result.rating.toFixed(1)} (${result.ratingCount ?? 0} reviews) on Google.`
+          : 'Commercial campsite.',
+        source: 'places',
+      })
+    }
+  }
+  return candidates
 }

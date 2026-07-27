@@ -8,6 +8,7 @@ import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
+import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { markDone, markSelected, markSkipped } from '../lib/placeStatus'
@@ -215,6 +216,14 @@ export function DayViewScreen() {
           dayId={dayId}
           dayNumber={day.index + 1}
           allDayIds={days.map((d) => d.id)}
+        />
+
+        <OvernightCandidatesPicker
+          tripId={tripId}
+          trip={trip}
+          dayId={dayId}
+          day={day}
+          priorDayIds={days.filter((d) => d.index < day.index).map((d) => d.id)}
         />
 
         {day.type === 'rest' ? (

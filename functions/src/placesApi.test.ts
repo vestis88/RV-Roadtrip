@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   enrichActivities,
   enrichRestaurantsForMeal,
+  searchCampsiteCandidates,
   type ProposedActivity,
   type ProposedRestaurant,
 } from './placesApi.js'
@@ -208,5 +209,68 @@ describe('enrichRestaurantsForMeal', () => {
     for (const name of dinnerNames) {
       expect(lunchNames.has(name)).toBe(false)
     }
+  })
+})
+
+describe('searchCampsiteCandidates', () => {
+  beforeEach(() => {
+    placeCounter = 0
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('searches rv_park then campground, deduping and capping at the limit', async () => {
+    const shared = goodPlace() // same place returned by both searches
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        jsonResponse({ places: [shared, goodPlace()] }),
+      ) // rv_park: 2 results
+      .mockImplementationOnce(() =>
+        jsonResponse({ places: [shared, goodPlace(), goodPlace()] }),
+      ) // campground: shared + 2 more
+    vi.stubGlobal('fetch', fetchMock)
+
+    const candidates = await searchCampsiteCandidates(NEAR, 'NO', 3)
+
+    expect(candidates).toHaveLength(3)
+    expect(new Set(candidates.map((c) => c.name)).size).toBe(3) // no duplicate
+    for (const candidate of candidates) {
+      expect(candidate.type).toBe('campsite')
+      expect(candidate.source).toBe('places')
+      expect(candidate.country).toBe('NO')
+    }
+    const [rvParkCall, campgroundCall] = fetchMock.mock.calls
+    expect(JSON.parse(rvParkCall[1].body as string)).toMatchObject({
+      includedTypes: ['rv_park'],
+    })
+    expect(JSON.parse(campgroundCall[1].body as string)).toMatchObject({
+      includedTypes: ['campground'],
+    })
+  })
+
+  it('drops results below the quality bar', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        jsonResponse({ places: [goodPlace({ rating: 3.0, userRatingCount: 10 })] }),
+      )
+      .mockImplementationOnce(() => jsonResponse({ places: [goodPlace()] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const candidates = await searchCampsiteCandidates(NEAR, 'NO', 3)
+
+    expect(candidates).toHaveLength(1)
+  })
+
+  it('throws when the Places API key is not configured', async () => {
+    vi.unstubAllEnvs()
+    await expect(searchCampsiteCandidates(NEAR, 'NO', 3)).rejects.toThrow(
+      /GOOGLE_PLACES_API_KEY/,
+    )
   })
 })

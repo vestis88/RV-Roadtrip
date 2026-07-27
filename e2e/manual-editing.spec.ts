@@ -130,3 +130,25 @@ test('request changes for this day submits a replan locking every other day', as
 
   await expect(page.getByTestId('request-changes-for-day-form')).toHaveCount(0)
 })
+
+test('opening "Change overnight stop" fails gracefully without Claude/Places credentials', async ({
+  page,
+}) => {
+  // CLAUDE_API_KEY/GOOGLE_PLACES_API_KEY aren't configured in this sandbox
+  // (same caveat as T-14/T-16/T-18/T-22/countries.spec.ts's refresh test) —
+  // getOvernightCandidates has no synthetic fallback by design, so this
+  // confirms the callable failing shows a clear error instead of hanging
+  // or crashing the screen.
+  await createTripWithPlan(page)
+  await page.goto('/map/day/2026-07-10')
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('change-overnight-toggle').click()
+  await expect(page.getByTestId('overnight-candidates-panel')).toBeVisible()
+  await expect(page.getByTestId('overnight-candidates-error')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  await page.getByTestId('change-overnight-cancel').click()
+  await expect(page.getByTestId('overnight-candidates-panel')).toHaveCount(0)
+})
