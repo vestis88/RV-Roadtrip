@@ -168,7 +168,7 @@ export const restaurantSchema = z.object({
   priceLevel: z.number().int().min(0).max(4).optional(),
   cuisine: z.string().optional(),
   blurb: z.string(),
-  status: z.enum(['suggested', 'selected', 'done']),
+  status: itemStatusSchema,
   doneAt: isoDateTime.optional(),
   diaryNote: z.string().optional(),
 })

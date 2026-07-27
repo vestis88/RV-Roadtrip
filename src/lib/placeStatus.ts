@@ -20,6 +20,18 @@ export async function markSelected(
   )
 }
 
+export async function markSkipped(
+  tripId: string,
+  dayId: string,
+  kind: PlaceKind,
+  placeId: string,
+) {
+  await updateDoc(
+    doc(db, 'trips', tripId, 'days', dayId, SUBCOLLECTION[kind], placeId),
+    { status: 'skipped' },
+  )
+}
+
 export async function markDone(
   tripId: string,
   dayId: string,

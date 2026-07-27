@@ -15,6 +15,7 @@ interface PlaceCardProps {
   status?: ItemStatus
   onMarkSelected?: () => void
   onMarkDone?: (note: string) => void
+  onMarkSkipped?: () => void
 }
 
 export function PlaceCard({
@@ -31,6 +32,7 @@ export function PlaceCard({
   status,
   onMarkSelected,
   onMarkDone,
+  onMarkSkipped,
 }: PlaceCardProps) {
   const [noteDraft, setNoteDraft] = useState('')
   const [addingNote, setAddingNote] = useState(false)
@@ -88,7 +90,7 @@ export function PlaceCard({
           </a>
         )}
 
-        {(onMarkSelected || onMarkDone) && (
+        {(onMarkSelected || onMarkDone || onMarkSkipped) && (
           <div className="mt-2 border-t border-neutral-100 pt-2 dark:border-neutral-800">
             <p
               data-testid={`${testId}-status`}
@@ -143,6 +145,19 @@ export function PlaceCard({
                     className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-900 dark:border-neutral-700 dark:text-white"
                   >
                     Done
+                  </button>
+                )}
+                {onMarkSkipped && (
+                  <button
+                    type="button"
+                    data-testid={`${testId}-mark-skipped`}
+                    onClick={(event) => {
+                      stop(event)
+                      onMarkSkipped()
+                    }}
+                    className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-500 dark:border-neutral-700 dark:text-neutral-400"
+                  >
+                    Skip
                   </button>
                 )}
               </div>

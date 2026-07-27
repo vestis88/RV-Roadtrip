@@ -6,8 +6,10 @@ import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail } from '../hooks/useDayDetail'
 import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
+import { AddCustomStopForm } from '../components/AddCustomStopForm'
+import { RequestChangesForDay } from '../components/RequestChangesForDay'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
-import { markDone, markSelected } from '../lib/placeStatus'
+import { markDone, markSelected, markSkipped } from '../lib/placeStatus'
 
 const SWIPE_THRESHOLD_PX = 50
 
@@ -27,7 +29,7 @@ function MapPanner({ target }: { target: SelectedPlace | null }) {
 }
 
 export function DayViewScreen() {
-  const { tripId } = useTripContext()
+  const { tripId, trip } = useTripContext()
   const navigate = useNavigate()
   const { dayId } = useParams<{ dayId: string }>()
   const { days } = useTripDays(tripId)
@@ -192,6 +194,14 @@ export function DayViewScreen() {
           </p>
         )}
 
+        <RequestChangesForDay
+          tripId={tripId}
+          trip={trip}
+          dayId={dayId}
+          dayNumber={day.index + 1}
+          allDayIds={days.map((d) => d.id)}
+        />
+
         {day.type === 'rest' ? (
           <p
             className="mx-4 mt-4 rounded bg-orange-50 p-3 text-orange-800 dark:bg-orange-950 dark:text-orange-200"
@@ -215,6 +225,16 @@ export function DayViewScreen() {
             </div>
           )
         )}
+
+        <AddCustomStopForm
+          tripId={tripId}
+          dayId={dayId}
+          defaultLocation={{
+            name: day.overnight.name,
+            lat: day.overnight.lat,
+            lng: day.overnight.lng,
+          }}
+        />
 
         <CardRow title="Activities" testId="activities-row">
           {activities.map((activity, i) => {
@@ -254,6 +274,11 @@ export function DayViewScreen() {
                     day.date,
                     note,
                   ).catch(console.error)
+                }
+                onMarkSkipped={() =>
+                  markSkipped(tripId, dayId, 'activity', activity.id).catch(
+                    console.error,
+                  )
                 }
               />
             )
@@ -298,6 +323,11 @@ export function DayViewScreen() {
                     note,
                   ).catch(console.error)
                 }
+                onMarkSkipped={() =>
+                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
+                }
               />
             )
           })}
@@ -341,6 +371,11 @@ export function DayViewScreen() {
                     note,
                   ).catch(console.error)
                 }
+                onMarkSkipped={() =>
+                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
+                }
               />
             )
           })}
@@ -383,6 +418,11 @@ export function DayViewScreen() {
                     day.date,
                     note,
                   ).catch(console.error)
+                }
+                onMarkSkipped={() =>
+                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
+                    console.error,
+                  )
                 }
               />
             )

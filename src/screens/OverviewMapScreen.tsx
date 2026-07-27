@@ -6,9 +6,7 @@ import {
   Polyline,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import type { Activity } from '@rv/shared'
-import { db } from '../lib/firebase'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayPlaces } from '../hooks/useDayPlaces'
@@ -16,6 +14,7 @@ import { getZoomTiers } from '../lib/mapZoomTiers'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()
@@ -45,25 +44,12 @@ export function OverviewMapScreen() {
   }
 
   async function submitChangeRequest() {
-    const today = new Date().toISOString().slice(0, 10)
-    await addDoc(collection(db, 'planRequests'), {
+    await submitPlanChangeRequest(
       tripId,
-      kind: 'replan',
-      status: 'pending',
-      createdAt: serverTimestamp(),
-      replanContext: {
-        currentLocation: {
-          lat: trip.settings.startPoint.lat,
-          lng: trip.settings.startPoint.lng,
-        },
-        today,
-        completedRefPaths: [],
-        remainingEndDate: trip.settings.endDate,
-        remainingEndPoint: trip.settings.endPoint,
-        changeRequestText: changeText,
-        lockedDayIds: Array.from(lockedDayIds),
-      },
-    })
+      trip,
+      changeText,
+      Array.from(lockedDayIds),
+    )
     setChangeRequestOpen(false)
   }
 
