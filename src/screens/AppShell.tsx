@@ -13,8 +13,13 @@ import { ExecutionModePrompt } from '../components/ExecutionModePrompt'
 
 function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
   const { days } = useTripDays(tripId)
-  const { behindKm, permissionDenied, replan, snoozeToday, submitManualPosition } =
-    useExecutionMode(tripId, trip, days)
+  const {
+    behindKm,
+    permissionDenied,
+    replan,
+    snoozeToday,
+    submitManualPosition,
+  } = useExecutionMode(tripId, trip, days)
 
   return (
     <ExecutionModePrompt
@@ -27,8 +32,18 @@ function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
   )
 }
 
-const NAV_LINK_CLASS =
-  'inline-flex min-h-11 items-center px-3 text-orange-700 underline dark:text-orange-400'
+const NAV_ITEMS = [
+  { to: '/', testId: 'nav-setup', label: 'Trip setup' },
+  { to: '/map', testId: 'nav-map', label: 'Map' },
+  { to: '/diary', testId: 'nav-diary', label: 'Diary' },
+  { to: '/countries', testId: 'nav-countries', label: 'Countries' },
+] as const
+
+/** Trip setup lives at the root path, so it only matches exactly; the others
+ * stay highlighted across their nested routes (e.g. /map/day/:dayId). */
+function isActiveRoute(pathname: string, to: string): boolean {
+  return to === '/' ? pathname === '/' : pathname.startsWith(to)
+}
 
 function AppShell() {
   const { tripId } = useTripSession()
@@ -55,33 +70,27 @@ function AppShell() {
   const mapsApiKey =
     (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? ''
 
-  const navLinks = (
-    <>
-      <Link to="/" data-testid="nav-setup" className={NAV_LINK_CLASS}>
-        Trip setup
-      </Link>
-      <Link to="/map" data-testid="nav-map" className={NAV_LINK_CLASS}>
-        Map
-      </Link>
-      <Link to="/diary" data-testid="nav-diary" className={NAV_LINK_CLASS}>
-        Diary
-      </Link>
+  const navLinks = NAV_ITEMS.map(({ to, testId, label }) => {
+    const active = isActiveRoute(location.pathname, to)
+    return (
       <Link
-        to="/countries"
-        data-testid="nav-countries"
-        className={NAV_LINK_CLASS}
+        key={to}
+        to={to}
+        data-testid={testId}
+        aria-current={active ? 'page' : undefined}
+        className={`nav-pill ${active ? 'nav-pill-active' : 'nav-pill-idle'}`}
       >
-        Countries
+        {label}
       </Link>
-    </>
-  )
+    )
+  })
 
   return (
     <APIProvider apiKey={mapsApiKey}>
-      <main className="flex min-h-svh flex-col bg-white dark:bg-neutral-900">
+      <main className="surface flex min-h-svh flex-col">
         {loading || !trip || !tripId ? (
-          <div className="mx-auto max-w-2xl px-4 py-6 text-center">
-            <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white">
+          <div className="mx-auto max-w-2xl px-4 py-10 text-center">
+            <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 dark:text-white">
               RV Road Trip Planner
             </h1>
             <p className="mt-2 text-neutral-500 dark:text-neutral-400">
@@ -89,28 +98,30 @@ function AppShell() {
             </p>
           </div>
         ) : isSetupPage ? (
-          <div className="mx-auto max-w-2xl px-4 py-6 text-center">
-            <h1 className="text-3xl font-semibold text-neutral-900 dark:text-white">
-              RV Road Trip Planner
-            </h1>
-            <div className="mt-4 space-y-2">
-              <input
-                className="w-full rounded border border-neutral-300 px-3 py-2 text-center dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
-                data-testid="trip-name-input"
-                value={nameDraft}
-                onChange={(event) => setNameDraft(event.target.value)}
-                onFocus={() => setIsEditingName(true)}
-                onBlur={saveName}
-              />
+          <div className="border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="mx-auto max-w-2xl px-4 py-6 text-center">
+              <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 dark:text-white">
+                RV Road Trip Planner
+              </h1>
+              <div className="mt-4 space-y-2">
+                <input
+                  className="field text-center text-lg font-medium"
+                  data-testid="trip-name-input"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onFocus={() => setIsEditingName(true)}
+                  onBlur={saveName}
+                />
+              </div>
+              <nav className="mt-4 flex flex-wrap justify-center gap-1 rounded-full bg-neutral-100 p-1 dark:bg-neutral-800/60">
+                {navLinks}
+              </nav>
             </div>
-            <nav className="mt-4 flex flex-wrap justify-center gap-1 text-sm">
-              {navLinks}
-            </nav>
           </div>
         ) : (
           <nav
             data-testid="compact-nav"
-            className="flex flex-wrap justify-center gap-1 border-b border-neutral-200 bg-white py-1 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+            className="flex flex-wrap justify-center gap-1 border-b border-neutral-200 bg-white px-2 py-1.5 dark:border-neutral-800 dark:bg-neutral-900"
           >
             {navLinks}
           </nav>

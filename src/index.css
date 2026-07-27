@@ -1,1 +1,130 @@
 @import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+ * Design system
+ * ---------------------------------------------------------------------------
+ * A travel-itinerary look: white cards floating on a lightly recessed neutral
+ * surface, blue as the single primary/action colour, warm amber reserved for
+ * ratings and "this one's highlighted", and pill-shaped controls throughout.
+ *
+ * These live as component classes (rather than being retyped as utility
+ * strings in 20 components) so the radius/shadow/colour scale stays in one
+ * place. Being in the `components` layer, any utility class in JSX still wins
+ * over them — e.g. `className="btn btn-primary px-2"` narrows the padding.
+ *
+ * Every class ships a `dark:` counterpart; the app is dark-mode-aware
+ * throughout and a light-only rule shows up as invisible text on dark.
+ * ------------------------------------------------------------------------ */
+
+@layer components {
+  /* Recessed page/section background that white cards visually float on. */
+  .surface {
+    @apply bg-neutral-50 dark:bg-neutral-950;
+  }
+
+  /* Standard card / panel container. */
+  .card {
+    @apply rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900;
+  }
+
+  /* Card that responds to being tapped. Tailwind v4's `@apply` only takes
+   * real utilities, not other component classes, so this repeats `.card`
+   * rather than composing it. */
+  .card-interactive {
+    @apply rounded-xl border border-neutral-200 bg-white shadow-sm transition hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900;
+  }
+
+  /* --- Buttons ---------------------------------------------------------- */
+
+  /* Base pill button. min-h-11 keeps the 44px tap-target floor the e2e
+   * suite asserts on for primary controls. */
+  .btn {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-full px-4 text-sm font-medium transition disabled:cursor-default disabled:opacity-50;
+  }
+
+  /* Compact variant for in-card actions where 44px would dominate. */
+  .btn-sm {
+    @apply min-h-9 gap-1 px-3 text-xs;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:shadow-md disabled:hover:bg-blue-600 disabled:hover:shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800;
+  }
+
+  /* Text-only action that still reads as tappable. */
+  .btn-ghost {
+    @apply text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950;
+  }
+
+  .btn-danger-ghost {
+    @apply text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950;
+  }
+
+  /* --- Links ------------------------------------------------------------ */
+
+  .link {
+    @apply text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300;
+  }
+
+  /* --- Form fields ------------------------------------------------------ */
+
+  .field {
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 transition outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white;
+  }
+
+  .field-sm {
+    @apply px-2.5 py-1.5 text-sm;
+  }
+
+  .field-label {
+    @apply mb-1 block text-sm font-medium text-neutral-700 dark:text-neutral-300;
+  }
+
+  /* --- Chips / pills ---------------------------------------------------- */
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .chip-blue {
+    @apply bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300;
+  }
+
+  .chip-neutral {
+    @apply bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300;
+  }
+
+  .chip-amber {
+    @apply bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200;
+  }
+
+  /* --- Navigation ------------------------------------------------------- */
+
+  /* px-3 (not px-4) so all four pills fit one row inside the segmented bar at
+   * a 375px viewport instead of wrapping. */
+  .nav-pill {
+    @apply inline-flex min-h-11 items-center rounded-full px-3 text-sm font-medium transition;
+  }
+
+  .nav-pill-active {
+    @apply bg-blue-600 text-white shadow-sm;
+  }
+
+  .nav-pill-idle {
+    @apply text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800;
+  }
+
+  /* --- Typography ------------------------------------------------------- */
+
+  .heading-lg {
+    @apply text-2xl font-semibold tracking-tight text-neutral-900 dark:text-white;
+  }
+
+  .heading-md {
+    @apply text-xl font-semibold tracking-tight text-neutral-900 dark:text-white;
+  }
+}
