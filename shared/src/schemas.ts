@@ -82,6 +82,19 @@ export const planMetaSchema = z.object({
   // for, once the route shape itself is known.
   progressCurrent: z.number().nonnegative().optional(),
   progressTotal: z.number().nonnegative().optional(),
+  // Internal to generatePlan.ts — never read or rendered by the frontend.
+  // Lets a retry after a failure resume from the last completed step
+  // instead of re-running the whole (expensive) Claude + Places/Routes
+  // pipeline from zero. `skeleton` is validated against
+  // planTripSkeletonSchema server-side (that schema lives in
+  // functions/src, not here, since it's an internal Claude-response shape,
+  // not a cross-cutting app data model) — left loosely typed here.
+  checkpoint: z
+    .object({
+      settingsHash: z.string(),
+      skeleton: z.unknown(),
+    })
+    .optional(),
 })
 
 export const tripSchema = z.object({

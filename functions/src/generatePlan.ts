@@ -8,6 +8,7 @@ import {
   activitySchema,
   restaurantSchema,
   tripDaySchema,
+  type NamedPoint,
   type Trip,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
@@ -20,6 +21,13 @@ import {
   resolveSkeletonDays,
   type GeneratedDay,
 } from './planPipeline.js'
+import {
+  clearCheckpoint,
+  computeSettingsHash,
+  loadCheckpoint,
+  saveSkeletonCheckpoint,
+  stageGeneratedDay,
+} from './planCheckpoint.js'
 
 interface PlanRequestData {
   tripId: string
@@ -32,39 +40,71 @@ interface PlanRequestData {
  * Runs the real planning pipeline for a fresh trip: Claude proposes the
  * route shape (planTrip), then resolveSkeletonDays turns it into real,
  * enriched days (Routes + Places).
+ *
+ * Resumable (see planCheckpoint.ts): if a checkpoint from a prior, failed
+ * attempt at these exact settings exists, the skeleton and any already-
+ * resolved days are reused instead of redone — a retry only has to finish
+ * whatever was left, not start over.
  */
-async function generateRealPlan(
+export async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
 ): Promise<GeneratedDay[]> {
-  const skeleton = await planTrip({
-    settings: trip.settings,
-    notesFreeText: trip.notes.freeText,
-    onProgress: (progress) => {
-      tripRef
-        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
-        .catch((error: unknown) =>
-          console.error('Failed to report planTrip progress', error),
-        )
-    },
-  })
+  const settingsHash = computeSettingsHash(trip)
+  const checkpoint = await loadCheckpoint(tripRef, trip, settingsHash)
+
+  let skeleton
+  let resumedDays: GeneratedDay[]
+  let startLocation: NamedPoint
+
+  if (checkpoint) {
+    skeleton = checkpoint.skeleton
+    resumedDays = checkpoint.resumedDays
+    const lastOvernight = resumedDays.at(-1)?.day.overnight
+    startLocation = lastOvernight
+      ? { name: lastOvernight.name, lat: lastOvernight.lat, lng: lastOvernight.lng }
+      : trip.settings.startPoint
+  } else {
+    skeleton = await planTrip({
+      settings: trip.settings,
+      notesFreeText: trip.notes.freeText,
+      onProgress: (progress) => {
+        tripRef
+          .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+          .catch((error: unknown) =>
+            console.error('Failed to report planTrip progress', error),
+          )
+      },
+    })
+    await saveSkeletonCheckpoint(tripRef, settingsHash, skeleton)
+    resumedDays = []
+    startLocation = trip.settings.startPoint
+  }
 
   // Reported from here on — this is the slow, sequential part (a Places/
   // Routes round-trip per day) that a "generating" spinner alone gives no
   // sense of progress through on a multi-week trip.
   await tripRef.update({
     'planMeta.progressLabel': FieldValue.delete(),
-    'planMeta.progressCurrent': 0,
+    'planMeta.progressCurrent': resumedDays.length,
     'planMeta.progressTotal': skeleton.days.length,
   })
 
-  return resolveSkeletonDays(skeleton.days, trip.settings.startPoint, (count) => {
-    tripRef
-      .update({ 'planMeta.progressCurrent': count })
-      .catch((error: unknown) =>
-        console.error('Failed to report day-resolution progress', error),
-      )
-  })
+  const remainingSkeletonDays = skeleton.days.slice(resumedDays.length)
+  const newlyResolved = await resolveSkeletonDays(
+    remainingSkeletonDays,
+    startLocation,
+    (count) => {
+      tripRef
+        .update({ 'planMeta.progressCurrent': resumedDays.length + count })
+        .catch((error: unknown) =>
+          console.error('Failed to report day-resolution progress', error),
+        )
+    },
+    (index, day) => stageGeneratedDay(tripRef, index, day),
+  )
+
+  return [...resumedDays, ...newlyResolved]
 }
 
 export const generatePlan = onDocumentCreated(
@@ -180,6 +220,9 @@ export const generatePlan = onDocumentCreated(
         }
       }
       await batch.commit()
+      // Only now that the replacement is fully committed is the checkpoint
+      // (skeleton + staged days) no longer needed for a future retry.
+      await clearCheckpoint(tripRef)
 
       const driveDays = days.filter((d) => d.day.drive)
       const totalKm = driveDays.reduce(

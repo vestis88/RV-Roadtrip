@@ -138,6 +138,13 @@ export async function resolveSkeletonDays(
   skeletonDays: PlanTripSkeletonDay[],
   startLocation: NamedPoint,
   onDayResolved?: (resolvedCount: number) => void,
+  // Awaited (unlike onDayResolved, a fire-and-forget progress counter also
+  // used by replanTrip.ts) — fires right when a day resolves, before the
+  // next one starts, so a caller can durably stage the day (e.g.
+  // generatePlan.ts's checkpoint) before risking a crash on the next one.
+  // A day's whole point is surviving a crash between it and the next day,
+  // so staging can't itself be fire-and-forget.
+  onDayGenerated?: (index: number, day: GeneratedDay) => void | Promise<void>,
 ): Promise<GeneratedDay[]> {
   const days: GeneratedDay[] = []
   let currentLocation = startLocation
@@ -149,6 +156,7 @@ export async function resolveSkeletonDays(
     days.push(generated)
     currentLocation = nextLocation
     onDayResolved?.(days.length)
+    await onDayGenerated?.(skDay.index, generated)
   }
   return days
 }
