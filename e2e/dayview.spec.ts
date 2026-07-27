@@ -40,7 +40,7 @@ test('rest day shows the no-driving banner instead of a drive card', async ({
   await expect(page.getByTestId('drive-card')).toHaveCount(0)
 })
 
-test('prev/next arrows and swipe cycle days without visiting the overview', async ({
+test('prev/next arrows cycle days without visiting the overview', async ({
   page,
 }) => {
   await createTripWithPlan(page)
@@ -52,8 +52,19 @@ test('prev/next arrows and swipe cycle days without visiting the overview', asyn
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-11')
   expect(page.url()).toContain('/map/day/2026-07-11')
 
-  // Swipe left (finger moves right-to-left) should advance to the next day,
-  // exercising the same touch handler a phone user would trigger.
+  await page.getByTestId('next-day').click()
+  await expect(page.getByTestId('day-view-date')).toContainText('2026-07-12')
+  expect(page.url()).toContain('/map/day/2026-07-12')
+  await expect(page.getByTestId('next-day')).toBeDisabled()
+})
+
+test('swiping over the day view does not change day — that gesture is reserved for panning the map', async ({
+  page,
+}) => {
+  await createTripWithPlan(page)
+  await page.goto('/map/day/2026-07-10')
+  await page.getByTestId('day-view').waitFor()
+
   const dayView = page.getByTestId('day-view')
   const box = await dayView.boundingBox()
   if (!box) throw new Error('day-view has no bounding box')
@@ -64,7 +75,6 @@ test('prev/next arrows and swipe cycle days without visiting the overview', asyn
   await dayView.dispatchEvent('touchend', {
     changedTouches: [{ identifier: 0, clientX: box.x + 20, clientY: midY }],
   })
-  await expect(page.getByTestId('day-view-date')).toContainText('2026-07-12')
-  expect(page.url()).toContain('/map/day/2026-07-12')
-  await expect(page.getByTestId('next-day')).toBeDisabled()
+  await expect(page.getByTestId('day-view-date')).toContainText('2026-07-10')
+  expect(page.url()).toContain('/map/day/2026-07-10')
 })

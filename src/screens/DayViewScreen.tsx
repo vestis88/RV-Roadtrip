@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AdvancedMarker,
@@ -16,8 +16,6 @@ import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPick
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { markDone, markSelected, markSkipped } from '../lib/placeStatus'
-
-const SWIPE_THRESHOLD_PX = 50
 
 interface SelectedPlace {
   id: string
@@ -42,7 +40,6 @@ export function DayViewScreen() {
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
 
-  const touchStartX = useRef<number | null>(null)
   const dayIndex = days.findIndex((d) => d.id === dayId)
   const prevDayId = dayIndex > 0 ? days[dayIndex - 1].id : undefined
   const nextDayId =
@@ -52,18 +49,6 @@ export function DayViewScreen() {
 
   function goToDay(id: string | undefined) {
     if (id) navigate(`/map/day/${id}`)
-  }
-
-  function onTouchStart(event: React.TouchEvent) {
-    touchStartX.current = event.touches[0].clientX
-  }
-
-  function onTouchEnd(event: React.TouchEvent) {
-    if (touchStartX.current == null) return
-    const deltaX = event.changedTouches[0].clientX - touchStartX.current
-    touchStartX.current = null
-    if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX) return
-    goToDay(deltaX < 0 ? nextDayId : prevDayId)
   }
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
@@ -82,8 +67,6 @@ export function DayViewScreen() {
     <div
       className="flex h-full w-full flex-col lg:flex-row"
       data-testid="day-view"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
     >
       <div
         className="relative h-[45%] w-full shrink-0 lg:h-full lg:w-1/2"
@@ -94,6 +77,7 @@ export function DayViewScreen() {
             defaultCenter={{ lat: day.overnight.lat, lng: day.overnight.lng }}
             defaultZoom={12}
             mapId="rv-day-view"
+            gestureHandling="greedy"
           >
             <MapPanner target={selectedPlace} />
 
