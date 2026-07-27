@@ -18,7 +18,11 @@ import {
 import { validatePacing } from './pacingValidator.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { computeRouteLeg, googleRoutesApiKey } from './routesApi.js'
-import { claudeApiKey, planTrip } from './prompts/planTrip.js'
+import {
+  claudeApiKey,
+  planTrip,
+  type PlanTripProgress,
+} from './prompts/planTrip.js'
 import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
 import {
   enrichActivities,
@@ -150,6 +154,12 @@ async function resolveSkeletonDay(
  * multi-week trip can mean hundreds of sequential Places calls; see the
  * generatePlan timeout for how that's accommodated.
  */
+function describePlanTripProgress(progress: PlanTripProgress): string {
+  return progress.phase === 'outline'
+    ? 'Planning your route…'
+    : `Planning day-by-day details (${progress.chunkIndex}/${progress.chunkCount})…`
+}
+
 async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
@@ -157,12 +167,20 @@ async function generateRealPlan(
   const skeleton = await planTrip({
     settings: trip.settings,
     notesFreeText: trip.notes.freeText,
+    onProgress: (progress) => {
+      tripRef
+        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+        .catch((error: unknown) =>
+          console.error('Failed to report planTrip progress', error),
+        )
+    },
   })
 
   // Reported from here on — this is the slow, sequential part (a Places/
   // Routes round-trip per day) that a "generating" spinner alone gives no
   // sense of progress through on a multi-week trip.
   await tripRef.update({
+    'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': 0,
     'planMeta.progressTotal': skeleton.days.length,
   })
@@ -253,6 +271,7 @@ export const generatePlan = onDocumentCreated(
       // where it reports its own.
       await tripRef.update({
         'planMeta.status': 'generating',
+        'planMeta.progressLabel': FieldValue.delete(),
         'planMeta.progressCurrent': FieldValue.delete(),
         'planMeta.progressTotal': FieldValue.delete(),
       })
@@ -305,6 +324,7 @@ export const generatePlan = onDocumentCreated(
         'planMeta.totalKm': totalKm,
         'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
         'planMeta.generatedAt': new Date().toISOString(),
+        'planMeta.progressLabel': FieldValue.delete(),
         'planMeta.progressCurrent': FieldValue.delete(),
         'planMeta.progressTotal': FieldValue.delete(),
       })
@@ -314,6 +334,7 @@ export const generatePlan = onDocumentCreated(
       await tripRef.update({
         'planMeta.status': 'error',
         'planMeta.error': String(error),
+        'planMeta.progressLabel': FieldValue.delete(),
         'planMeta.progressCurrent': FieldValue.delete(),
         'planMeta.progressTotal': FieldValue.delete(),
       })

@@ -71,10 +71,15 @@ export const planMetaSchema = z.object({
   generatedAt: isoDateTime.optional(),
   lastReplanAt: isoDateTime.optional(),
   error: z.string().optional(),
-  // Set while status is 'generating': progressTotal is unset/0 during the
-  // initial Claude call (route shape not known yet), then both are set once
-  // per-day resolution (Places/Routes enrichment) starts — this is the
-  // slow, sequential part of generation the progress bar is really for.
+  // Human-readable step label during 'generating' (e.g. "Planning week 2 of
+  // 4…") — set through the chunked planTrip() call and the Places/Routes
+  // enrichment loop alike, so the UI always has something specific to show
+  // instead of a single opaque "generating" spinner across the whole
+  // multi-step pipeline.
+  progressLabel: z.string().optional(),
+  // Set once per-day resolution (Places/Routes enrichment) starts — the
+  // slow, sequential tail end of generation the day-count progress bar is
+  // for, once the route shape itself is known.
   progressCurrent: z.number().nonnegative().optional(),
   progressTotal: z.number().nonnegative().optional(),
 })

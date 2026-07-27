@@ -282,7 +282,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
                 ? `${trip.planMeta.progressCurrent ?? 0}/${trip.planMeta.progressTotal} days (${Math.round(
                     ((trip.planMeta.progressCurrent ?? 0) / trip.planMeta.progressTotal) * 100,
                   )}%)`
-                : 'planning your route…'}
+                : (trip.planMeta.progressLabel ?? 'planning your route…')}
             </span>
           )}
         </div>
