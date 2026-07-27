@@ -5,6 +5,7 @@ import {
   parseRegionHighlights,
   parseRouteOutline,
 } from './planTrip.js'
+import type { RegionHighlightsResponse } from './planTripSchema.js'
 
 const RECORDED_HIGHLIGHTS = `\`\`\`json
 {
@@ -294,5 +295,57 @@ describe('planTrip', () => {
     await expect(
       planTrip({ settings: {} as never, notesFreeText: '' }),
     ).rejects.toThrow(/day index 1/)
+  })
+})
+
+describe('generateRegionHighlights + generateSkeletonFromHighlights (review-pause split)', () => {
+  it('generateRegionHighlights makes exactly one call and returns the parsed highlights', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(highlights.regions[0].candidateStops[0].town).toBe('Lillehammer')
+  })
+
+  it('generateSkeletonFromHighlights, given highlights already resolved, never asks for highlights again', async () => {
+    createMock.mockReset()
+    createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
+      .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
+
+    const { generateSkeletonFromHighlights } = await import('./planTrip.js')
+    const highlights = { regions: [] } as unknown as RegionHighlightsResponse
+    const onProgress = vi.fn()
+    const skeleton = await generateSkeletonFromHighlights({
+      settings: {} as never,
+      notesFreeText: '',
+      highlights,
+      onProgress,
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(2) // outline + 1 detail chunk only
+    expect(skeleton.days).toHaveLength(2)
+    expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
+    expect(onProgress).not.toHaveBeenCalledWith({ phase: 'highlights' })
+  })
+
+  it('planTrip (the combined path) is unaffected by the split — still highlights + outline + detail', async () => {
+    createMock.mockReset()
+    createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+      .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
+      .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
+
+    const { planTrip } = await import('./planTrip.js')
+    const result = await planTrip({ settings: {} as never, notesFreeText: '' })
+
+    expect(createMock).toHaveBeenCalledTimes(3)
+    expect(result.days).toHaveLength(2)
   })
 })

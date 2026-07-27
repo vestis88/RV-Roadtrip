@@ -3,6 +3,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
+import { HighlightsReviewPanel } from '../components/HighlightsReviewPanel'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
 import { db } from '../lib/firebase'
 import { PRESET_INTERESTS } from '../lib/interests'
@@ -16,6 +17,7 @@ interface SettingsScreenProps {
 export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
   const [submitting, setSubmitting] = useState(false)
+  const [reviewBeforeGenerating, setReviewBeforeGenerating] = useState(false)
   const submittingRef = useRef(false)
 
   function commit(partial: Partial<TripSettings>) {
@@ -60,6 +62,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         kind: 'full',
         status: 'pending',
         createdAt: serverTimestamp(),
+        ...(reviewBeforeGenerating ? { reviewHighlights: true } : {}),
       })
     } finally {
       submittingRef.current = false
@@ -233,6 +236,21 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
       </label>
 
       <div>
+        {(trip.planMeta.status === 'idle' ||
+          trip.planMeta.status === 'stale' ||
+          trip.planMeta.status === 'error') && (
+          <label className="mb-2 flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+            <input
+              type="checkbox"
+              data-testid="review-highlights-checkbox"
+              checked={reviewBeforeGenerating}
+              onChange={(event) =>
+                setReviewBeforeGenerating(event.target.checked)
+              }
+            />
+            Review suggested regions before generating
+          </label>
+        )}
         <div className="flex items-center gap-3">
           {trip.planMeta.status === 'idle' && (
             <button
@@ -295,6 +313,13 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           </p>
         )}
       </div>
+
+      {trip.planMeta.status === 'awaiting-highlights-review' && (
+        <HighlightsReviewPanel
+          tripId={tripId}
+          pendingHighlights={trip.planMeta.pendingHighlights}
+        />
+      )}
 
       <p
         className="text-xs text-neutral-400 dark:text-neutral-500"

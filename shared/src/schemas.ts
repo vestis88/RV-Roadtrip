@@ -59,6 +59,13 @@ export const planStatusSchema = z.enum([
   'idle',
   'pending',
   'generating',
+  // Interactive/transparent route planning (implemented 2026-07-27): a
+  // 'full' plan request can opt into pausing after the highlights phase
+  // (pure curation — candidate stops per region, no dates/pacing involved
+  // yet) instead of generating straight through, so the traveler can
+  // re-rank/remove candidates before the route is actually shaped.
+  // Skippable — this status is only ever entered when requested.
+  'awaiting-highlights-review',
   'ready',
   'error',
   'stale',
@@ -95,6 +102,11 @@ export const planMetaSchema = z.object({
       skeleton: z.unknown(),
     })
     .optional(),
+  // Set while status is 'awaiting-highlights-review' — the raw
+  // RegionHighlightsResponse (regionHighlightsResponseSchema lives in
+  // functions/src, same reasoning as checkpoint.skeleton above) for the
+  // review UI to render and let the traveler edit before continuing.
+  pendingHighlights: z.unknown().optional(),
 })
 
 export const tripSchema = z.object({
@@ -250,7 +262,7 @@ export const logEntrySchema = z.object({
 
 export const planRequestSchema = z.object({
   tripId: z.string(),
-  kind: z.enum(['full', 'replan']),
+  kind: z.enum(['full', 'replan', 'continueFromHighlights']),
   replanContext: z
     .object({
       currentLocation: latLngSchema,
@@ -262,6 +274,15 @@ export const planRequestSchema = z.object({
       lockedDayIds: z.array(z.string()).optional(),
     })
     .optional(),
+  // Set on a 'full' request to pause after the highlights phase for review
+  // instead of generating straight through — skippable, off by default.
+  reviewHighlights: z.boolean().optional(),
+  // Set on a 'continueFromHighlights' request: the traveler's edited
+  // highlights (validated server-side against regionHighlightsResponseSchema
+  // — see planMeta.checkpoint's comment for why it's untyped here) and an
+  // optional note folded into notesFreeText for the outline/detail phases.
+  editedHighlights: z.unknown().optional(),
+  reviewNote: z.string().optional(),
   status: z.enum(['pending', 'processing', 'done', 'error']),
   error: z.string().optional(),
 })

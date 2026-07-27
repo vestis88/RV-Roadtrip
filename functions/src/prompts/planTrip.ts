@@ -137,44 +137,36 @@ async function callWithRetry<T>(
 }
 
 /**
- * Plans a trip in three phases, each with a narrower job than the last:
- *
- * 1. "highlights" — pure curation, no dates or pacing involved. Reasons
- *    region-by-region about what's actually worth seeing for these
- *    travelers' interests and produces a ranked shortlist of candidate
- *    stops. This is what makes route selection interest-driven rather than
- *    defaulting to whatever's closest to the direct line — the model
- *    decides what's good BEFORE it's under any pressure to make the
- *    schedule fit.
- * 2. "outline" — selects from that shortlist (prioritizing must-sees) and
- *    sequences the selections into an actual day-by-day route from the real
- *    start point to the real end point, so pacing and the final destination
- *    are still solved with the whole trip in view.
- * 3. "detail" (chunked) — the route is split into fixed-size chunks and
- *    each chunk's activities/restaurants are filled in by a separate call
- *    that's given the full outline for context but can only elaborate on
- *    its own days — it cannot redirect the route.
- *
- * Every individual call stays small and fast regardless of trip length,
- * unlike asking for the whole curated, scheduled, detailed itinerary in one
- * shot.
+ * Phase 1 alone (see planTrip's own doc comment below for the full
+ * three-phase picture) — split out for the interactive/transparent route
+ * planning review pause (implemented 2026-07-27): generatePlan.ts can run
+ * just this phase, show the traveler the candidate stops + reasoning, and
+ * only call generateSkeletonFromHighlights once they've edited them and
+ * chosen to continue.
  */
-export async function planTrip(input: {
+export async function generateRegionHighlights(input: {
   settings: TripSettings
   notesFreeText: string
-  onProgress?: (progress: PlanTripProgress) => void
+}): Promise<RegionHighlightsResponse> {
+  const client = new Anthropic({ apiKey: claudeApiKey.value() })
+  const { system, user } = buildRegionHighlightsPrompt(input)
+  return callWithRetry(client, system, user, 8000, parseRegionHighlights)
+}
+
+/**
+ * Phases 2 ("outline") and 3 ("detail", chunked) — given highlights already
+ * resolved (either freshly, via planTrip below, or a traveler-edited set
+ * from the review pause), sequences them into a day-by-day route and fills
+ * in each day's activities/restaurants.
+ */
+export async function generateSkeletonFromHighlights(input: {
+  settings: TripSettings
+  notesFreeText: string
+  highlights: RegionHighlightsResponse
+  onProgress?: (progress: Extract<PlanTripProgress, { phase: 'outline' | 'detail' }>) => void
 }): Promise<PlanTripSkeleton> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
-
-  input.onProgress?.({ phase: 'highlights' })
-  const { system: highlightsSystem, user: highlightsUser } = buildRegionHighlightsPrompt(input)
-  const highlights = await callWithRetry(
-    client,
-    highlightsSystem,
-    highlightsUser,
-    8000,
-    parseRegionHighlights,
-  )
+  const { highlights } = input
 
   input.onProgress?.({ phase: 'outline' })
   const { system: outlineSystem, user: outlineUser } = buildRouteOutlinePrompt({
@@ -229,4 +221,43 @@ export async function planTrip(input: {
   })
 
   return planTripSkeletonSchema.parse({ days })
+}
+
+/**
+ * Plans a trip in three phases, each with a narrower job than the last:
+ *
+ * 1. "highlights" (generateRegionHighlights) — pure curation, no dates or
+ *    pacing involved. Reasons region-by-region about what's actually worth
+ *    seeing for these travelers' interests and produces a ranked shortlist
+ *    of candidate stops. This is what makes route selection interest-driven
+ *    rather than defaulting to whatever's closest to the direct line — the
+ *    model decides what's good BEFORE it's under any pressure to make the
+ *    schedule fit.
+ * 2. "outline" (generateSkeletonFromHighlights) — selects from that
+ *    shortlist (prioritizing must-sees) and sequences the selections into
+ *    an actual day-by-day route from the real start point to the real end
+ *    point, so pacing and the final destination are still solved with the
+ *    whole trip in view.
+ * 3. "detail" (generateSkeletonFromHighlights, chunked) — the route is
+ *    split into fixed-size chunks and each chunk's activities/restaurants
+ *    are filled in by a separate call that's given the full outline for
+ *    context but can only elaborate on its own days — it cannot redirect
+ *    the route.
+ *
+ * Every individual call stays small and fast regardless of trip length,
+ * unlike asking for the whole curated, scheduled, detailed itinerary in one
+ * shot. Split into two exported functions above (rather than one inline
+ * pipeline) so generatePlan.ts's review-pause flow can run just phase 1,
+ * show the traveler the result, and resume into phases 2-3 later with
+ * their edits — this function is the default "run the whole thing" path
+ * used when that pause isn't requested.
+ */
+export async function planTrip(input: {
+  settings: TripSettings
+  notesFreeText: string
+  onProgress?: (progress: PlanTripProgress) => void
+}): Promise<PlanTripSkeleton> {
+  input.onProgress?.({ phase: 'highlights' })
+  const highlights = await generateRegionHighlights(input)
+  return generateSkeletonFromHighlights({ ...input, highlights })
 }

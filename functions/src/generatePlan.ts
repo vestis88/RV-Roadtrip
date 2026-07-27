@@ -14,7 +14,13 @@ import {
 import { validatePacing } from './pacingValidator.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
-import { claudeApiKey, planTrip } from './prompts/planTrip.js'
+import {
+  claudeApiKey,
+  generateRegionHighlights,
+  generateSkeletonFromHighlights,
+  planTrip,
+} from './prompts/planTrip.js'
+import { regionHighlightsResponseSchema } from './prompts/planTripSchema.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
   describePlanTripProgress,
@@ -31,24 +37,68 @@ import {
 
 interface PlanRequestData {
   tripId: string
-  kind: 'full' | 'replan'
+  kind: 'full' | 'replan' | 'continueFromHighlights'
   replanContext?: ReplanContext
+  // Interactive/transparent route planning (implemented 2026-07-27):
+  reviewHighlights?: boolean
+  editedHighlights?: unknown
+  reviewNote?: string
   status: string
 }
 
 /**
+ * How generateRealPlan should obtain its skeleton — either the default
+ * end-to-end pipeline (planTrip, resumable via checkpoint), or resuming
+ * into just phases 2-3 with highlights the traveler already reviewed and
+ * edited during a review-pause request.
+ */
+type SkeletonSource =
+  | { kind: 'fresh' }
+  | {
+      kind: 'fromHighlights'
+      highlights: Awaited<ReturnType<typeof generateRegionHighlights>>
+      notesFreeText: string
+    }
+
+/**
+ * Runs just the highlights phase and pauses there for review (implemented
+ * 2026-07-27) — exported/testable the same way generateRealPlan is, since
+ * both run inside a Cloud Function trigger that a test can't mock into
+ * directly (the Functions emulator runs the compiled bundle in its own
+ * process; vi.mock only reaches code running in the test process itself).
+ */
+export async function pauseForHighlightsReview(
+  trip: Trip,
+  tripRef: DocumentReference,
+): Promise<void> {
+  const highlights = await generateRegionHighlights({
+    settings: trip.settings,
+    notesFreeText: trip.notes.freeText,
+  })
+
+  await tripRef.update({
+    'planMeta.status': 'awaiting-highlights-review',
+    'planMeta.pendingHighlights': highlights,
+    'planMeta.progressLabel': FieldValue.delete(),
+  })
+}
+
+/**
  * Runs the real planning pipeline for a fresh trip: Claude proposes the
- * route shape (planTrip), then resolveSkeletonDays turns it into real,
- * enriched days (Routes + Places).
+ * route shape (planTrip, or generateSkeletonFromHighlights if resuming from
+ * a reviewed-highlights request), then resolveSkeletonDays turns it into
+ * real, enriched days (Routes + Places).
  *
  * Resumable (see planCheckpoint.ts): if a checkpoint from a prior, failed
  * attempt at these exact settings exists, the skeleton and any already-
  * resolved days are reused instead of redone — a retry only has to finish
- * whatever was left, not start over.
+ * whatever was left, not start over. `source` only decides how the
+ * skeleton is obtained when there's no checkpoint to resume from.
  */
 export async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
+  source: SkeletonSource = { kind: 'fresh' },
 ): Promise<GeneratedDay[]> {
   const settingsHash = computeSettingsHash(trip)
   const checkpoint = await loadCheckpoint(tripRef, trip, settingsHash)
@@ -64,6 +114,22 @@ export async function generateRealPlan(
     startLocation = lastOvernight
       ? { name: lastOvernight.name, lat: lastOvernight.lat, lng: lastOvernight.lng }
       : trip.settings.startPoint
+  } else if (source.kind === 'fromHighlights') {
+    skeleton = await generateSkeletonFromHighlights({
+      settings: trip.settings,
+      notesFreeText: source.notesFreeText,
+      highlights: source.highlights,
+      onProgress: (progress) => {
+        tripRef
+          .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+          .catch((error: unknown) =>
+            console.error('Failed to report planTrip progress', error),
+          )
+      },
+    })
+    await saveSkeletonCheckpoint(tripRef, settingsHash, skeleton)
+    resumedDays = []
+    startLocation = trip.settings.startPoint
   } else {
     skeleton = await planTrip({
       settings: trip.settings,
@@ -129,10 +195,17 @@ export const generatePlan = onDocumentCreated(
     // create multiple planRequest docs, but this transaction ensures only
     // the first to claim the trip's planMeta actually runs — the rest are
     // rejected immediately rather than piling up duplicate work.
+    // 'awaiting-highlights-review' blocks a new 'full'/'replan' request the
+    // same way — the trip is paused waiting on the traveler's edits, not
+    // free to restart — but must NOT block the 'continueFromHighlights'
+    // request that resumes it; that's the one request this exact status
+    // exists to let through.
     const claimed = await db.runTransaction(async (tx) => {
       const tripSnap = await tx.get(tripRef)
       const currentStatus = tripSnap.data()?.planMeta?.status
-      if (currentStatus === 'pending' || currentStatus === 'generating') {
+      const isBusy = currentStatus === 'pending' || currentStatus === 'generating'
+      const isPausedForReview = currentStatus === 'awaiting-highlights-review'
+      if (isBusy || (isPausedForReview && request.kind !== 'continueFromHighlights')) {
         return false
       }
       tx.update(tripRef, { 'planMeta.status': 'pending' })
@@ -144,6 +217,34 @@ export const generatePlan = onDocumentCreated(
         status: 'error',
         error: 'Another plan request is already in progress for this trip.',
       })
+      return
+    }
+
+    if (request.kind === 'full' && request.reviewHighlights) {
+      try {
+        await tripRef.update({
+          'planMeta.status': 'generating',
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+
+        const tripSnap = await tripRef.get()
+        const trip = tripSnap.data() as Trip
+
+        await pauseForHighlightsReview(trip, tripRef)
+        await snap.ref.update({ status: 'done' })
+      } catch (error) {
+        console.error('generatePlan (highlights review) failed', error)
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': String(error),
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+        await snap.ref.update({ status: 'error', error: String(error) })
+      }
       return
     }
 
@@ -179,18 +280,34 @@ export const generatePlan = onDocumentCreated(
     try {
       // Clear any progress left over from a previous run so the UI doesn't
       // briefly show a stale percentage before this run reaches the point
-      // where it reports its own.
+      // where it reports its own. pendingHighlights is cleared too — a
+      // 'continueFromHighlights' request is done with it the moment
+      // generation resumes.
       await tripRef.update({
         'planMeta.status': 'generating',
         'planMeta.progressLabel': FieldValue.delete(),
         'planMeta.progressCurrent': FieldValue.delete(),
         'planMeta.progressTotal': FieldValue.delete(),
+        'planMeta.pendingHighlights': FieldValue.delete(),
       })
 
       const tripSnap = await tripRef.get()
       const trip = tripSnap.data() as Trip
 
-      const days = await generateRealPlan(trip, tripRef)
+      const source: SkeletonSource =
+        request.kind === 'continueFromHighlights'
+          ? {
+              kind: 'fromHighlights',
+              highlights: regionHighlightsResponseSchema.parse(
+                request.editedHighlights,
+              ),
+              notesFreeText: request.reviewNote
+                ? `${trip.notes.freeText}\n\nMust include (from highlights review): ${request.reviewNote}`
+                : trip.notes.freeText,
+            }
+          : { kind: 'fresh' }
+
+      const days = await generateRealPlan(trip, tripRef, source)
 
       // Structural check only: no day may exceed the traveler's own
       // maxDriveHoursPerDay by more than the tolerance, and rest days stay
