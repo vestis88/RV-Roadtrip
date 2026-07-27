@@ -1,21 +1,117 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AdvancedMarker,
   Map as GoogleMap,
   Polyline,
+  useMap,
+  useMapsLibrary,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
-import type { Activity } from '@rv/shared'
+import type { Activity, LatLng } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayPlaces } from '../hooks/useDayPlaces'
+import {
+  buildOverviewRoutePoints,
+  chunkRouteSegments,
+} from '../lib/buildOverviewRoute'
 import { getZoomTiers } from '../lib/mapZoomTiers'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { MarkerBadge } from '../components/MarkerBadge'
+
+const ROUTE_STROKE = {
+  strokeColor: '#ea580c',
+  strokeOpacity: 0.8,
+  strokeWeight: 4,
+}
+
+/**
+ * The whole-trip driving route.
+ *
+ * Straight lines between overnight stops were the first version of this, and
+ * they lie about the one thing this screen is for: a 60 km hop over a fjord or
+ * an alpine pass reads identically to a 60 km motorway run, so the shape of the
+ * trip on screen has nothing to do with the shape of the drive.
+ *
+ * The straight polyline survives as the fallback state rather than as a
+ * separate error path — it renders immediately, the Directions results replace
+ * it when they arrive, and if any segment fails (no key, quota, offline) it is
+ * simply never replaced. A partially-routed map with a gap where one request
+ * 403'd would be worse than a consistently approximate one.
+ */
+function TripRoute({ points }: { points: LatLng[] }) {
+  const map = useMap()
+  const routesLibrary = useMapsLibrary('routes')
+  // Holds the exact array that is currently drawn as real directions, so a
+  // changed selection (a new array) falls back to the polyline until its own
+  // requests land, with no extra reset state to keep in sync.
+  const [routedPoints, setRoutedPoints] = useState<LatLng[] | null>(null)
+
+  useEffect(() => {
+    if (!map || !routesLibrary || points.length < 2) return
+
+    const segments = chunkRouteSegments(points)
+    const renderers: google.maps.DirectionsRenderer[] = []
+    let cancelled = false
+
+    async function run() {
+      if (!routesLibrary) return
+      const service = new routesLibrary.DirectionsService()
+      const results: google.maps.DirectionsResult[] = []
+
+      // Sequential on purpose: a multi-week trip is several requests against
+      // the same key the rest of the app is already using, and firing them
+      // together is the reliable way to get rate-limited on exactly the trips
+      // that need chunking in the first place.
+      for (const segment of segments) {
+        const result = await service.route({
+          origin: segment[0],
+          destination: segment[segment.length - 1],
+          waypoints: segment
+            .slice(1, -1)
+            .map((location) => ({ location, stopover: true })),
+          travelMode: routesLibrary.TravelMode.DRIVING,
+        })
+        if (cancelled) return
+        results.push(result)
+      }
+
+      // Nothing is drawn until every segment is in hand, so the polyline
+      // fallback is never half-covered by a route that stops mid-trip.
+      for (const result of results) {
+        const renderer = new routesLibrary.DirectionsRenderer({
+          map,
+          // The screen draws its own day badges and place pins; Directions'
+          // A/B/C markers would bury them under less information.
+          suppressMarkers: true,
+          // Zoom drives the marker tiers here, so the route must not move the
+          // camera out from under the traveler.
+          preserveViewport: true,
+          polylineOptions: ROUTE_STROKE,
+        })
+        renderer.setDirections(result)
+        renderers.push(renderer)
+      }
+      setRoutedPoints(points)
+    }
+
+    run().catch((error: unknown) => {
+      console.warn('Overview route directions failed', error)
+    })
+
+    return () => {
+      cancelled = true
+      for (const renderer of renderers) renderer.setMap(null)
+    }
+  }, [map, routesLibrary, points])
+
+  if (routedPoints === points || points.length < 2) return null
+  return <Polyline path={points} {...ROUTE_STROKE} />
+}
 
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()
@@ -25,11 +121,10 @@ export function OverviewMapScreen() {
   const [zoom, setZoom] = useState(6)
   const tiers = getZoomTiers(zoom)
   const dayIds = days.map((d) => d.id)
-  const places = useDayPlaces(
-    tripId,
-    dayIds,
-    tiers.showSelectedActivities || tiers.showAllPlaces,
-  )
+  // Fetched unconditionally, unlike the marker tiers below: the route threads
+  // through each day's chosen or best-rated activity, so it needs every day's
+  // places from load, not from whenever the traveler happens to zoom past 9.
+  const places = useDayPlaces(tripId, dayIds, true)
 
   const [changeRequestOpen, setChangeRequestOpen] = useState(false)
   const [changeText, setChangeText] = useState('')
@@ -54,9 +149,19 @@ export function OverviewMapScreen() {
     setChangeRequestOpen(false)
   }
 
-  const path = days
-    .filter((d) => d.drive)
-    .flatMap((d) => [{ lat: d.overnight.lat, lng: d.overnight.lng }])
+  // Recomputed from whatever the current fetch produced rather than snapshotted
+  // once: selecting an activity on a day screen and coming back here remounts
+  // this screen, re-reads the days' places, and the route moves to match.
+  const routePoints = useMemo(
+    () =>
+      buildOverviewRoutePoints(
+        days.map((day) => ({
+          overnight: day.overnight,
+          activities: places[day.id]?.activities,
+        })),
+      ),
+    [days, places],
+  )
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
@@ -150,18 +255,12 @@ export function OverviewMapScreen() {
             }}
             defaultZoom={zoom}
             mapId="rv-trip-overview"
+            gestureHandling="greedy"
             onCameraChanged={(event: MapCameraChangedEvent) =>
               setZoom(event.detail.zoom)
             }
           >
-            {path.length > 1 && (
-              <Polyline
-                path={path}
-                strokeColor="#ea580c"
-                strokeOpacity={0.8}
-                strokeWeight={4}
-              />
-            )}
+            <TripRoute points={routePoints} />
 
             <AdvancedMarker
               position={{
