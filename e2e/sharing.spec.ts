@@ -15,19 +15,25 @@ test('joining via the manual code input reaches the same trip as the URL param p
   expect(code).toBeTruthy()
 
   await pageB.goto('/')
-  await pageB.getByTestId('join-code-input').waitFor()
+  await pageB.getByTestId('share-menu-toggle').click()
   await pageB.getByTestId('join-code-input').fill(code!)
   await pageB.getByTestId('join-code-submit').click()
 
   await pageB.getByTestId('trip-name-input').waitFor()
+  await pageB.getByTestId('share-menu-toggle').click()
   await expect(pageB.getByTestId('share-code')).toHaveText(`Share code: ${code}`)
 
   await contextA.close()
   await contextB.close()
 })
 
-test('copy-link button is present next to the share code', async ({ page }) => {
+test('copy-link button is present next to the share code, behind the collapsed share menu', async ({
+  page,
+}) => {
   await page.goto('/')
-  await page.getByTestId('share-code').waitFor()
+  await page.getByTestId('share-menu-toggle').waitFor()
+  await expect(page.getByTestId('copy-share-link')).not.toBeVisible()
+
+  await page.getByTestId('share-menu-toggle').click()
   await expect(page.getByTestId('copy-share-link')).toBeVisible()
 })

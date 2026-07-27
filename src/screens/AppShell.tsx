@@ -99,43 +99,56 @@ function AppShell() {
                   onFocus={() => setIsEditingName(true)}
                   onBlur={saveName}
                 />
-                {trip.meta.shareCode && (
-                  <div className="flex items-center justify-center gap-2">
-                    <p
-                      className="text-sm text-neutral-500 dark:text-neutral-400"
-                      data-testid="share-code"
-                    >
-                      Share code: {trip.meta.shareCode}
-                    </p>
-                    <button
-                      type="button"
-                      data-testid="copy-share-link"
-                      onClick={() => copyShareLink().catch(console.error)}
-                      className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
-                    >
-                      {linkCopied ? 'Copied!' : 'Copy link'}
-                    </button>
-                  </div>
-                )}
-                <form
-                  onSubmit={submitJoinCode}
-                  className="flex items-center justify-center gap-2"
+                <details
+                  className="mx-auto max-w-xs text-center"
+                  data-testid="share-menu"
                 >
-                  <input
-                    className="w-full max-w-40 rounded border border-neutral-300 px-3 py-2 text-center text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
-                    data-testid="join-code-input"
-                    placeholder="Enter a share code"
-                    value={joinCodeDraft}
-                    onChange={(event) => setJoinCodeDraft(event.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    data-testid="join-code-submit"
-                    className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+                  <summary
+                    data-testid="share-menu-toggle"
+                    className="cursor-pointer text-sm text-orange-700 underline dark:text-orange-400"
                   >
-                    Join
-                  </button>
-                </form>
+                    Share / join trip
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {trip.meta.shareCode && (
+                      <div className="flex items-center justify-center gap-2">
+                        <p
+                          className="text-sm text-neutral-500 dark:text-neutral-400"
+                          data-testid="share-code"
+                        >
+                          Share code: {trip.meta.shareCode}
+                        </p>
+                        <button
+                          type="button"
+                          data-testid="copy-share-link"
+                          onClick={() => copyShareLink().catch(console.error)}
+                          className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+                        >
+                          {linkCopied ? 'Copied!' : 'Copy link'}
+                        </button>
+                      </div>
+                    )}
+                    <form
+                      onSubmit={submitJoinCode}
+                      className="flex items-center justify-center gap-2"
+                    >
+                      <input
+                        className="w-full max-w-40 rounded border border-neutral-300 px-3 py-2 text-center text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                        data-testid="join-code-input"
+                        placeholder="Enter a share code"
+                        value={joinCodeDraft}
+                        onChange={(event) => setJoinCodeDraft(event.target.value)}
+                      />
+                      <button
+                        type="submit"
+                        data-testid="join-code-submit"
+                        className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+                      >
+                        Join
+                      </button>
+                    </form>
+                  </div>
+                </details>
               </div>
               <nav className="mt-4 flex flex-wrap justify-center gap-1 text-sm">
                 <Link
