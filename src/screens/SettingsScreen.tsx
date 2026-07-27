@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { addDoc, collection } from 'firebase/firestore'
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
@@ -59,6 +59,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         tripId,
         kind: 'full',
         status: 'pending',
+        createdAt: serverTimestamp(),
       })
     } finally {
       submittingRef.current = false

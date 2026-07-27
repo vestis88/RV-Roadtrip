@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { addDoc, collection } from 'firebase/firestore'
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import type { Trip } from '@rv/shared'
 import { db } from '../lib/firebase'
 import type { TripDayWithId } from './useTripDays'
@@ -91,6 +91,7 @@ export function useExecutionMode(
       tripId,
       kind: 'replan',
       status: 'pending',
+      createdAt: serverTimestamp(),
       replanContext: {
         currentLocation,
         today,

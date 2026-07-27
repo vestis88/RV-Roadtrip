@@ -6,7 +6,7 @@ import {
   Polyline,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
-import { addDoc, collection } from 'firebase/firestore'
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import type { Activity } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { useTripContext } from '../context/TripContext'
@@ -50,6 +50,7 @@ export function OverviewMapScreen() {
       tripId,
       kind: 'replan',
       status: 'pending',
+      createdAt: serverTimestamp(),
       replanContext: {
         currentLocation: {
           lat: trip.settings.startPoint.lat,
