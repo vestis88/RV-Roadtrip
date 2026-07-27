@@ -37,6 +37,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test -w shared
+      # @rv/shared's package.json resolves via "main": "./dist/index.js" — any
+      # frontend file with a value-level import from it (not just `import
+      # type`) needs this built first, or Vite's resolver fails outright.
+      - run: npm run build -w shared
       - run: npm run test
       - run: npm run build
       - run: npm run build -w functions
