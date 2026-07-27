@@ -58,11 +58,20 @@ export type PlanTripSkeleton = z.infer<typeof planTripSkeletonSchema>
 // under real time/distance constraints, instead of trying to both curate
 // and schedule in a single call — which is what previously biased routes
 // toward whatever town was closest to the direct line.
+// lat/lng are NOT produced by Claude — they're geocoded server-side after
+// the response validates (generateRegionHighlights), so the review UI can
+// draw the candidates on a map and estimate each one's detour off the
+// ideal route. Optional because geocoding is best-effort: a town that
+// doesn't resolve, a transient Places error, or an unconfigured
+// GOOGLE_PLACES_API_KEY must degrade to "no coordinates for this one",
+// never to a failed trip generation.
 export const regionHighlightCandidateSchema = z.object({
   town: z.string(),
   country: z.string().length(2),
   why: z.string(),
   priority: z.enum(['must-see', 'worth-a-detour', 'nice-if-convenient']),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
 })
 
 export const regionHighlightSchema = z.object({
@@ -76,9 +85,13 @@ export const regionHighlightsResponseSchema = z.object({
   regions: z.array(regionHighlightSchema).min(1),
 })
 
-export type RegionHighlightCandidate = z.infer<typeof regionHighlightCandidateSchema>
+export type RegionHighlightCandidate = z.infer<
+  typeof regionHighlightCandidateSchema
+>
 export type RegionHighlight = z.infer<typeof regionHighlightSchema>
-export type RegionHighlightsResponse = z.infer<typeof regionHighlightsResponseSchema>
+export type RegionHighlightsResponse = z.infer<
+  typeof regionHighlightsResponseSchema
+>
 
 // Phase 1 of planTrip's three-phase generation: just the route shape (which
 // town each day overnights in, and the drive legs between them) for the

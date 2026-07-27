@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { defineSecret } from 'firebase-functions/params'
 import type { TripSettings } from '@rv/shared'
+import { geocodeQuery } from '../placesApi.js'
 import {
   buildChunkDetailPrompt,
   buildRegionHighlightsPrompt,
@@ -63,7 +64,9 @@ export function parseAndValidateRouteOutline(text: string): RouteOutline {
   const outline = parseRouteOutline(text)
   const indices = outline.days.map((day) => day.index)
   const expected = indices.map((_, i) => i)
-  const isContiguousFromZero = indices.every((index, i) => index === expected[i])
+  const isContiguousFromZero = indices.every(
+    (index, i) => index === expected[i],
+  )
   if (!isContiguousFromZero) {
     throw new Error(
       `"index" must be 0-based and contiguous (0, 1, 2, …) with no gaps — got [${indices.join(', ')}]`,
@@ -100,7 +103,9 @@ async function callWithRetry<T>(
   maxTokens: number,
   parse: (text: string) => T,
 ): Promise<T> {
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userContent }]
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: userContent },
+  ]
 
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -124,7 +129,9 @@ async function callWithRetry<T>(
     try {
       return parse(text)
     } catch (error) {
-      lastError = new Error(`${String(error)} | ${describeResponse(response, text)}`)
+      lastError = new Error(
+        `${String(error)} | ${describeResponse(response, text)}`,
+      )
       messages.push({ role: 'assistant', content: text })
       messages.push({
         role: 'user',
@@ -150,7 +157,62 @@ export async function generateRegionHighlights(input: {
 }): Promise<RegionHighlightsResponse> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRegionHighlightsPrompt(input)
-  return callWithRetry(client, system, user, 8000, parseRegionHighlights)
+  const highlights = await callWithRetry(
+    client,
+    system,
+    user,
+    8000,
+    parseRegionHighlights,
+  )
+  return geocodeHighlights(highlights, input.settings)
+}
+
+/**
+ * Resolves every candidate town to coordinates so the review UI can map the
+ * candidates and estimate each one's detour off the ideal route. Claude is
+ * deliberately not asked for coordinates (models invent plausible-looking
+ * wrong ones); these come from Places.
+ *
+ * Best-effort by design: geocodeQuery throws when GOOGLE_PLACES_API_KEY is
+ * unset and can fail per-town on a bad name or transient error, and none of
+ * that is worth failing a whole trip generation over — a candidate that
+ * can't be located simply keeps its other fields and carries no lat/lng,
+ * which the review panel renders without a detour badge. Biased near
+ * startPoint rather than per-region: a single global bias point is enough
+ * to disambiguate town names at this scale, and text search already carries
+ * the country in the query.
+ */
+async function geocodeHighlights(
+  highlights: RegionHighlightsResponse,
+  settings: TripSettings,
+): Promise<RegionHighlightsResponse> {
+  const near = settings.startPoint
+  if (!near) return highlights
+
+  const located = await Promise.all(
+    highlights.regions.map(async (region) => ({
+      ...region,
+      candidateStops: await Promise.all(
+        region.candidateStops.map(async (stop) => {
+          try {
+            const point = await geocodeQuery(
+              `${stop.town}, ${stop.country}`,
+              near,
+            )
+            return point ? { ...stop, lat: point.lat, lng: point.lng } : stop
+          } catch (error) {
+            console.warn(
+              `Geocoding highlight candidate "${stop.town}, ${stop.country}" failed — continuing without coordinates`,
+              error,
+            )
+            return stop
+          }
+        }),
+      ),
+    })),
+  )
+
+  return { regions: located }
 }
 
 /**
@@ -163,7 +225,9 @@ export async function generateSkeletonFromHighlights(input: {
   settings: TripSettings
   notesFreeText: string
   highlights: RegionHighlightsResponse
-  onProgress?: (progress: Extract<PlanTripProgress, { phase: 'outline' | 'detail' }>) => void
+  onProgress?: (
+    progress: Extract<PlanTripProgress, { phase: 'outline' | 'detail' }>,
+  ) => void
 }): Promise<PlanTripSkeleton> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { highlights } = input
@@ -188,14 +252,24 @@ export async function generateSkeletonFromHighlights(input: {
 
   const detailByIndex = new Map<number, ChunkDetailResponse['days'][number]>()
   for (let c = 0; c < chunks.length; c++) {
-    input.onProgress?.({ phase: 'detail', chunkIndex: c + 1, chunkCount: chunks.length })
+    input.onProgress?.({
+      phase: 'detail',
+      chunkIndex: c + 1,
+      chunkCount: chunks.length,
+    })
     const { system, user } = buildChunkDetailPrompt({
       settings: input.settings,
       notesFreeText: input.notesFreeText,
       outline,
       chunkDays: chunks[c],
     })
-    const detail = await callWithRetry(client, system, user, 16000, parseChunkDetail)
+    const detail = await callWithRetry(
+      client,
+      system,
+      user,
+      16000,
+      parseChunkDetail,
+    )
     for (const day of detail.days) {
       detailByIndex.set(day.index, day)
     }
@@ -204,7 +278,9 @@ export async function generateSkeletonFromHighlights(input: {
   const days: PlanTripSkeletonDay[] = outline.days.map((outlineDay) => {
     const detail = detailByIndex.get(outlineDay.index)
     if (!detail) {
-      throw new Error(`Claude never returned detail for day index ${outlineDay.index}`)
+      throw new Error(
+        `Claude never returned detail for day index ${outlineDay.index}`,
+      )
     }
     return {
       index: outlineDay.index,

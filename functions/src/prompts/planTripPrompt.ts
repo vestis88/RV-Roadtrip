@@ -21,6 +21,8 @@ Step 3: for each region, list candidate overnight towns as a ranked shortlist:
 - "worth-a-detour": strong candidates if the schedule allows.
 - "nice-if-convenient": fine to include only if it's already roughly on the way.
 
+The "why" for each candidate town is what the traveler actually reads when deciding whether to keep or drop it, so make it substantial: 2-4 sentences that first describe what is genuinely there and what the place is like (the specific sights, landscape, and character/feel of the town — name real places, don't stay abstract), then connect that to THESE travelers' stated interests, ages, and freeform notes. Write it so someone who has never heard of the town could decide on it from your description alone, without going and looking the place up somewhere else. Do not write a single generic sentence.
+
 Do NOT worry about the trip's exact dates, total length, or drive-time limits — that scheduling problem is solved in a later step, by selecting from what you produce here. List more candidates than a typical trip could actually fit; being generous here gives the scheduling step real choices instead of one path.
 
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences:
@@ -31,7 +33,7 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
       "country": string (ISO 2-letter code),
       "reasoning": string (one to two sentences on what this region is good for, for these travelers),
       "candidateStops": [
-        { "town": string, "country": string (ISO 2-letter code), "why": string (one sentence, tied to interests/notes), "priority": "must-see" | "worth-a-detour" | "nice-if-convenient" }
+        { "town": string, "country": string (ISO 2-letter code), "why": string (2-4 sentences: what's actually there and what the place is like, then why it fits THESE travelers' interests/notes — enough to decide on without looking it up elsewhere), "priority": "must-see" | "worth-a-detour" | "nice-if-convenient" }
       ]
     }
   ]

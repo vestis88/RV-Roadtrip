@@ -47,25 +47,109 @@ const RECORDED_OUTLINE = `\`\`\`json
 
 function activities() {
   return [
-    { name: 'Maihaugen Open-Air Museum', town: 'Lillehammer', category: 'museum', kidFriendly: true, blurb: 'A hidden-gem open-air museum the kids will love.' },
-    { name: 'Lysgårdsbakkene Ski Jumping Arena', town: 'Lillehammer', category: 'sight', kidFriendly: true, blurb: 'Olympic ski jump with a viewing platform.' },
-    { name: 'Hunderfossen Family Park', town: 'Øyer', category: 'playground', kidFriendly: true, blurb: 'A classic family theme park just outside town.' },
-    { name: 'Mjøsa lakeside walk', town: 'Lillehammer', category: 'hike', kidFriendly: true, blurb: 'A gentle lakeside stroll with picnic spots.' },
-    { name: 'Lillehammer Art Museum', town: 'Lillehammer', category: 'sight', kidFriendly: false, blurb: 'A striking modern building with Norwegian art.' },
+    {
+      name: 'Maihaugen Open-Air Museum',
+      town: 'Lillehammer',
+      category: 'museum',
+      kidFriendly: true,
+      blurb: 'A hidden-gem open-air museum the kids will love.',
+    },
+    {
+      name: 'Lysgårdsbakkene Ski Jumping Arena',
+      town: 'Lillehammer',
+      category: 'sight',
+      kidFriendly: true,
+      blurb: 'Olympic ski jump with a viewing platform.',
+    },
+    {
+      name: 'Hunderfossen Family Park',
+      town: 'Øyer',
+      category: 'playground',
+      kidFriendly: true,
+      blurb: 'A classic family theme park just outside town.',
+    },
+    {
+      name: 'Mjøsa lakeside walk',
+      town: 'Lillehammer',
+      category: 'hike',
+      kidFriendly: true,
+      blurb: 'A gentle lakeside stroll with picnic spots.',
+    },
+    {
+      name: 'Lillehammer Art Museum',
+      town: 'Lillehammer',
+      category: 'sight',
+      kidFriendly: false,
+      blurb: 'A striking modern building with Norwegian art.',
+    },
   ]
 }
 
 function restaurants() {
   return [
-    { name: 'Nikkers', town: 'Lillehammer', meal: 'breakfast', cuisine: 'Norwegian', blurb: 'Cozy breakfast spot near the river.' },
-    { name: 'Bakeriet i Lillehammer', town: 'Lillehammer', meal: 'breakfast', cuisine: 'Bakery', blurb: 'Local bakery with fresh pastries.' },
-    { name: 'Cafe Klosteret', town: 'Lillehammer', meal: 'breakfast', cuisine: 'Cafe', blurb: 'Relaxed café in a historic building.' },
-    { name: 'Vertshuset', town: 'Lillehammer', meal: 'lunch', cuisine: 'Norwegian', blurb: 'Traditional lunch fare in the old town.' },
-    { name: 'Svare & Berg', town: 'Lillehammer', meal: 'lunch', cuisine: 'Contemporary', blurb: 'Modern bistro with a seasonal menu.' },
-    { name: 'Nikkers Lunsj', town: 'Lillehammer', meal: 'lunch', cuisine: 'Norwegian', blurb: 'Same cozy spot, hearty midday plates.' },
-    { name: 'Bryggerikjelleren', town: 'Lillehammer', meal: 'dinner', cuisine: 'Norwegian', blurb: 'Cozy cellar restaurant near the river.' },
-    { name: 'Egon Lillehammer', town: 'Lillehammer', meal: 'dinner', cuisine: 'Family', blurb: 'Reliable family-friendly chain restaurant.' },
-    { name: 'Sushi Bar Lillehammer', town: 'Lillehammer', meal: 'dinner', cuisine: 'Japanese', blurb: 'A change of pace with fresh sushi.' },
+    {
+      name: 'Nikkers',
+      town: 'Lillehammer',
+      meal: 'breakfast',
+      cuisine: 'Norwegian',
+      blurb: 'Cozy breakfast spot near the river.',
+    },
+    {
+      name: 'Bakeriet i Lillehammer',
+      town: 'Lillehammer',
+      meal: 'breakfast',
+      cuisine: 'Bakery',
+      blurb: 'Local bakery with fresh pastries.',
+    },
+    {
+      name: 'Cafe Klosteret',
+      town: 'Lillehammer',
+      meal: 'breakfast',
+      cuisine: 'Cafe',
+      blurb: 'Relaxed café in a historic building.',
+    },
+    {
+      name: 'Vertshuset',
+      town: 'Lillehammer',
+      meal: 'lunch',
+      cuisine: 'Norwegian',
+      blurb: 'Traditional lunch fare in the old town.',
+    },
+    {
+      name: 'Svare & Berg',
+      town: 'Lillehammer',
+      meal: 'lunch',
+      cuisine: 'Contemporary',
+      blurb: 'Modern bistro with a seasonal menu.',
+    },
+    {
+      name: 'Nikkers Lunsj',
+      town: 'Lillehammer',
+      meal: 'lunch',
+      cuisine: 'Norwegian',
+      blurb: 'Same cozy spot, hearty midday plates.',
+    },
+    {
+      name: 'Bryggerikjelleren',
+      town: 'Lillehammer',
+      meal: 'dinner',
+      cuisine: 'Norwegian',
+      blurb: 'Cozy cellar restaurant near the river.',
+    },
+    {
+      name: 'Egon Lillehammer',
+      town: 'Lillehammer',
+      meal: 'dinner',
+      cuisine: 'Family',
+      blurb: 'Reliable family-friendly chain restaurant.',
+    },
+    {
+      name: 'Sushi Bar Lillehammer',
+      town: 'Lillehammer',
+      meal: 'dinner',
+      cuisine: 'Japanese',
+      blurb: 'A change of pace with fresh sushi.',
+    },
   ]
 }
 
@@ -92,7 +176,9 @@ describe('parseRegionHighlights', () => {
 
   it('throws on a response that violates the schema', () => {
     expect(() => parseRegionHighlights('{"regions": []}')).toThrow()
-    expect(() => parseRegionHighlights('{"regions": [{"region": "x"}]}')).toThrow()
+    expect(() =>
+      parseRegionHighlights('{"regions": [{"region": "x"}]}'),
+    ).toThrow()
   })
 })
 
@@ -117,7 +203,10 @@ describe('parseAndValidateRouteOutline', () => {
   })
 
   it('rejects 1-based day numbering', () => {
-    const oneBased = RECORDED_OUTLINE.replace('"index": 0', '"index": 1').replace(
+    const oneBased = RECORDED_OUTLINE.replace(
+      '"index": 0',
+      '"index": 1',
+    ).replace(
       '"index": 1,\n      "date": "2026-07-11"',
       '"index": 2,\n      "date": "2026-07-11"',
     )
@@ -153,6 +242,24 @@ vi.mock('@anthropic-ai/sdk', () => ({
     messages = { create: createMock }
   },
 }))
+
+// vi.hoisted, unlike the plain const above: vi.mock is hoisted above every
+// top-level statement, and this factory dereferences the mock as it runs
+// (rather than lazily inside a class body, the way the Anthropic one does),
+// so the binding has to be hoisted with it.
+const geocodeQueryMock = vi.hoisted(() => vi.fn())
+
+// placesApi also exports the googlePlacesApiKey secret constant, which
+// planTrip.ts's own module graph pulls in — spreading the real module keeps
+// that (and every other export) intact while swapping only geocodeQuery.
+vi.mock('../placesApi.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../placesApi.js')>()
+  return { ...actual, geocodeQuery: geocodeQueryMock }
+})
+
+const SETTINGS_WITH_START = {
+  startPoint: { name: 'Oslo, Norway', lat: 59.9139, lng: 10.7522 },
+} as never
 
 function textResponse(text: string) {
   return { content: [{ type: 'text', text }], stop_reason: 'end_turn' }
@@ -192,8 +299,16 @@ describe('planTrip', () => {
         index,
         date: `2026-07-${10 + index}`,
         type: 'drive',
-        overnight: { name: `Stop ${index}`, town: `Town ${index}`, country: 'NO' },
-        drive: { fromTown: `Town ${index - 1}`, toTown: `Town ${index}`, slot: 'morning' },
+        overnight: {
+          name: `Stop ${index}`,
+          town: `Town ${index}`,
+          country: 'NO',
+        },
+        drive: {
+          fromTown: `Town ${index - 1}`,
+          toTown: `Town ${index}`,
+          slot: 'morning',
+        },
         highlightReason: `Reason for stop ${index}.`,
       })),
     }
@@ -201,7 +316,9 @@ describe('planTrip', () => {
       .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse(JSON.stringify(tenDayOutline)))
       // CHUNK_SIZE is 7, so 10 days split into a 7-day and a 3-day call.
-      .mockResolvedValueOnce(textResponse(dayDetailResponseFor([0, 1, 2, 3, 4, 5, 6])))
+      .mockResolvedValueOnce(
+        textResponse(dayDetailResponseFor([0, 1, 2, 3, 4, 5, 6])),
+      )
       .mockResolvedValueOnce(textResponse(dayDetailResponseFor([7, 8, 9])))
 
     const { planTrip } = await import('./planTrip.js')
@@ -214,12 +331,22 @@ describe('planTrip', () => {
 
     expect(createMock).toHaveBeenCalledTimes(4)
     expect(result.days).toHaveLength(10)
-    expect(result.days.map((d) => d.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(result.days.map((d) => d.index)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    ])
     expect(result.days[9].overnight.name).toBe('Stop 9')
     expect(onProgress).toHaveBeenCalledWith({ phase: 'highlights' })
     expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
-    expect(onProgress).toHaveBeenCalledWith({ phase: 'detail', chunkIndex: 1, chunkCount: 2 })
-    expect(onProgress).toHaveBeenCalledWith({ phase: 'detail', chunkIndex: 2, chunkCount: 2 })
+    expect(onProgress).toHaveBeenCalledWith({
+      phase: 'detail',
+      chunkIndex: 1,
+      chunkCount: 2,
+    })
+    expect(onProgress).toHaveBeenCalledWith({
+      phase: 'detail',
+      chunkIndex: 2,
+      chunkCount: 2,
+    })
   })
 
   it('retries the outline call once on a schema failure and succeeds on the second attempt', async () => {
@@ -333,6 +460,98 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(skeleton.days).toHaveLength(2)
     expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
     expect(onProgress).not.toHaveBeenCalledWith({ phase: 'highlights' })
+  })
+
+  it('attaches geocoded lat/lng to every candidate stop', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock
+      .mockResolvedValueOnce({ lat: 61.1153, lng: 10.4662 })
+      .mockResolvedValueOnce({ lat: 62.1008, lng: 7.2064 })
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    const [lillehammer, geiranger] = highlights.regions[0].candidateStops
+    expect(lillehammer).toMatchObject({
+      town: 'Lillehammer',
+      lat: 61.1153,
+      lng: 10.4662,
+    })
+    expect(geiranger).toMatchObject({
+      town: 'Geiranger',
+      lat: 62.1008,
+      lng: 7.2064,
+    })
+    // Queried by "town, country", biased near the trip's start point.
+    expect(geocodeQueryMock).toHaveBeenCalledWith('Lillehammer, NO', {
+      name: 'Oslo, Norway',
+      lat: 59.9139,
+      lng: 10.7522,
+    })
+  })
+
+  it('degrades to a candidate with no coordinates when geocoding throws (e.g. no Places key)', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockRejectedValue(
+      new Error('GOOGLE_PLACES_API_KEY is not configured'),
+    )
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    const [lillehammer] = highlights.regions[0].candidateStops
+    // Everything else survives — only the coordinates are missing.
+    expect(lillehammer.town).toBe('Lillehammer')
+    expect(lillehammer.priority).toBe('must-see')
+    expect(lillehammer.why).toContain('Olympic')
+    expect(lillehammer.lat).toBeUndefined()
+    expect(lillehammer.lng).toBeUndefined()
+  })
+
+  it('degrades to a candidate with no coordinates when the town does not resolve', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+    // First town resolves, second returns no match at all.
+    geocodeQueryMock
+      .mockResolvedValueOnce({ lat: 61.1153, lng: 10.4662 })
+      .mockResolvedValueOnce(null)
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    const [lillehammer, geiranger] = highlights.regions[0].candidateStops
+    expect(lillehammer.lat).toBe(61.1153)
+    expect(geiranger.town).toBe('Geiranger')
+    expect(geiranger.lat).toBeUndefined()
+  })
+
+  it('skips geocoding entirely when the trip has no start point to bias from', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(geocodeQueryMock).not.toHaveBeenCalled()
+    expect(highlights.regions[0].candidateStops[0].lat).toBeUndefined()
   })
 
   it('planTrip (the combined path) is unaffected by the split — still highlights + outline + detail', async () => {
