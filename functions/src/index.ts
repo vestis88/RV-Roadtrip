@@ -4,8 +4,16 @@
 // functions with the default us-central1 region baked in.
 import './globalOptions.js'
 import { initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 
 initializeApp()
+// Places API responses routinely omit optional fields (rating, photos,
+// opening hours, price level, ...). Building Activity/Restaurant docs from
+// them via plain property assignment leaves those keys explicitly
+// `undefined`, which the Admin SDK rejects by default ("Cannot use
+// 'undefined' as a Firestore value") — these fields are genuinely optional
+// in the schema, so omitting them is correct, not a bug to work around.
+getFirestore().settings({ ignoreUndefinedProperties: true })
 
 export { createTrip, joinTrip } from './trips.js'
 export { generatePlan } from './generatePlan.js'

@@ -7,6 +7,7 @@ const PROJECT_ID = 'demo-rv-trip-planner'
 
 beforeAll(() => {
   initializeApp({ projectId: PROJECT_ID })
+  getFirestore().settings({ ignoreUndefinedProperties: true })
 })
 
 async function waitFor<T>(
