@@ -59,7 +59,7 @@ export function ChipMultiSelect({
               onClick={() => toggle(option.value)}
               className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
                 isSelected
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'bg-neutral-900 text-white shadow-sm dark:bg-white dark:text-neutral-900'
                   : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-800'
               }`}
             >

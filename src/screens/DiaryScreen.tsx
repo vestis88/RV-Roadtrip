@@ -29,7 +29,7 @@ function DiaryEntryRow({ entry }: { entry: LogEntryWithId }) {
       </p>
       <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
         <span>{entry.date}</span>
-        <span className="chip chip-blue">{entry.refType}</span>
+        <span className="chip chip-neutral">{entry.refType}</span>
       </p>
       {entry.note && (
         <p

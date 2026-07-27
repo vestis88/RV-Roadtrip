@@ -39,7 +39,7 @@ export function CountriesScreen() {
                 <span>{countryName(code)}</span>
                 <span
                   aria-hidden
-                  className="ml-auto text-blue-600 dark:text-blue-400"
+                  className="ml-auto text-orange-600 dark:text-orange-400"
                 >
                   →
                 </span>

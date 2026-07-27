@@ -179,7 +179,7 @@ export function AddCustomStopForm({
           <label className="flex items-center gap-1 text-sm text-neutral-700 dark:text-neutral-300">
             <input
               type="checkbox"
-              className="accent-blue-600"
+              className="accent-orange-600"
               data-testid="custom-stop-kid-friendly"
               checked={kidFriendly}
               onChange={(event) => setKidFriendly(event.target.checked)}

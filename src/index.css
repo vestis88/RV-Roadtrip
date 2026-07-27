@@ -3,9 +3,12 @@
 /* ---------------------------------------------------------------------------
  * Design system
  * ---------------------------------------------------------------------------
- * A travel-itinerary look: white cards floating on a lightly recessed neutral
- * surface, blue as the single primary/action colour, warm amber reserved for
- * ratings and "this one's highlighted", and pill-shaped controls throughout.
+ * A travel-itinerary look, calibrated against an actual wanderlog.com
+ * screenshot (this app's original blue palette was a guess made without
+ * being able to load the live site — corrected 2026-07-27): mostly
+ * monochrome — near-black text, light neutral-gray section backgrounds,
+ * solid near-black "primary" pills — with a single warm coral/orange accent
+ * used sparingly for links, highlights, and badges. No blue anywhere.
  *
  * These live as component classes (rather than being retyped as utility
  * strings in 20 components) so the radius/shadow/colour scale stays in one
@@ -19,7 +22,7 @@
 @layer components {
   /* Recessed page/section background that white cards visually float on. */
   .surface {
-    @apply bg-neutral-50 dark:bg-neutral-950;
+    @apply bg-neutral-100 dark:bg-neutral-950;
   }
 
   /* Standard card / panel container. */
@@ -47,17 +50,20 @@
     @apply min-h-9 gap-1 px-3 text-xs;
   }
 
+  /* Solid near-black pill — the strongest action on a screen. Inverted in
+   * dark mode (white pill) so it still reads as "the strong one" rather than
+   * disappearing into the dark surface. */
   .btn-primary {
-    @apply bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:shadow-md disabled:hover:bg-blue-600 disabled:hover:shadow-sm;
+    @apply bg-neutral-900 text-white shadow-sm hover:bg-neutral-800 hover:shadow-md disabled:hover:bg-neutral-900 disabled:hover:shadow-sm dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200 dark:disabled:hover:bg-white;
   }
 
   .btn-secondary {
-    @apply border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800;
+    @apply bg-neutral-200 text-neutral-900 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-white dark:hover:bg-neutral-700;
   }
 
   /* Text-only action that still reads as tappable. */
   .btn-ghost {
-    @apply text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950;
+    @apply text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950;
   }
 
   .btn-danger-ghost {
@@ -67,13 +73,13 @@
   /* --- Links ------------------------------------------------------------ */
 
   .link {
-    @apply text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300;
+    @apply text-orange-700 underline underline-offset-2 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300;
   }
 
   /* --- Form fields ------------------------------------------------------ */
 
   .field {
-    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 transition outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white;
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 transition outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white dark:focus:ring-white/10;
   }
 
   .field-sm {
@@ -90,8 +96,11 @@
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
 
-  .chip-blue {
-    @apply bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300;
+  /* The one spot of colour on an otherwise neutral chip — for the single
+   * stat/badge on a screen that deserves to stand out (e.g. a countdown or
+   * day count), mirroring wanderlog.com's coral "days until trip" badge. */
+  .chip-accent {
+    @apply bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300;
   }
 
   .chip-neutral {
@@ -111,7 +120,7 @@
   }
 
   .nav-pill-active {
-    @apply bg-blue-600 text-white shadow-sm;
+    @apply bg-neutral-900 text-white shadow-sm dark:bg-white dark:text-neutral-900;
   }
 
   .nav-pill-idle {

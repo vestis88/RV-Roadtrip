@@ -80,7 +80,7 @@ export function OverviewMapScreen() {
         </span>
         <span
           data-testid="header-day-count"
-          className="chip chip-blue px-3 py-1"
+          className="chip chip-accent px-3 py-1"
         >
           {days.length} days
         </span>
@@ -122,7 +122,7 @@ export function OverviewMapScreen() {
               >
                 <input
                   type="checkbox"
-                  className="accent-blue-600"
+                  className="accent-orange-600"
                   checked={lockedDayIds.has(day.id)}
                   onChange={() => toggleLock(day.id)}
                 />

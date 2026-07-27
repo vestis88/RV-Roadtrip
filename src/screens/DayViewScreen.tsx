@@ -205,7 +205,7 @@ export function DayViewScreen() {
 
         {(day.highlightReason ?? day.extraTimeReason) && (
           <p
-            className="mx-4 mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900 italic dark:bg-blue-950 dark:text-blue-200"
+            className="mx-4 mt-2 rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-900 italic dark:bg-orange-950 dark:text-orange-200"
             data-testid="day-highlight-reason"
           >
             Why here: {day.highlightReason ?? day.extraTimeReason}
@@ -251,7 +251,7 @@ export function DayViewScreen() {
                 <span className="chip chip-neutral">
                   {day.drive.durationMin.toFixed(0)} min
                 </span>
-                <span className="chip chip-blue">{day.drive.slot}</span>
+                <span className="chip chip-neutral">{day.drive.slot}</span>
               </div>
             </div>
           )

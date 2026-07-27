@@ -72,7 +72,7 @@ export function PlaceCard({
         </p>
         {(category || rating != null) && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {category && <span className="chip chip-blue">{category}</span>}
+            {category && <span className="chip chip-neutral">{category}</span>}
             {rating != null && (
               <span className="text-xs font-medium text-neutral-700 dark:text-neutral-200">
                 <span aria-hidden className="text-amber-500">

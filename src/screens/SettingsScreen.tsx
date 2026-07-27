@@ -210,7 +210,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             min={0}
             max={14}
             data-testid="rest-day-frequency-input"
-            className="w-full accent-blue-600"
+            className="w-full accent-orange-600"
             value={settings.restDayFrequency}
             onChange={(event) =>
               commit({ restDayFrequency: Number(event.target.value) })
@@ -227,7 +227,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             min={1}
             max={10}
             data-testid="max-drive-hours-input"
-            className="w-full accent-blue-600"
+            className="w-full accent-orange-600"
             value={settings.maxDriveHoursPerDay}
             onChange={(event) =>
               commit({ maxDriveHoursPerDay: Number(event.target.value) })
@@ -244,7 +244,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             <input
               type="checkbox"
               data-testid="review-highlights-checkbox"
-              className="accent-blue-600"
+              className="accent-orange-600"
               checked={reviewBeforeGenerating}
               onChange={(event) =>
                 setReviewBeforeGenerating(event.target.checked)
