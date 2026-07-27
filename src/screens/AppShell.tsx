@@ -32,6 +32,8 @@ function AppShell() {
   const { trip, loading } = useTrip(tripId)
   const [nameDraft, setNameDraft] = useState('')
   const [isEditingName, setIsEditingName] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [joinCodeDraft, setJoinCodeDraft] = useState('')
 
   if (trip && !isEditingName && nameDraft !== trip.meta.name) {
     setNameDraft(trip.meta.name)
@@ -41,6 +43,31 @@ function AppShell() {
     setIsEditingName(false)
     if (!tripId || !nameDraft) return
     await updateDoc(doc(db, 'trips', tripId), { 'meta.name': nameDraft })
+  }
+
+  async function copyShareLink() {
+    if (!trip?.meta.shareCode) return
+    const url = `${window.location.origin}${window.location.pathname}?join=${trip.meta.shareCode}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    } catch (error) {
+      console.error('Failed to copy share link', error)
+    }
+  }
+
+  // Reuses the exact ?join= flow useTripSession already handles on mount
+  // (and that the URL-param path is already E2E-tested against) rather
+  // than duplicating the joinTrip callable logic here — this is just a
+  // friendlier way to trigger it than hand-typing a URL.
+  function submitJoinCode(event: React.FormEvent) {
+    event.preventDefault()
+    const code = joinCodeDraft.trim()
+    if (!code) return
+    const url = new URL(window.location.href)
+    url.searchParams.set('join', code)
+    window.location.href = url.toString()
   }
 
   // Hoisted here (rather than per-screen) so the whole app shares a single
@@ -73,13 +100,42 @@ function AppShell() {
                   onBlur={saveName}
                 />
                 {trip.meta.shareCode && (
-                  <p
-                    className="text-sm text-neutral-500 dark:text-neutral-400"
-                    data-testid="share-code"
-                  >
-                    Share code: {trip.meta.shareCode}
-                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <p
+                      className="text-sm text-neutral-500 dark:text-neutral-400"
+                      data-testid="share-code"
+                    >
+                      Share code: {trip.meta.shareCode}
+                    </p>
+                    <button
+                      type="button"
+                      data-testid="copy-share-link"
+                      onClick={() => copyShareLink().catch(console.error)}
+                      className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+                    >
+                      {linkCopied ? 'Copied!' : 'Copy link'}
+                    </button>
+                  </div>
                 )}
+                <form
+                  onSubmit={submitJoinCode}
+                  className="flex items-center justify-center gap-2"
+                >
+                  <input
+                    className="w-full max-w-40 rounded border border-neutral-300 px-3 py-2 text-center text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                    data-testid="join-code-input"
+                    placeholder="Enter a share code"
+                    value={joinCodeDraft}
+                    onChange={(event) => setJoinCodeDraft(event.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    data-testid="join-code-submit"
+                    className="inline-flex min-h-11 items-center rounded border border-neutral-300 px-3 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
+                  >
+                    Join
+                  </button>
+                </form>
               </div>
               <nav className="mt-4 flex flex-wrap justify-center gap-1 text-sm">
                 <Link

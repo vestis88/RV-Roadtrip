@@ -41,6 +41,21 @@ export function CountryDetailScreen() {
   const { guide, loading } = useCountryGuide(tripId, code ?? '')
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorAcknowledgedAt, setErrorAcknowledgedAt] = useState<
+    string | undefined
+  >(guide?.generatedAt)
+
+  // The refresh call can reject client-side (e.g. a timeout on a slow
+  // Claude web-search call) while the Cloud Function keeps running and
+  // still succeeds, updating `guide` via the live listener afterward — a
+  // stale error would otherwise sit on screen even though a fresh guide
+  // just arrived. Clear it whenever the guide is genuinely new (adjusting
+  // state during render, not in an effect, per React's guidance for
+  // resetting state when a value changes).
+  if (guide?.generatedAt !== errorAcknowledgedAt) {
+    setErrorAcknowledgedAt(guide?.generatedAt)
+    setError(null)
+  }
 
   async function refresh() {
     if (!code) return
