@@ -292,6 +292,14 @@ export const planRequestSchema = z.object({
   // Set on a 'full' request to pause after the highlights phase for review
   // instead of generating straight through — skippable, off by default.
   reviewHighlights: z.boolean().optional(),
+  // Set on a 'full' request to run the opt-in web-search enrichment pass
+  // between the highlights phase and the review pause: an extra Claude call
+  // (with web search) looks for worthwhile stops near the already-curated
+  // route that the knowledge-only first pass may have missed. Off by
+  // default and costs real time, so the traveler asks for it explicitly —
+  // and it only ever makes sense alongside reviewHighlights, since the whole
+  // point is judging the finds before they're baked into a plan.
+  searchForMoreStops: z.boolean().optional(),
   // Set on a 'continueFromHighlights' request: the traveler's edited
   // highlights (validated server-side against regionHighlightsResponseSchema
   // — see planMeta.checkpoint's comment for why it's untyped here) and an

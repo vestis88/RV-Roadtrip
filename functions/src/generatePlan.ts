@@ -22,7 +22,14 @@ import {
   generateSkeletonFromHighlights,
   planTrip,
 } from './prompts/planTrip.js'
-import { regionHighlightsResponseSchema } from './prompts/planTripSchema.js'
+import {
+  buildHighlightsBackbone,
+  generateEnrichedHighlights,
+} from './prompts/enrichHighlights.js'
+import {
+  regionHighlightsResponseSchema,
+  type RegionHighlightsResponse,
+} from './prompts/planTripSchema.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
   describePlanTripProgress,
@@ -49,6 +56,10 @@ interface PlanRequestData {
   reviewHighlights?: boolean
   editedHighlights?: unknown
   reviewNote?: string
+  // Opt-in web-search enrichment before the review pause (implemented
+  // 2026-07-28) — only meaningful alongside reviewHighlights, which the
+  // Settings screen enforces by forcing that box on when this one is ticked.
+  searchForMoreStops?: boolean
   status: string
 }
 
@@ -76,17 +87,59 @@ type SkeletonSource =
 export async function pauseForHighlightsReview(
   trip: Trip,
   tripRef: DocumentReference,
+  searchForMoreStops = false,
 ): Promise<void> {
-  const highlights = await generateRegionHighlights({
+  const curated = await generateRegionHighlights({
     settings: trip.settings,
     notesFreeText: trip.notes.freeText,
   })
+
+  const highlights = searchForMoreStops
+    ? await withWebSearchFinds(trip, curated)
+    : curated
 
   await tripRef.update({
     'planMeta.status': 'awaiting-highlights-review',
     'planMeta.pendingHighlights': highlights,
     'planMeta.progressLabel': FieldValue.delete(),
   })
+}
+
+/**
+ * Runs the opt-in web-search enrichment pass and appends whatever survives
+ * its distance filter as extra regions on the curated highlights (rather
+ * than merging finds into existing region objects — they're a distinct set
+ * of suggestions and read more honestly grouped as their own regions, each
+ * candidate already tagged source: 'search' for the review panel to label).
+ *
+ * Never fails the pause. This is a secondary, explicitly-requested extra on
+ * top of a primary flow that works perfectly well without it, so a web
+ * search error, an exhausted schema-validation retry, or a Places outage
+ * degrades to "you get the curated highlights" — the same principle as the
+ * review panel's map falling back to a straight line when Directions fails,
+ * rather than showing no route at all.
+ */
+async function withWebSearchFinds(
+  trip: Trip,
+  curated: RegionHighlightsResponse,
+): Promise<RegionHighlightsResponse> {
+  try {
+    const backbone = buildHighlightsBackbone(trip.settings, curated)
+    const extraRegions = await generateEnrichedHighlights({
+      settings: trip.settings,
+      notesFreeText: trip.notes.freeText,
+      highlights: curated,
+      backbone,
+    })
+    if (extraRegions.length === 0) return curated
+    return { regions: [...curated.regions, ...extraRegions] }
+  } catch (error) {
+    console.error(
+      'Highlights web-search enrichment failed — continuing with the curated highlights only',
+      error,
+    )
+    return curated
+  }
 }
 
 /**
@@ -302,7 +355,11 @@ export const generatePlan = onDocumentCreated(
         const tripSnap = await tripRef.get()
         const trip = tripSnap.data() as Trip
 
-        await pauseForHighlightsReview(trip, tripRef)
+        await pauseForHighlightsReview(
+          trip,
+          tripRef,
+          request.searchForMoreStops === true,
+        )
         await snap.ref.update({ status: 'done' })
       } catch (error) {
         console.error('generatePlan (highlights review) failed', error)

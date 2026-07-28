@@ -84,6 +84,40 @@ const FIXTURE_LOCATED_HIGHLIGHTS = {
   ],
 }
 
+// One curated candidate and one the opt-in web-search pass added, in the
+// same region: the traveler has to be able to tell which is which at a
+// glance. Both sit exactly on the corridor so the source tag is the only
+// thing that distinguishes them in the UI. `source` absent (not 'curated')
+// on the first, matching what every trip planned before this feature has.
+const FIXTURE_MIXED_SOURCE_HIGHLIGHTS = {
+  regions: [
+    {
+      region: 'Meridian country',
+      country: 'NO',
+      reasoning: 'A synthetic corridor with predictable geometry.',
+      candidateStops: [
+        {
+          town: 'Midpoint',
+          country: 'NO',
+          why: 'Hand-curated from general knowledge in the first pass.',
+          priority: 'must-see',
+          lat: 52,
+          lng: 10,
+        },
+        {
+          town: 'Found By Search',
+          country: 'NO',
+          why: 'A science centre that reopened this spring, turned up by the web-search pass.',
+          priority: 'worth-a-detour',
+          source: 'search',
+          lat: 51,
+          lng: 10,
+        },
+      ],
+    },
+  ],
+}
+
 const MERIDIAN_ENDPOINTS = {
   'settings.startPoint': { name: 'South end', lat: 50, lng: 10 },
   'settings.endPoint': { name: 'North end', lat: 54, lng: 10 },
@@ -106,6 +140,119 @@ test('checking "review before generating" is off by default and can be enabled',
   await expect(page.getByTestId('review-highlights-checkbox')).not.toBeChecked()
   await page.getByTestId('review-highlights-checkbox').check()
   await expect(page.getByTestId('review-highlights-checkbox')).toBeChecked()
+})
+
+test('"search the web for extra stops" is off by default, explains its cost, and forces the review pause on', async ({
+  page,
+}) => {
+  await getTripId(page)
+
+  const searchBox = page.getByTestId('search-more-stops-checkbox')
+  const reviewBox = page.getByTestId('review-highlights-checkbox')
+
+  // Off by default and clearly labelled with what it costs — this pass adds
+  // real waiting time before the traveler gets anything back.
+  await expect(searchBox).not.toBeChecked()
+  await expect(reviewBox).toBeEnabled()
+  await expect(page.getByText('Also search the web for extra hidden-gem stops', {
+    exact: false,
+  })).toBeVisible()
+  await expect(page.getByText('an extra AI + web-search pass runs first', {
+    exact: false,
+  })).toBeVisible()
+
+  // Searching without reviewing would bake web-search finds straight into a
+  // real plan, which is exactly what this feature is not allowed to do — so
+  // ticking it takes the review pause on and says why.
+  await searchBox.check()
+  await expect(reviewBox).toBeChecked()
+  await expect(reviewBox).toBeDisabled()
+  await expect(
+    page.getByTestId('review-highlights-forced-note'),
+  ).toBeVisible()
+
+  // Unticking hands control of the review pause straight back.
+  await searchBox.uncheck()
+  await expect(reviewBox).not.toBeChecked()
+  await expect(reviewBox).toBeEnabled()
+  await expect(page.getByTestId('review-highlights-forced-note')).toHaveCount(0)
+})
+
+test('generating with "search the web for extra stops" ticked sends both flags on the plan request', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+
+  await page.getByTestId('search-more-stops-checkbox').check()
+  await page.getByTestId('generate-plan-button').click()
+
+  // Only the request document is asserted: the generation it kicks off hits
+  // the same no-credentials wall every Claude-backed feature does in this
+  // sandbox (see cost-guards.spec.ts), so this covers the wiring, not a
+  // completed enrichment.
+  await expect
+    .poll(
+      async () => {
+        const snap = await adminDb
+          .collection('planRequests')
+          .where('tripId', '==', tripId)
+          .get()
+        return snap.size
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(1)
+
+  const snap = await adminDb
+    .collection('planRequests')
+    .where('tripId', '==', tripId)
+    .get()
+  const request = snap.docs[0].data()
+
+  expect(request.kind).toBe('full')
+  expect(request.searchForMoreStops).toBe(true)
+  // Never enrichment without review — the server is told to pause too.
+  expect(request.reviewHighlights).toBe(true)
+})
+
+test('a web-search-sourced candidate is labelled as such, and otherwise behaves like any other', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      ...MERIDIAN_ENDPOINTS,
+      'planMeta.status': 'awaiting-highlights-review',
+      'planMeta.pendingHighlights': FIXTURE_MIXED_SOURCE_HIGHLIGHTS,
+    })
+
+  await page.getByTestId('highlights-review-panel').waitFor()
+
+  // The curated candidate carries no provenance tag …
+  await expect(page.getByTestId('highlights-stop-source-0-0')).toHaveCount(0)
+  // … and the web-search find says plainly where it came from.
+  await expect(page.getByTestId('highlights-stop-source-0-1')).toHaveText(
+    'Found via web search',
+  )
+
+  // It's a normal candidate in every other respect: same detour badge, same
+  // priority controls.
+  await expect(page.getByTestId('highlights-stop-detour-0-1')).toHaveText(
+    '≈+0 km detour',
+  )
+  await page.getByTestId('highlights-stop-up-0-1').click()
+  await expect(page.getByTestId('highlights-stop-priority-0-1')).toHaveText(
+    'Must-see',
+  )
+  // Promoted, it still shows its provenance rather than passing as curated.
+  await expect(page.getByTestId('highlights-stop-source-0-1')).toHaveText(
+    'Found via web search',
+  )
+  await page.getByTestId('highlights-stop-remove-0-1').click()
+  await expect(page.getByTestId('highlights-stop-source-0-1')).toHaveCount(0)
 })
 
 test('the highlights review panel renders regions, supports re-ranking, removing, and a note, and submits a continuation request', async ({

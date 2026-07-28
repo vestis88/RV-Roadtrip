@@ -65,11 +65,20 @@ export type PlanTripSkeleton = z.infer<typeof planTripSkeletonSchema>
 // doesn't resolve, a transient Places error, or an unconfigured
 // GOOGLE_PLACES_API_KEY must degrade to "no coordinates for this one",
 // never to a failed trip generation.
+// `source` is not produced by the highlights call either: it's stamped on
+// server-side by the opt-in web-search enrichment pass (enrichHighlights.ts)
+// so the review UI can show the traveler which suggestions came from a web
+// search rather than the curated pass. Optional, and absent/undefined means
+// 'curated' — every candidate produced before this feature existed (real
+// trips mid-flight, stored pendingHighlights, existing tests) has to stay
+// valid, and a candidate the plain highlights call returned is curated by
+// definition.
 export const regionHighlightCandidateSchema = z.object({
   town: z.string(),
   country: z.string().length(2),
   why: z.string(),
   priority: z.enum(['must-see', 'worth-a-detour', 'nice-if-convenient']),
+  source: z.enum(['curated', 'search']).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
 })

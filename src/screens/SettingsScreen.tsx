@@ -18,7 +18,16 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
   const [submitting, setSubmitting] = useState(false)
   const [reviewBeforeGenerating, setReviewBeforeGenerating] = useState(false)
+  const [searchForMoreStops, setSearchForMoreStops] = useState(false)
   const submittingRef = useRef(false)
+
+  // Searching the web for extra stops only makes sense if the traveler
+  // actually gets to see and judge what it found before it's baked into a
+  // plan — that's the whole point of the feature — so ticking it forces the
+  // review pause on rather than allowing a submission with enrichment but no
+  // review. Derived rather than a state write, so unticking it hands control
+  // of the review checkbox straight back.
+  const reviewHighlights = reviewBeforeGenerating || searchForMoreStops
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
@@ -62,7 +71,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         kind: 'full',
         status: 'pending',
         createdAt: serverTimestamp(),
-        ...(reviewBeforeGenerating ? { reviewHighlights: true } : {}),
+        ...(reviewHighlights ? { reviewHighlights: true } : {}),
+        ...(searchForMoreStops ? { searchForMoreStops: true } : {}),
       })
     } finally {
       submittingRef.current = false
@@ -240,18 +250,48 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
         {(trip.planMeta.status === 'idle' ||
           trip.planMeta.status === 'stale' ||
           trip.planMeta.status === 'error') && (
-          <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
-            <input
-              type="checkbox"
-              data-testid="review-highlights-checkbox"
-              className="accent-orange-600"
-              checked={reviewBeforeGenerating}
-              onChange={(event) =>
-                setReviewBeforeGenerating(event.target.checked)
-              }
-            />
-            Review suggested regions before generating
-          </label>
+          <div className="mb-3 space-y-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                data-testid="review-highlights-checkbox"
+                className="accent-orange-600"
+                checked={reviewHighlights}
+                disabled={searchForMoreStops}
+                onChange={(event) =>
+                  setReviewBeforeGenerating(event.target.checked)
+                }
+              />
+              Review suggested regions before generating
+            </label>
+            {searchForMoreStops && (
+              <p
+                data-testid="review-highlights-forced-note"
+                className="pl-6 text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                Kept on because you're searching for extra stops — you'll see
+                what the search found, and can drop any of it, before the route
+                is built.
+              </p>
+            )}
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                data-testid="search-more-stops-checkbox"
+                className="mt-0.5 accent-orange-600"
+                checked={searchForMoreStops}
+                onChange={(event) => setSearchForMoreStops(event.target.checked)}
+              />
+              <span>
+                Also search the web for extra hidden-gem stops near the route
+                <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                  Adds real time before you get to review — an extra AI +
+                  web-search pass runs first. Anything it finds is clearly
+                  marked and stays yours to keep or drop.
+                </span>
+              </span>
+            </label>
+          </div>
         )}
         <div className="flex flex-wrap items-center gap-3">
           {trip.planMeta.status === 'idle' && (

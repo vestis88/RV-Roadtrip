@@ -343,6 +343,20 @@ export function HighlightsReviewPanel({
                       >
                         {PRIORITY_LABEL[stop.priority]}
                       </span>
+                      {/* Provenance, not a control: these behave exactly like
+                          any other candidate (same ▲/▼/Remove, same detour
+                          badge). The tag exists so a traveler can tell at a
+                          glance which suggestions a web search turned up
+                          versus which came from the curated pass, instead of
+                          the two being silently indistinguishable. */}
+                      {stop.source === 'search' && (
+                        <span
+                          data-testid={`highlights-stop-source-${regionIndex}-${stopIndex}`}
+                          className="chip chip-neutral"
+                        >
+                          Found via web search
+                        </span>
+                      )}
                       {detour.kind !== 'unknown-location' && (
                         <span
                           data-testid={`highlights-stop-detour-${regionIndex}-${stopIndex}`}
