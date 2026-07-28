@@ -65,7 +65,7 @@ export async function resolveSkeletonDay(
       toName: overnight.name,
       distanceKm: leg.distanceKm,
       durationMin: leg.durationMin,
-      slot: skDay.drive?.slot ?? 'morning',
+      slot: skDay.drive?.slot ?? 'evening',
       ...(leg.polyline ? { polyline: leg.polyline } : {}),
     }
   } else {

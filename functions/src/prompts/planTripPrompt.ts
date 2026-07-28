@@ -68,6 +68,14 @@ ${PACING_RULES}
 
 Choose overnight stops with nearby campsites where possible.
 
+Default every drive day's "slot" to "evening": drive after that day's
+activities and dinner, arriving at the new overnight town late, so full
+daylight stays available for sightseeing rather than being consumed by
+driving. Only use "morning" or "midday" for a specific day when evening
+driving is genuinely impractical for it — e.g. the drive is too long to
+finish after dinner and still leave the travelers a reasonable rest, or the
+next day's plans require an early arrival.
+
 "index" is 0-based: the first day of the trip is index 0, the second is index 1, and so on with no gaps — NOT 1-based day numbering.
 
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences, no activities or restaurants (those are planned separately):
