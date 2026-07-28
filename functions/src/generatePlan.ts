@@ -12,6 +12,7 @@ import {
   type Trip,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
+import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
 import {
@@ -37,8 +38,12 @@ import {
 
 interface PlanRequestData {
   tripId: string
-  kind: 'full' | 'replan' | 'continueFromHighlights'
+  kind: 'full' | 'replan' | 'continueFromHighlights' | 'insertRestDay'
   replanContext?: ReplanContext
+  // "Add a rest day" (implemented 2026-07-28): a purely mechanical reschedule
+  // — no Claude/Places call — routed through this trigger anyway so it shares
+  // the one-operation-per-trip cost guard below with replan/full.
+  insertRestDayContext?: { afterDayId: string }
   // Interactive/transparent route planning (implemented 2026-07-27):
   reviewHighlights?: boolean
   editedHighlights?: unknown
@@ -236,6 +241,40 @@ export const generatePlan = onDocumentCreated(
         await snap.ref.update({ status: 'done' })
       } catch (error) {
         console.error('generatePlan (highlights review) failed', error)
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': String(error),
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+        await snap.ref.update({ status: 'error', error: String(error) })
+      }
+      return
+    }
+
+    if (request.kind === 'insertRestDay') {
+      const afterDayId = request.insertRestDayContext?.afterDayId
+      if (!afterDayId) {
+        const message = 'insertRestDay request is missing insertRestDayContext'
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': message,
+        })
+        await snap.ref.update({ status: 'error', error: message })
+        return
+      }
+      try {
+        await tripRef.update({
+          'planMeta.status': 'generating',
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+        await runInsertRestDay(request.tripId, afterDayId)
+        await snap.ref.update({ status: 'done' })
+      } catch (error) {
+        console.error('runInsertRestDay failed', error)
         await tripRef.update({
           'planMeta.status': 'error',
           'planMeta.error': String(error),

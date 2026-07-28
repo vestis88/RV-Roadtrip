@@ -262,7 +262,7 @@ export const logEntrySchema = z.object({
 
 export const planRequestSchema = z.object({
   tripId: z.string(),
-  kind: z.enum(['full', 'replan', 'continueFromHighlights']),
+  kind: z.enum(['full', 'replan', 'continueFromHighlights', 'insertRestDay']),
   replanContext: z
     .object({
       currentLocation: latLngSchema,
@@ -278,6 +278,15 @@ export const planRequestSchema = z.object({
       // be told the remainder's first day needs to be an easy catch-up day,
       // not paced the same as the rest of the remainder.
       behindScheduleKm: z.number().positive().optional(),
+    })
+    .optional(),
+  // Set on an 'insertRestDay' request: the traveler wants to stay put one
+  // extra day, so a rest day is inserted immediately after this day and
+  // every later day shifts one calendar day back. Purely mechanical — no
+  // Claude/Places call involved. afterDayId is a day doc ID (= its date).
+  insertRestDayContext: z
+    .object({
+      afterDayId: z.string(),
     })
     .optional(),
   // Set on a 'full' request to pause after the highlights phase for review
