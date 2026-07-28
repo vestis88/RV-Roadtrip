@@ -421,6 +421,7 @@ export async function searchCampsiteCandidates(
           ? `Rated ${result.rating.toFixed(1)} (${result.ratingCount ?? 0} reviews) on Google.`
           : 'Commercial campsite.',
         source: 'places',
+        ...(result.googleMapsUrl ? { googleMapsUrl: result.googleMapsUrl } : {}),
       })
     }
   }

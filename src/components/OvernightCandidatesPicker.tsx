@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { httpsCallable } from 'firebase/functions'
 import type { OvernightStopCandidate, Trip, TripDay } from '@rv/shared'
 import { functions } from '../lib/firebase'
+import { googleMapsSearchUrl } from '../lib/mapLinks'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 
 interface OvernightCandidatesPickerProps {
@@ -50,6 +51,28 @@ export function OvernightCandidatesPicker({
       typeof window !== 'undefined' &&
       !window.localStorage.getItem(WILD_TOOLTIP_SEEN_KEY),
   )
+  // Candidates are resolved fresh every time this panel opens, never
+  // persisted — so unlike Day View's activity/restaurant Skip, there's
+  // nothing to write to Firestore. Skipping here just dismisses a candidate
+  // from view for this browsing session, reversibly, via the same
+  // hide-behind-a-toggle pattern DayViewScreen's PlaceCardSection uses.
+  const [skippedIndices, setSkippedIndices] = useState<Set<number>>(new Set())
+  const [expandedSkippedTypes, setExpandedSkippedTypes] = useState<
+    Set<OvernightStopCandidate['type']>
+  >(new Set())
+
+  function skipCandidate(index: number) {
+    setSkippedIndices((prev) => new Set(prev).add(index))
+  }
+
+  function toggleShowSkipped(type: OvernightStopCandidate['type']) {
+    setExpandedSkippedTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }
 
   async function loadCandidates() {
     setOpen(true)
@@ -141,10 +164,15 @@ export function OvernightCandidatesPicker({
 
       {candidates &&
         GROUPS.map(({ type, label }) => {
-          const items = candidates
+          const allItems = candidates
             .map((c, i) => ({ c, i }))
             .filter(({ c }) => c.type === type)
-          if (items.length === 0) return null
+          if (allItems.length === 0) return null
+          const skipped = allItems.filter(({ i }) => skippedIndices.has(i))
+          const showSkipped = expandedSkippedTypes.has(type)
+          const items = showSkipped
+            ? allItems
+            : allItems.filter(({ i }) => !skippedIndices.has(i))
           return (
             <div key={type} data-testid={`overnight-group-${type}`}>
               <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
@@ -186,7 +214,9 @@ export function OvernightCandidatesPicker({
                   <div
                     key={i}
                     data-testid={`overnight-candidate-${type}-${i}`}
-                    className="surface rounded-lg border border-neutral-200 p-2 text-sm dark:border-neutral-800"
+                    className={`surface rounded-lg border border-neutral-200 p-2 text-sm dark:border-neutral-800 ${
+                      skippedIndices.has(i) ? 'opacity-60' : ''
+                    }`}
                   >
                     <p className="font-medium text-neutral-900 dark:text-white">
                       {c.name}
@@ -199,18 +229,50 @@ export function OvernightCandidatesPicker({
                         AI-suggested — verify locally.
                       </p>
                     )}
-                    <button
-                      type="button"
-                      data-testid={`overnight-candidate-pick-${type}-${i}`}
-                      disabled={submittingIndex !== null}
-                      onClick={() => pickCandidate(c, i)}
-                      className="btn btn-sm btn-primary mt-2"
+                    <a
+                      data-testid={`overnight-candidate-navigate-${type}-${i}`}
+                      href={c.googleMapsUrl ?? googleMapsSearchUrl(c.lat, c.lng)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="link mt-1 inline-block text-xs font-medium"
                     >
-                      {submittingIndex === i ? 'Submitting…' : 'Use this stop'}
-                    </button>
+                      Navigate
+                    </a>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid={`overnight-candidate-pick-${type}-${i}`}
+                        disabled={submittingIndex !== null}
+                        onClick={() => pickCandidate(c, i)}
+                        className="btn btn-sm btn-primary"
+                      >
+                        {submittingIndex === i ? 'Submitting…' : 'Use this stop'}
+                      </button>
+                      {!skippedIndices.has(i) && (
+                        <button
+                          type="button"
+                          data-testid={`overnight-candidate-skip-${type}-${i}`}
+                          disabled={submittingIndex !== null}
+                          onClick={() => skipCandidate(i)}
+                          className="text-xs text-neutral-500 underline underline-offset-2 dark:text-neutral-400"
+                        >
+                          Skip
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
+              {skipped.length > 0 && (
+                <button
+                  type="button"
+                  data-testid={`overnight-group-${type}-show-skipped`}
+                  onClick={() => toggleShowSkipped(type)}
+                  className="mt-1 text-xs text-neutral-500 underline underline-offset-2 dark:text-neutral-400"
+                >
+                  {showSkipped ? 'Hide' : 'Show'} {skipped.length} skipped
+                </button>
+              )}
             </div>
           )
         })}

@@ -147,6 +147,11 @@ export const overnightStopCandidateSchema = z.object({
   // suggestions are Places/OSM-verified vs. AI-suggested and worth
   // double-checking locally.
   source: z.enum(['places', 'osm', 'claude']),
+  // Only ever set for source: 'places' — a real Places listing URL. OSM and
+  // Claude-sourced candidates have no equivalent, so the UI falls back to a
+  // generic lat/lng Maps search link for those instead of leaving them
+  // without a way to navigate there at all.
+  googleMapsUrl: z.string().url().optional(),
 })
 export type OvernightStopCandidate = z.infer<typeof overnightStopCandidateSchema>
 
