@@ -12,6 +12,7 @@ import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
+import { AddRestDay } from '../components/AddRestDay'
 import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
@@ -202,6 +203,12 @@ export function DayViewScreen() {
           dayId={dayId}
           dayNumber={day.index + 1}
           allDayIds={days.map((d) => d.id)}
+        />
+
+        <AddRestDay
+          tripId={tripId}
+          dayId={dayId}
+          overnightName={day.overnight.name}
         />
 
         <OvernightCandidatesPicker

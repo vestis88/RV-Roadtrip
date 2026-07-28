@@ -1,5 +1,25 @@
 import { expect, test } from './fixtures.js'
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+const PROJECT_ID = 'demo-rv-trip-planner'
+if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
+const adminDb = getFirestore()
+
+async function waitFor<T>(
+  fn: () => Promise<T | undefined>,
+  timeoutMs = 20_000,
+): Promise<T> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const result = await fn()
+    if (result !== undefined) return result
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  throw new Error('Timed out waiting for condition')
+}
 
 const VIEWPORTS = {
   phone: { width: 375, height: 812 },
@@ -77,4 +97,64 @@ test('swiping over the day view does not change day — that gesture is reserved
   })
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-10')
   expect(page.url()).toContain('/map/day/2026-07-10')
+})
+
+// "Add a rest day" is the one plan operation that runs entirely in the
+// backend without Claude/Places/Routes, so — unlike the other planRequest
+// flows — it completes for real in this credential-less emulator and can be
+// asserted end to end.
+test('adding a rest day inserts a day and pushes every later day back one', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  await page.goto('/map/day/2026-07-10')
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('add-rest-day-button').click()
+  await expect(page.getByTestId('add-rest-day-form')).toContainText(
+    'Lillehammer Camping',
+  )
+  await page.getByTestId('add-rest-day-confirm').click()
+  await expect(page.getByTestId('add-rest-day-form')).toHaveCount(0)
+
+  const dayIds = await waitFor(async () => {
+    const snap = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .orderBy('date')
+      .get()
+    return snap.size === 4 ? snap.docs.map((d) => d.id) : undefined
+  })
+
+  // The fixture plan is 2026-07-10..12; the extra day lands on the 11th and
+  // the two days that followed slide to the 12th and 13th.
+  expect(dayIds).toEqual([
+    '2026-07-10',
+    '2026-07-11',
+    '2026-07-12',
+    '2026-07-13',
+  ])
+
+  const insertedSnap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc('2026-07-11')
+    .get()
+  expect(insertedSnap.data()?.type).toBe('rest')
+  expect(insertedSnap.data()?.overnight.name).toBe('Lillehammer Camping')
+
+  // The day that used to be the 11th kept its content, one date later.
+  const shiftedSnap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc('2026-07-12')
+    .get()
+  expect(shiftedSnap.data()?.summary).toContain('Gudbrandsdalen')
+  expect(shiftedSnap.data()?.index).toBe(2)
+
+  await page.goto('/map/day/2026-07-11')
+  await expect(page.getByTestId('rest-day-banner')).toBeVisible()
 })
