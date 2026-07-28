@@ -3,6 +3,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import {
   AdvancedMarker,
   Map as GoogleMap,
+  Polyline,
   useMap,
   useMapsLibrary,
 } from '@vis.gl/react-google-maps'
@@ -51,6 +52,12 @@ const PRIORITY_LABEL: Record<HighlightPriority, string> = {
 // backbone keeps a route on screen instead of failing the whole call.
 const MAX_DIRECTIONS_WAYPOINTS = 23
 
+const ROUTE_STROKE = {
+  strokeColor: '#ea580c',
+  strokeOpacity: 0.85,
+  strokeWeight: 4,
+}
+
 /**
  * Draws the real driving route through the backbone. A straight polyline
  * between must-sees was the first version of this and it actively misled —
@@ -58,14 +65,18 @@ const MAX_DIRECTIONS_WAYPOINTS = 23
  * it does, around fjords and mountains), which is the specific thing this
  * screen exists to let the traveler judge.
  *
- * Renders nothing at all if the Directions call fails. The map's own tiles
- * and markers are still useful without a route line, and a review screen that
- * blanks out because a secondary API call 403'd is worse than one missing a
- * line.
+ * The straight polyline survives as the fallback state rather than as an
+ * error path (mirrors OverviewMapScreen's TripRoute): it renders immediately
+ * and is only replaced once Directions actually resolves for this exact
+ * backbone, so a failed/blocked/unconfigured Directions call still leaves a
+ * line on screen instead of nothing at all — a review screen with no route
+ * line is much easier to mistake for "broken" than one that's merely
+ * approximate.
  */
 function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
+  const [routedBackbone, setRoutedBackbone] = useState<LatLng[] | null>(null)
 
   useEffect(() => {
     if (!map || !routesLibrary || backbone.length < 2) return
@@ -78,11 +89,7 @@ function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
       // The panel frames the map itself, around every candidate rather than
       // just the routed ones.
       preserveViewport: true,
-      polylineOptions: {
-        strokeColor: '#ea580c',
-        strokeOpacity: 0.85,
-        strokeWeight: 4,
-      },
+      polylineOptions: ROUTE_STROKE,
     })
 
     const via = backbone.slice(1, -1).slice(0, MAX_DIRECTIONS_WAYPOINTS)
@@ -96,7 +103,9 @@ function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
         travelMode: routesLibrary.TravelMode.DRIVING,
       })
       .then((result) => {
-        if (!cancelled) renderer.setDirections(result)
+        if (cancelled) return
+        renderer.setDirections(result)
+        setRoutedBackbone(backbone)
       })
       .catch((error: unknown) => {
         console.warn('Highlights route directions failed', error)
@@ -108,7 +117,8 @@ function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
     }
   }, [map, routesLibrary, backbone])
 
-  return null
+  if (routedBackbone === backbone || backbone.length < 2) return null
+  return <Polyline path={backbone} {...ROUTE_STROKE} />
 }
 
 /** Keeps every candidate and both endpoints in frame without hand-picking a zoom. */
@@ -253,7 +263,7 @@ export function HighlightsReviewPanel({
 
       <div
         data-testid="highlights-map"
-        className="h-56 overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800"
+        className="h-56 overflow-hidden rounded-xl border border-neutral-200 md:h-80 lg:h-96 dark:border-neutral-800"
       >
         {apiKey ? (
           <GoogleMap
