@@ -12,7 +12,7 @@ async function setPlaceInput(locator: import('@playwright/test').Locator, value:
   }, value)
 }
 
-test('skipping an activity marks it skipped without removing it', async ({
+test('skipping an activity removes it from the row behind a "show skipped" toggle, reversibly', async ({
   page,
 }) => {
   await createTripWithPlan(page)
@@ -23,11 +23,24 @@ test('skipping an activity marks it skipped without removing it', async ({
     'suggested',
   )
   await page.getByTestId('activity-card-0-mark-skipped').click()
+
+  // Gone from the main row — this is what clears room for whatever else was
+  // generated for this slot, rather than a skipped card just sitting there.
+  await expect(page.getByTestId('activity-card-0')).toHaveCount(0)
+  const showSkipped = page.getByTestId('activities-row-show-skipped')
+  await expect(showSkipped).toHaveText('Show 1 skipped')
+
+  // But not lost outright — expanding the toggle brings it back, and it can
+  // still be un-skipped from there.
+  await showSkipped.click()
   await expect(page.getByTestId('activity-card-0-status')).toContainText(
     'skipped',
   )
-  // Still present, just marked — this is not a dismiss/hide feature.
-  await expect(page.getByTestId('activity-card-0')).toBeVisible()
+  await page.getByTestId('activity-card-0-mark-selected').click()
+  await expect(page.getByTestId('activity-card-0-status')).toContainText(
+    'selected',
+  )
+  await expect(page.getByTestId('activities-row-show-skipped')).toHaveCount(0)
 })
 
 test('adding a custom activity writes a new selected activity card', async ({

@@ -7,7 +7,7 @@ import {
 } from '@vis.gl/react-google-maps'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
-import { useDayDetail } from '../hooks/useDayDetail'
+import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { CardRow } from '../components/CardRow'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
@@ -16,7 +16,12 @@ import { AddRestDay } from '../components/AddRestDay'
 import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
-import { markDone, markSelected, markSkipped } from '../lib/placeStatus'
+import {
+  markDone,
+  markSelected,
+  markSkipped,
+  type PlaceKind,
+} from '../lib/placeStatus'
 
 interface SelectedPlace {
   id: string
@@ -31,6 +36,108 @@ function MapPanner({ target }: { target: SelectedPlace | null }) {
     if (map && target) map.panTo({ lat: target.lat, lng: target.lng })
   }, [map, target])
   return null
+}
+
+interface IndexedPlace {
+  index: number
+  place: ActivityWithId | RestaurantWithId
+}
+
+/**
+ * One CardRow's worth of activity/restaurant options. A skipped item used to
+ * just sit in place with a dimmer label — reported as "skipping does not
+ * remove the card and reveal a new one" — so it's tucked behind a "Show
+ * skipped" toggle instead: gone from the main scroller by default (clearing
+ * room for whatever else was generated for this slot), reversible by
+ * expanding the toggle and tapping Select again rather than lost outright.
+ */
+function PlaceCardSection({
+  title,
+  rowTestId,
+  cardIdPrefix,
+  kind,
+  entries,
+  tripId,
+  dayId,
+  date,
+  selectedPlaceId,
+  onSelect,
+}: {
+  title: string
+  rowTestId: string
+  cardIdPrefix: string
+  kind: PlaceKind
+  entries: IndexedPlace[]
+  tripId: string
+  dayId: string
+  date: string
+  selectedPlaceId: string | undefined
+  onSelect: (cardId: string, place: { name: string; lat: number; lng: number }) => void
+}) {
+  const [showSkipped, setShowSkipped] = useState(false)
+  const active = entries.filter(({ place }) => place.status !== 'skipped')
+  const skipped = entries.filter(({ place }) => place.status === 'skipped')
+  const visible = showSkipped ? [...active, ...skipped] : active
+
+  return (
+    <CardRow
+      title={title}
+      testId={rowTestId}
+      footer={
+        skipped.length > 0 ? (
+          <button
+            type="button"
+            data-testid={`${rowTestId}-show-skipped`}
+            onClick={() => setShowSkipped((v) => !v)}
+            className="text-xs text-neutral-500 underline underline-offset-2 dark:text-neutral-400"
+          >
+            {showSkipped ? 'Hide' : 'Show'} {skipped.length} skipped
+          </button>
+        ) : undefined
+      }
+    >
+      {visible.map(({ index, place }) => {
+        const cardId = `${cardIdPrefix}-card-${index}`
+        return (
+          <div
+            key={index}
+            className={place.status === 'skipped' ? 'opacity-60' : undefined}
+          >
+            <PlaceCard
+              testId={cardId}
+              name={place.name}
+              category={'category' in place ? place.category : undefined}
+              rating={place.rating}
+              ratingCount={place.ratingCount}
+              blurb={place.blurb}
+              photoUrl={place.photoUrl}
+              googleMapsUrl={place.googleMapsUrl}
+              status={place.status}
+              selected={selectedPlaceId === cardId}
+              onTap={() =>
+                onSelect(cardId, {
+                  name: place.name,
+                  lat: place.lat,
+                  lng: place.lng,
+                })
+              }
+              onMarkSelected={() =>
+                markSelected(tripId, dayId, kind, place.id).catch(console.error)
+              }
+              onMarkDone={(note) =>
+                markDone(tripId, dayId, kind, place.id, date, note).catch(
+                  console.error,
+                )
+              }
+              onMarkSkipped={() =>
+                markSkipped(tripId, dayId, kind, place.id).catch(console.error)
+              }
+            />
+          </div>
+        )
+      })}
+    </CardRow>
+  )
 }
 
 export function DayViewScreen() {
@@ -258,207 +365,57 @@ export function DayViewScreen() {
           }}
         />
 
-        <CardRow title="Activities" testId="activities-row">
-          {activities.map((activity, i) => {
-            const testId = `activity-card-${i}`
-            return (
-              <PlaceCard
-                key={i}
-                testId={testId}
-                name={activity.name}
-                category={activity.category}
-                rating={activity.rating}
-                ratingCount={activity.ratingCount}
-                blurb={activity.blurb}
-                photoUrl={activity.photoUrl}
-                googleMapsUrl={activity.googleMapsUrl}
-                status={activity.status}
-                selected={selectedPlace?.id === testId}
-                onTap={() =>
-                  setSelectedPlace({
-                    id: testId,
-                    name: activity.name,
-                    lat: activity.lat,
-                    lng: activity.lng,
-                  })
-                }
-                onMarkSelected={() =>
-                  markSelected(tripId, dayId, 'activity', activity.id).catch(
-                    console.error,
-                  )
-                }
-                onMarkDone={(note) =>
-                  markDone(
-                    tripId,
-                    dayId,
-                    'activity',
-                    activity.id,
-                    day.date,
-                    note,
-                  ).catch(console.error)
-                }
-                onMarkSkipped={() =>
-                  markSkipped(tripId, dayId, 'activity', activity.id).catch(
-                    console.error,
-                  )
-                }
-              />
-            )
-          })}
-        </CardRow>
+        <PlaceCardSection
+          title="Activities"
+          rowTestId="activities-row"
+          cardIdPrefix="activity"
+          kind="activity"
+          entries={activities.map((place, index) => ({ index, place }))}
+          tripId={tripId}
+          dayId={dayId}
+          date={day.date}
+          selectedPlaceId={selectedPlace?.id}
+          onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+        />
 
-        <CardRow title="Breakfast" testId="breakfast-row">
-          {breakfast.map((restaurant, i) => {
-            const testId = `breakfast-card-${i}`
-            return (
-              <PlaceCard
-                key={i}
-                testId={testId}
-                name={restaurant.name}
-                rating={restaurant.rating}
-                ratingCount={restaurant.ratingCount}
-                blurb={restaurant.blurb}
-                googleMapsUrl={restaurant.googleMapsUrl}
-                photoUrl={restaurant.photoUrl}
-                status={restaurant.status}
-                selected={selectedPlace?.id === testId}
-                onTap={() =>
-                  setSelectedPlace({
-                    id: testId,
-                    name: restaurant.name,
-                    lat: restaurant.lat,
-                    lng: restaurant.lng,
-                  })
-                }
-                onMarkSelected={() =>
-                  markSelected(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                  ).catch(console.error)
-                }
-                onMarkDone={(note) =>
-                  markDone(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                    day.date,
-                    note,
-                  ).catch(console.error)
-                }
-                onMarkSkipped={() =>
-                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
-                }
-              />
-            )
-          })}
-        </CardRow>
+        <PlaceCardSection
+          title="Breakfast"
+          rowTestId="breakfast-row"
+          cardIdPrefix="breakfast"
+          kind="restaurant"
+          entries={breakfast.map((place, index) => ({ index, place }))}
+          tripId={tripId}
+          dayId={dayId}
+          date={day.date}
+          selectedPlaceId={selectedPlace?.id}
+          onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+        />
 
-        <CardRow title="Lunch" testId="lunch-row">
-          {lunch.map((restaurant, i) => {
-            const testId = `lunch-card-${i}`
-            return (
-              <PlaceCard
-                key={i}
-                testId={testId}
-                name={restaurant.name}
-                rating={restaurant.rating}
-                ratingCount={restaurant.ratingCount}
-                blurb={restaurant.blurb}
-                googleMapsUrl={restaurant.googleMapsUrl}
-                photoUrl={restaurant.photoUrl}
-                status={restaurant.status}
-                selected={selectedPlace?.id === testId}
-                onTap={() =>
-                  setSelectedPlace({
-                    id: testId,
-                    name: restaurant.name,
-                    lat: restaurant.lat,
-                    lng: restaurant.lng,
-                  })
-                }
-                onMarkSelected={() =>
-                  markSelected(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                  ).catch(console.error)
-                }
-                onMarkDone={(note) =>
-                  markDone(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                    day.date,
-                    note,
-                  ).catch(console.error)
-                }
-                onMarkSkipped={() =>
-                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
-                }
-              />
-            )
-          })}
-        </CardRow>
+        <PlaceCardSection
+          title="Lunch"
+          rowTestId="lunch-row"
+          cardIdPrefix="lunch"
+          kind="restaurant"
+          entries={lunch.map((place, index) => ({ index, place }))}
+          tripId={tripId}
+          dayId={dayId}
+          date={day.date}
+          selectedPlaceId={selectedPlace?.id}
+          onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+        />
 
-        <CardRow title="Dinner" testId="dinner-row">
-          {dinner.map((restaurant, i) => {
-            const testId = `dinner-card-${i}`
-            return (
-              <PlaceCard
-                key={i}
-                testId={testId}
-                name={restaurant.name}
-                rating={restaurant.rating}
-                ratingCount={restaurant.ratingCount}
-                blurb={restaurant.blurb}
-                googleMapsUrl={restaurant.googleMapsUrl}
-                photoUrl={restaurant.photoUrl}
-                status={restaurant.status}
-                selected={selectedPlace?.id === testId}
-                onTap={() =>
-                  setSelectedPlace({
-                    id: testId,
-                    name: restaurant.name,
-                    lat: restaurant.lat,
-                    lng: restaurant.lng,
-                  })
-                }
-                onMarkSelected={() =>
-                  markSelected(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                  ).catch(console.error)
-                }
-                onMarkDone={(note) =>
-                  markDone(
-                    tripId,
-                    dayId,
-                    'restaurant',
-                    restaurant.id,
-                    day.date,
-                    note,
-                  ).catch(console.error)
-                }
-                onMarkSkipped={() =>
-                  markSkipped(tripId, dayId, 'restaurant', restaurant.id).catch(
-                    console.error,
-                  )
-                }
-              />
-            )
-          })}
-        </CardRow>
+        <PlaceCardSection
+          title="Dinner"
+          rowTestId="dinner-row"
+          cardIdPrefix="dinner"
+          kind="restaurant"
+          entries={dinner.map((place, index) => ({ index, place }))}
+          tripId={tripId}
+          dayId={dayId}
+          date={day.date}
+          selectedPlaceId={selectedPlace?.id}
+          onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+        />
       </div>
     </div>
   )
