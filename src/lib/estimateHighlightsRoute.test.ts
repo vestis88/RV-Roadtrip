@@ -83,6 +83,33 @@ describe('buildIdealRouteBackbone', () => {
     expect(backbone).toEqual([OSLO, ROME])
   })
 
+  it('sorts must-sees along the start→end corridor instead of trusting region list order', () => {
+    // Innsbruck is listed FIRST but sits much further along toward Rome;
+    // Lillehammer is listed SECOND but sits north of Oslo, before the start.
+    // Trusting list order would put Innsbruck ahead of Lillehammer in the
+    // backbone — a stop that belongs early in the trip sorting in as if it
+    // came after the one near the destination.
+    const backbone = buildIdealRouteBackbone(
+      OSLO,
+      [
+        region('Alps', [
+          stop('Innsbruck', 'must-see', { lat: 47.2692, lng: 11.4041 }),
+        ]),
+        region('Fjords', [
+          stop('Lillehammer', 'must-see', { lat: 61.1153, lng: 10.4662 }),
+        ]),
+      ],
+      ROME,
+    )
+
+    expect(backbone).toEqual([
+      OSLO,
+      { lat: 61.1153, lng: 10.4662 },
+      { lat: 47.2692, lng: 11.4041 },
+      ROME,
+    ])
+  })
+
   it('drops a missing start or end point instead of emitting NaN coordinates', () => {
     const noEnd = buildIdealRouteBackbone(OSLO, [], undefined)
     expect(noEnd).toEqual([OSLO])

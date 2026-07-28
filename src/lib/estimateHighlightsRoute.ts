@@ -29,15 +29,38 @@ export function hasLocation(stop: HighlightCandidateStop): stop is LocatedStop {
 }
 
 /**
- * The "ideal route" the review panel measures detours against: start, every
- * must-see candidate that has coordinates, then finish.
+ * Scalar projection of `point` onto the start→end line: 0 sits at start, 1 at
+ * end, and values outside [0, 1] fall before start or past end. A planar
+ * approximation (no great-circle math) — plenty accurate for ordering
+ * candidates along a single trip's corridor, the same tradeoff
+ * estimateDetourKm already makes with haversine distance.
+ */
+function projectAlongRoute(start: LatLng, end: LatLng, point: LatLng): number {
+  const dx = end.lat - start.lat
+  const dy = end.lng - start.lng
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return 0
+  const px = point.lat - start.lat
+  const py = point.lng - start.lng
+  return (px * dx + py * dy) / lengthSquared
+}
+
+/**
+ * The "ideal route" the review panel measures detours against (and draws):
+ * start, every must-see candidate that has coordinates — sorted by how far
+ * along the start→end corridor each one sits — then finish.
  *
- * Order is the order the highlights phase already produced — region order,
- * then within-region array order — deliberately NOT re-sorted geographically.
- * HIGHLIGHTS_SYSTEM_PROMPT's step 1 works out the geographic corridor from
- * startPoint to endPoint before listing anything, so its own ordering is
- * already roughly along that corridor; re-sorting here would just substitute
- * a naive nearest-neighbour guess for the model's corridor reasoning.
+ * Sorted rather than trusting the highlights phase's own region order (the
+ * first version of this): HIGHLIGHTS_SYSTEM_PROMPT's step 1 works out a
+ * geographic corridor before listing anything, but never guarantees the
+ * regions themselves come out strictly sequenced along it — only "roughly"
+ * so. A must-see promoted from a region that was out of that rough order
+ * landed in the wrong spot in the backbone: a stop that belongs mid-trip
+ * could sort in after the destination. Reported as: promoting a highlight
+ * placed it after the destination on the map, with only a straight line (no
+ * real route) to show for it — the backtracking a wrong order produces is
+ * also exactly the kind of waypoint sequence that makes a Directions request
+ * more likely to fail outright.
  *
  * Regions contributing no must-sees drop out entirely — the backbone is the
  * spine of things the trip is definitely built around, not one point per
@@ -56,10 +79,23 @@ export function buildIdealRouteBackbone(
       )
       .map((stop) => ({ lat: stop.lat, lng: stop.lng })),
   )
+
   // A trip mid-edit can have a start/end point that hasn't been filled in
-  // yet; dropping the incomplete end rather than passing NaN coordinates
-  // through keeps every downstream distance real.
-  return [start, ...mustSees, end].filter(isUsablePoint)
+  // yet — ordering along a corridor needs both ends, so this just falls back
+  // to listed order in that case (dropping the incomplete point, same as
+  // before, rather than passing NaN coordinates through).
+  const usableStart = isUsablePoint(start) ? start : undefined
+  const usableEnd = isUsablePoint(end) ? end : undefined
+  const orderedMustSees =
+    usableStart && usableEnd
+      ? [...mustSees].sort(
+          (a, b) =>
+            projectAlongRoute(usableStart, usableEnd, a) -
+            projectAlongRoute(usableStart, usableEnd, b),
+        )
+      : mustSees
+
+  return [usableStart, ...orderedMustSees, usableEnd].filter(isUsablePoint)
 }
 
 function isUsablePoint(point: LatLng | undefined): point is LatLng {
