@@ -59,6 +59,26 @@ const ROUTE_STROKE = {
 }
 
 /**
+ * Pulls a readable reason out of whatever the Directions promise rejects
+ * with — usually an object carrying a `code` (a google.maps.DirectionsStatus
+ * like REQUEST_DENIED or OVER_QUERY_LIMIT) and/or a `message`, but the shape
+ * isn't guaranteed, so this degrades to String(error) rather than throwing.
+ * Console-only logging left this undiagnosable on a phone with no devtools
+ * access — surfacing it in the UI is what makes it reportable at all.
+ */
+function describeDirectionsError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const code = 'code' in error ? String((error as { code: unknown }).code) : undefined
+    const message =
+      'message' in error ? String((error as { message: unknown }).message) : undefined
+    if (code && message) return `${code}: ${message}`
+    if (code) return code
+    if (message) return message
+  }
+  return String(error)
+}
+
+/**
  * Draws the real driving route through the backbone. A straight polyline
  * between must-sees was the first version of this and it actively misled —
  * it implied detour costs that the road network doesn't charge (and hid ones
@@ -73,13 +93,20 @@ const ROUTE_STROKE = {
  * line is much easier to mistake for "broken" than one that's merely
  * approximate.
  */
-function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
+function BackboneRoute({
+  backbone,
+  onError,
+}: {
+  backbone: LatLng[]
+  onError: (message: string | null) => void
+}) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
   const [routedBackbone, setRoutedBackbone] = useState<LatLng[] | null>(null)
 
   useEffect(() => {
     if (!map || !routesLibrary || backbone.length < 2) return
+    onError(null)
 
     const renderer = new routesLibrary.DirectionsRenderer({
       map,
@@ -109,13 +136,14 @@ function BackboneRoute({ backbone }: { backbone: LatLng[] }) {
       })
       .catch((error: unknown) => {
         console.warn('Highlights route directions failed', error)
+        if (!cancelled) onError(describeDirectionsError(error))
       })
 
     return () => {
       cancelled = true
       renderer.setMap(null)
     }
-  }, [map, routesLibrary, backbone])
+  }, [map, routesLibrary, backbone, onError])
 
   if (routedBackbone === backbone || backbone.length < 2) return null
   return <Polyline path={backbone} {...ROUTE_STROKE} />
@@ -175,6 +203,7 @@ export function HighlightsReviewPanel({
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [routeError, setRouteError] = useState<string | null>(null)
 
   // Derived from live state, not from the pending highlights as loaded:
   // promoting a stop to must-see puts it INTO the backbone, which changes
@@ -274,7 +303,7 @@ export function HighlightsReviewPanel({
             gestureHandling="greedy"
           >
             <FitToPoints points={framedPoints} />
-            <BackboneRoute backbone={backbone} />
+            <BackboneRoute backbone={backbone} onError={setRouteError} />
 
             <AdvancedMarker
               position={{ lat: startPoint.lat, lng: startPoint.lng }}
@@ -310,6 +339,16 @@ export function HighlightsReviewPanel({
           </p>
         )}
       </div>
+
+      {routeError && (
+        <p
+          data-testid="highlights-route-error"
+          className="text-xs text-amber-700 dark:text-amber-400"
+        >
+          Showing a straight line instead of the real route — the driving
+          directions request failed ({routeError}).
+        </p>
+      )}
 
       {highlights.regions.map((region, regionIndex) => (
         <div

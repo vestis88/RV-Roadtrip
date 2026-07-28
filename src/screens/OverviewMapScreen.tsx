@@ -30,6 +30,26 @@ const ROUTE_STROKE = {
 }
 
 /**
+ * Pulls a readable reason out of whatever the Directions promise rejects
+ * with — usually an object carrying a `code` (a google.maps.DirectionsStatus
+ * like REQUEST_DENIED or OVER_QUERY_LIMIT) and/or a `message`, but the shape
+ * isn't guaranteed, so this degrades to String(error) rather than throwing.
+ * Console-only logging left this undiagnosable on a phone with no devtools
+ * access — surfacing it in the UI is what makes it reportable at all.
+ */
+function describeDirectionsError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const code = 'code' in error ? String((error as { code: unknown }).code) : undefined
+    const message =
+      'message' in error ? String((error as { message: unknown }).message) : undefined
+    if (code && message) return `${code}: ${message}`
+    if (code) return code
+    if (message) return message
+  }
+  return String(error)
+}
+
+/**
  * The whole-trip driving route.
  *
  * Straight lines between overnight stops were the first version of this, and
@@ -43,7 +63,13 @@ const ROUTE_STROKE = {
  * simply never replaced. A partially-routed map with a gap where one request
  * 403'd would be worse than a consistently approximate one.
  */
-function TripRoute({ points }: { points: LatLng[] }) {
+function TripRoute({
+  points,
+  onError,
+}: {
+  points: LatLng[]
+  onError: (message: string | null) => void
+}) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
   // Holds the exact array that is currently drawn as real directions, so a
@@ -53,6 +79,7 @@ function TripRoute({ points }: { points: LatLng[] }) {
 
   useEffect(() => {
     if (!map || !routesLibrary || points.length < 2) return
+    onError(null)
 
     const segments = chunkRouteSegments(points)
     const renderers: google.maps.DirectionsRenderer[] = []
@@ -101,13 +128,14 @@ function TripRoute({ points }: { points: LatLng[] }) {
 
     run().catch((error: unknown) => {
       console.warn('Overview route directions failed', error)
+      if (!cancelled) onError(describeDirectionsError(error))
     })
 
     return () => {
       cancelled = true
       for (const renderer of renderers) renderer.setMap(null)
     }
-  }, [map, routesLibrary, points])
+  }, [map, routesLibrary, points, onError])
 
   if (routedPoints === points || points.length < 2) return null
   return <Polyline path={points} {...ROUTE_STROKE} />
@@ -129,6 +157,7 @@ export function OverviewMapScreen() {
   const [changeRequestOpen, setChangeRequestOpen] = useState(false)
   const [changeText, setChangeText] = useState('')
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
+  const [routeError, setRouteError] = useState<string | null>(null)
 
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
@@ -209,6 +238,16 @@ export function OverviewMapScreen() {
         </p>
       )}
 
+      {routeError && (
+        <p
+          data-testid="route-error-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-center text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          Showing a straight line instead of the real route — the driving
+          directions request failed ({routeError}).
+        </p>
+      )}
+
       {changeRequestOpen && (
         <div className="border-b border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
           <textarea
@@ -260,7 +299,7 @@ export function OverviewMapScreen() {
               setZoom(event.detail.zoom)
             }
           >
-            <TripRoute points={routePoints} />
+            <TripRoute points={routePoints} onError={setRouteError} />
 
             <AdvancedMarker
               position={{
