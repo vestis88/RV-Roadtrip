@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import {
   AdvancedMarker,
-  InfoWindow,
   Map as GoogleMap,
   Polyline,
   useMap,
@@ -289,6 +288,12 @@ function RealDetours({
   return null
 }
 
+/**
+ * Compact on purpose: this sits on the map, not in the list, so a full town
+ * name plus chips (as the list row gets) would crowd out the map itself on a
+ * phone — the full name is still available via the marker's title (hover) and
+ * unabbreviated in the list row the marker scrolls to on tap.
+ */
 function CandidateMarker({
   stop,
   selected,
@@ -299,7 +304,7 @@ function CandidateMarker({
   const mustSee = stop.priority === 'must-see'
   return (
     <div
-      className={`flex h-7 items-center rounded-full border-2 px-2 text-xs font-semibold shadow-md transition ${
+      className={`flex h-6 max-w-20 items-center overflow-hidden rounded-full border-2 px-1.5 text-[10px] font-semibold shadow-md transition ${
         selected ? 'scale-110 border-orange-500' : 'border-white dark:border-neutral-900'
       } ${
         mustSee
@@ -307,23 +312,17 @@ function CandidateMarker({
           : 'bg-white text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
       }`}
     >
-      {stop.town}
+      <span className="truncate">{stop.town}</span>
     </div>
   )
 }
 
-/**
- * The name/chips/description/controls for one candidate — shared between its
- * row in the list and its pop-out on the map, so promoting, demoting,
- * removing, or just reading the detour figure works identically from either
- * place instead of the map only being able to show a subset.
- */
+/** The name/chips/description/controls for one candidate's row in the list. */
 function CandidateDetails({
   stop,
   regionIndex,
   stopIndex,
   detour,
-  testIdPrefix,
   onFocus,
   onRaise,
   onLower,
@@ -333,7 +332,6 @@ function CandidateDetails({
   regionIndex: number
   stopIndex: number
   detour: DetourEstimate
-  testIdPrefix: string
   onFocus?: () => void
   onRaise: () => void
   onLower: () => void
@@ -346,7 +344,7 @@ function CandidateDetails({
           {onFocus ? (
             <button
               type="button"
-              data-testid={`${testIdPrefix}-focus-${regionIndex}-${stopIndex}`}
+              data-testid={`highlights-stop-focus-${regionIndex}-${stopIndex}`}
               onClick={onFocus}
               className="font-medium text-neutral-900 underline decoration-dotted underline-offset-2 dark:text-white"
             >
@@ -358,7 +356,7 @@ function CandidateDetails({
             </p>
           )}
           <span
-            data-testid={`${testIdPrefix}-priority-${regionIndex}-${stopIndex}`}
+            data-testid={`highlights-stop-priority-${regionIndex}-${stopIndex}`}
             className="chip chip-neutral"
           >
             {PRIORITY_LABEL[stop.priority]}
@@ -370,7 +368,7 @@ function CandidateDetails({
               instead of the two being silently indistinguishable. */}
           {stop.source === 'search' && (
             <span
-              data-testid={`${testIdPrefix}-source-${regionIndex}-${stopIndex}`}
+              data-testid={`highlights-stop-source-${regionIndex}-${stopIndex}`}
               className="chip chip-neutral"
             >
               Found via web search
@@ -378,7 +376,7 @@ function CandidateDetails({
           )}
           {detour.kind !== 'unknown-location' && (
             <span
-              data-testid={`${testIdPrefix}-detour-${regionIndex}-${stopIndex}`}
+              data-testid={`highlights-stop-detour-${regionIndex}-${stopIndex}`}
               className={
                 detour.kind === 'on-route' ? 'chip chip-accent' : 'chip chip-neutral'
               }
@@ -398,7 +396,7 @@ function CandidateDetails({
         <button
           type="button"
           aria-label="Raise priority"
-          data-testid={`${testIdPrefix}-up-${regionIndex}-${stopIndex}`}
+          data-testid={`highlights-stop-up-${regionIndex}-${stopIndex}`}
           disabled={stop.priority === 'must-see'}
           onClick={onRaise}
           className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
@@ -408,7 +406,7 @@ function CandidateDetails({
         <button
           type="button"
           aria-label="Lower priority"
-          data-testid={`${testIdPrefix}-down-${regionIndex}-${stopIndex}`}
+          data-testid={`highlights-stop-down-${regionIndex}-${stopIndex}`}
           disabled={stop.priority === 'nice-if-convenient'}
           onClick={onLower}
           className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
@@ -418,7 +416,7 @@ function CandidateDetails({
       </div>
       <button
         type="button"
-        data-testid={`${testIdPrefix}-remove-${regionIndex}-${stopIndex}`}
+        data-testid={`highlights-stop-remove-${regionIndex}-${stopIndex}`}
         onClick={onRemove}
         className="shrink-0 text-xs text-red-600 underline underline-offset-2 dark:text-red-400"
       >
@@ -460,6 +458,18 @@ export function HighlightsReviewPanel({
     regionIndex: number
     stopIndex: number
   } | null>(null)
+
+  // Keyed by "regionIndex-stopIndex". The map is a separate DOM subtree (a
+  // Google Maps portal) from the scrollable list below it, so tapping a
+  // marker can't rely on the browser's own "scroll to this element" —
+  // scrollToStop below does it by hand via these refs.
+  const stopRowRefs = useRef(new Map<string, HTMLDivElement>())
+
+  const scrollToStop = useCallback((regionIndex: number, stopIndex: number) => {
+    stopRowRefs.current
+      .get(`${regionIndex}-${stopIndex}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
 
   // Derived from live state, not from the pending highlights as loaded:
   // promoting a stop to must-see puts it INTO the backbone, which changes
@@ -617,9 +627,17 @@ export function HighlightsReviewPanel({
         anything before generating the full route.
       </p>
 
+      {/* Sticky rather than scrolling away with the rest of the card: on a
+          phone the map and a comfortably-sized candidate list can't both fit
+          on screen at once, and a popup big enough to hold the same details
+          as the list row (tried first) doesn't fit either. Pinning the map
+          and letting the list scroll underneath it — with a tap on either
+          side driving the other, see PanToSelected / scrollToStop — keeps the
+          map usable as a constant reference instead of it being one more
+          thing competing for vertical space. */}
       <div
         data-testid="highlights-map"
-        className="h-56 overflow-hidden rounded-xl border border-neutral-200 md:h-80 lg:h-96 dark:border-neutral-800"
+        className="sticky top-0 z-10 h-72 overflow-hidden rounded-xl border border-neutral-200 bg-white sm:h-80 md:h-96 dark:border-neutral-800 dark:bg-neutral-900"
       >
         {apiKey ? (
           <GoogleMap
@@ -670,54 +688,15 @@ export function HighlightsReviewPanel({
                   position={{ lat: stop.lat, lng: stop.lng }}
                   title={`${stop.town} — ${PRIORITY_LABEL[stop.priority]}`}
                   data-testid="highlights-candidate-marker"
-                  onClick={() => setSelectedStop({ regionIndex, stopIndex })}
+                  onClick={() => {
+                    setSelectedStop({ regionIndex, stopIndex })
+                    scrollToStop(regionIndex, stopIndex)
+                  }}
                 >
                   <CandidateMarker stop={stop} selected={isSelected} />
                 </AdvancedMarker>
               )
             })}
-
-            {selectedStopPoint &&
-              selectedStop &&
-              (() => {
-                const stop =
-                  highlights.regions[selectedStop.regionIndex]?.candidateStops[
-                    selectedStop.stopIndex
-                  ]
-                if (!stop) return null
-                return (
-                  <InfoWindow
-                    position={selectedStopPoint}
-                    onCloseClick={() => setSelectedStop(null)}
-                  >
-                    <div
-                      className="flex w-64 items-start gap-2 p-1 text-sm"
-                      data-testid={`highlights-popup-${selectedStop.regionIndex}-${selectedStop.stopIndex}`}
-                    >
-                      <CandidateDetails
-                        stop={stop}
-                        regionIndex={selectedStop.regionIndex}
-                        stopIndex={selectedStop.stopIndex}
-                        detour={getDetour(
-                          selectedStop.regionIndex,
-                          selectedStop.stopIndex,
-                          stop,
-                        )}
-                        testIdPrefix="highlights-popup-stop"
-                        onRaise={() =>
-                          movePriority(selectedStop.regionIndex, selectedStop.stopIndex, 1)
-                        }
-                        onLower={() =>
-                          movePriority(selectedStop.regionIndex, selectedStop.stopIndex, -1)
-                        }
-                        onRemove={() =>
-                          removeStop(selectedStop.regionIndex, selectedStop.stopIndex)
-                        }
-                      />
-                    </div>
-                  </InfoWindow>
-                )
-              })()}
           </GoogleMap>
         ) : (
           <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">
@@ -756,8 +735,16 @@ export function HighlightsReviewPanel({
               return (
                 <div
                   key={stopIndex}
+                  ref={(el) => {
+                    const key = `${regionIndex}-${stopIndex}`
+                    if (el) stopRowRefs.current.set(key, el)
+                    else stopRowRefs.current.delete(key)
+                  }}
                   data-testid={`highlights-stop-${regionIndex}-${stopIndex}`}
-                  className={`flex items-start gap-2 rounded-lg border bg-white p-2 text-sm transition hover:shadow-sm dark:bg-neutral-900 ${
+                  // scroll-mt- matches the sticky map's own height above (see
+                  // highlights-map) so scrollToStop's scrollIntoView doesn't
+                  // land a row half-hidden underneath it.
+                  className={`flex scroll-mt-72 items-start gap-2 rounded-lg border bg-white p-2 text-sm transition hover:shadow-sm sm:scroll-mt-80 md:scroll-mt-96 dark:bg-neutral-900 ${
                     isSelected
                       ? 'border-orange-500 ring-2 ring-orange-500'
                       : 'border-neutral-200 dark:border-neutral-800'
@@ -768,7 +755,6 @@ export function HighlightsReviewPanel({
                     regionIndex={regionIndex}
                     stopIndex={stopIndex}
                     detour={getDetour(regionIndex, stopIndex, stop)}
-                    testIdPrefix="highlights-stop"
                     onFocus={
                       hasLocation(stop)
                         ? () => setSelectedStop({ regionIndex, stopIndex })
