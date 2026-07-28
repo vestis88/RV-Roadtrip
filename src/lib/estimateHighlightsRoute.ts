@@ -1,14 +1,24 @@
-import type { LatLng } from '@rv/shared'
-import { haversineDistanceKm } from './executionMode'
+import { buildRouteBackbone, estimateDetourKm, type LatLng } from '@rv/shared'
+
+export { estimateDetourKm }
 
 export type HighlightPriority =
   'must-see' | 'worth-a-detour' | 'nice-if-convenient'
+
+/**
+ * Where a candidate came from. Absent/undefined means the original curated
+ * highlights pass — the field only exists so the opt-in web-search
+ * enrichment step's finds can be labelled as such in the review panel, and
+ * every candidate written before that feature existed stays valid without it.
+ */
+export type HighlightSource = 'curated' | 'search'
 
 export interface HighlightCandidateStop {
   town: string
   country: string
   why: string
   priority: HighlightPriority
+  source?: HighlightSource
   /** Geocoded server-side (see functions/src/prompts/planTrip.ts) — absent when geocoding failed. */
   lat?: number
   lng?: number
@@ -29,42 +39,20 @@ export function hasLocation(stop: HighlightCandidateStop): stop is LocatedStop {
 }
 
 /**
- * Scalar projection of `point` onto the start→end line: 0 sits at start, 1 at
- * end, and values outside [0, 1] fall before start or past end. A planar
- * approximation (no great-circle math) — plenty accurate for ordering
- * candidates along a single trip's corridor, the same tradeoff
- * estimateDetourKm already makes with haversine distance.
- */
-function projectAlongRoute(start: LatLng, end: LatLng, point: LatLng): number {
-  const dx = end.lat - start.lat
-  const dy = end.lng - start.lng
-  const lengthSquared = dx * dx + dy * dy
-  if (lengthSquared === 0) return 0
-  const px = point.lat - start.lat
-  const py = point.lng - start.lng
-  return (px * dx + py * dy) / lengthSquared
-}
-
-/**
  * The "ideal route" the review panel measures detours against (and draws):
  * start, every must-see candidate that has coordinates — sorted by how far
  * along the start→end corridor each one sits — then finish.
  *
- * Sorted rather than trusting the highlights phase's own region order (the
- * first version of this): HIGHLIGHTS_SYSTEM_PROMPT's step 1 works out a
- * geographic corridor before listing anything, but never guarantees the
- * regions themselves come out strictly sequenced along it — only "roughly"
- * so. A must-see promoted from a region that was out of that rough order
- * landed in the wrong spot in the backbone: a stop that belongs mid-trip
- * could sort in after the destination. Reported as: promoting a highlight
- * placed it after the destination on the map, with only a straight line (no
- * real route) to show for it — the backtracking a wrong order produces is
- * also exactly the kind of waypoint sequence that makes a Directions request
- * more likely to fail outright.
- *
  * Regions contributing no must-sees drop out entirely — the backbone is the
  * spine of things the trip is definitely built around, not one point per
  * region.
+ *
+ * Only the extract-must-sees-from-regions part lives here; the geometry
+ * itself is @rv/shared's buildRouteBackbone, shared with the backend's
+ * highlights web-search enrichment (which builds the same backbone from its
+ * own region types to bound how far off-route a find may be). The corridor
+ * sort in particular has already been got wrong once — a single
+ * implementation is what stops it being got wrong differently in two places.
  */
 export function buildIdealRouteBackbone(
   start: LatLng | undefined,
@@ -80,62 +68,7 @@ export function buildIdealRouteBackbone(
       .map((stop) => ({ lat: stop.lat, lng: stop.lng })),
   )
 
-  // A trip mid-edit can have a start/end point that hasn't been filled in
-  // yet — ordering along a corridor needs both ends, so this just falls back
-  // to listed order in that case (dropping the incomplete point, same as
-  // before, rather than passing NaN coordinates through).
-  const usableStart = isUsablePoint(start) ? start : undefined
-  const usableEnd = isUsablePoint(end) ? end : undefined
-  const orderedMustSees =
-    usableStart && usableEnd
-      ? [...mustSees].sort(
-          (a, b) =>
-            projectAlongRoute(usableStart, usableEnd, a) -
-            projectAlongRoute(usableStart, usableEnd, b),
-        )
-      : mustSees
-
-  return [usableStart, ...orderedMustSees, usableEnd].filter(isUsablePoint)
-}
-
-function isUsablePoint(point: LatLng | undefined): point is LatLng {
-  return !!point && Number.isFinite(point.lat) && Number.isFinite(point.lng)
-}
-
-/**
- * Cheapest-insertion estimate of what visiting `candidate` costs on top of
- * the backbone: for each consecutive leg (A, B), how much longer A→candidate→B
- * is than A→B, minimised over all legs. That's the extra distance of slotting
- * the stop into wherever it fits best, which is what "detour" means to a
- * traveler looking at a shortlist.
- *
- * Straight-line (haversine) rather than real driving distance on purpose:
- * this runs client-side over every candidate on every priority change, and a
- * Directions call per candidate would be both slow and expensive for a figure
- * whose only job is to make candidates comparable to each other. It reads low
- * against real roads (especially around fjords and mountains) — an ordering
- * hint, not a routing promise.
- */
-export function estimateDetourKm(
-  candidate: LatLng,
-  backbone: LatLng[],
-): number {
-  if (backbone.length < 2) return 0
-
-  let cheapest = Infinity
-  for (let i = 0; i < backbone.length - 1; i++) {
-    const a = backbone[i]
-    const b = backbone[i + 1]
-    const viaCandidate =
-      haversineDistanceKm(a, candidate) + haversineDistanceKm(candidate, b)
-    const direct = haversineDistanceKm(a, b)
-    const detour = viaCandidate - direct
-    if (detour < cheapest) cheapest = detour
-  }
-
-  // Floating-point noise can push an exactly-on-the-line point microscopically
-  // negative; a negative detour is meaningless either way.
-  return Number.isFinite(cheapest) ? Math.max(0, cheapest) : 0
+  return buildRouteBackbone(start, mustSees, end)
 }
 
 export type DetourEstimate =

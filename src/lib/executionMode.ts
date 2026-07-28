@@ -1,19 +1,10 @@
-import type { LatLng } from '@rv/shared'
-
-const EARTH_RADIUS_KM = 6371
 export const BEHIND_PLAN_THRESHOLD_KM = 50
 
-export function haversineDistanceKm(a: LatLng, b: LatLng): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const sinLat = Math.sin(dLat / 2)
-  const sinLng = Math.sin(dLng / 2)
-  const h =
-    sinLat * sinLat +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h))
-}
+// Moved to @rv/shared (see shared/src/geo.ts): the highlights web-search
+// enrichment pass needs the same distance maths server-side, and a second
+// copy of it is exactly how the two ends drift apart. Re-exported here so
+// this module's own callers keep importing it from where they always have.
+export { haversineDistanceKm } from '@rv/shared'
 
 export function shouldPromptReplan(
   distanceKm: number,
