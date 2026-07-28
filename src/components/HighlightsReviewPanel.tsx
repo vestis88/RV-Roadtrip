@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import {
   AdvancedMarker,
+  InfoWindow,
   Map as GoogleMap,
   Polyline,
   useMap,
@@ -12,10 +13,13 @@ import { db } from '../lib/firebase'
 import {
   buildIdealRouteBackbone,
   describeDetour,
+  findCheapestBackboneLeg,
   hasLocation,
+  type DetourEstimate,
   type HighlightCandidateStop,
   type HighlightPriority,
   type HighlightRegion,
+  type LocatedStop,
 } from '../lib/estimateHighlightsRoute'
 
 interface RegionHighlightsResponse {
@@ -96,9 +100,12 @@ function describeDirectionsError(error: unknown): string {
 function BackboneRoute({
   backbone,
   onError,
+  onRouted,
 }: {
   backbone: LatLng[]
   onError: (message: string | null) => void
+  /** Real per-leg distances (km), once known — null while unrouted/unknown. */
+  onRouted: (legDistancesKm: number[] | null) => void
 }) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
@@ -107,6 +114,7 @@ function BackboneRoute({
   useEffect(() => {
     if (!map || !routesLibrary || backbone.length < 2) return
     onError(null)
+    onRouted(null)
 
     const renderer = new routesLibrary.DirectionsRenderer({
       map,
@@ -133,6 +141,17 @@ function BackboneRoute({
         if (cancelled) return
         renderer.setDirections(result)
         setRoutedBackbone(backbone)
+        // Only meaningful when nothing got truncated by MAX_DIRECTIONS_WAYPOINTS
+        // above — a leg count that doesn't match the full backbone can't be
+        // safely indexed by findCheapestBackboneLeg (which reasons over the
+        // untruncated backbone), so real per-candidate detours are skipped
+        // rather than risk lining up the wrong leg.
+        const legs = result.routes[0]?.legs ?? []
+        onRouted(
+          legs.length === backbone.length - 1
+            ? legs.map((leg) => (leg.distance?.value ?? 0) / 1000)
+            : null,
+        )
       })
       .catch((error: unknown) => {
         console.warn('Highlights route directions failed', error)
@@ -143,7 +162,7 @@ function BackboneRoute({
       cancelled = true
       renderer.setMap(null)
     }
-  }, [map, routesLibrary, backbone, onError])
+  }, [map, routesLibrary, backbone, onError, onRouted])
 
   if (routedBackbone === backbone || backbone.length < 2) return null
   return <Polyline path={backbone} {...ROUTE_STROKE} />
@@ -163,11 +182,126 @@ function FitToPoints({ points }: { points: LatLng[] }) {
   return null
 }
 
-function CandidateMarker({ stop }: { stop: HighlightCandidateStop }) {
+// How close in to zoom when a traveler asks to see one specific candidate —
+// close enough to read the immediate area, not so close the map feels empty.
+const FOCUS_ZOOM = 11
+
+/**
+ * Pans (and zooms in, if needed) to whichever candidate is focused — set by
+ * either clicking a stop's name in the list below or a marker on the map
+ * itself, so both directions land on the same "look at this one" behavior.
+ */
+function PanToSelected({ target }: { target: LatLng | null }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!map || !target) return
+    map.panTo(target)
+    map.setZoom(FOCUS_ZOOM)
+  }, [map, target])
+
+  return null
+}
+
+interface DetourCandidate {
+  regionIndex: number
+  stopIndex: number
+  point: LatLng
+}
+
+/**
+ * Upgrades each non-must-see candidate's detour from the instant haversine
+ * estimate to a real Directions-measured figure, one candidate at a time —
+ * same "sequential, not parallel" reasoning as BackboneRoute's own chunked
+ * requests, since this is yet more requests against the same key. Only runs
+ * once the backbone's own real route is known (legDistancesKm), since a
+ * candidate's real detour is measured against that route's own real leg
+ * distance, not another estimate.
+ *
+ * Renders nothing; reports each result up as it resolves via onUpdate rather
+ * than batching, so the list upgrades candidate-by-candidate instead of
+ * waiting for all of them before showing any real figure.
+ */
+function RealDetours({
+  backbone,
+  legDistancesKm,
+  candidates,
+  onUpdate,
+}: {
+  backbone: LatLng[]
+  legDistancesKm: number[] | null
+  candidates: DetourCandidate[]
+  onUpdate: (key: string, km: number) => void
+}) {
+  const routesLibrary = useMapsLibrary('routes')
+
+  useEffect(() => {
+    if (
+      !routesLibrary ||
+      !legDistancesKm ||
+      legDistancesKm.length !== backbone.length - 1
+    ) {
+      return
+    }
+    let cancelled = false
+
+    async function run() {
+      const service = new routesLibrary!.DirectionsService()
+      for (const candidate of candidates) {
+        if (cancelled) return
+        const legIndex = findCheapestBackboneLeg(candidate.point, backbone)
+        if (legIndex === null) continue
+
+        try {
+          const result = await service.route({
+            origin: backbone[legIndex],
+            destination: backbone[legIndex + 1],
+            waypoints: [{ location: candidate.point, stopover: true }],
+            travelMode: routesLibrary!.TravelMode.DRIVING,
+          })
+          if (cancelled) return
+          const legs = result.routes[0]?.legs ?? []
+          const viaKm = legs.reduce(
+            (sum, leg) => sum + (leg.distance?.value ?? 0) / 1000,
+            0,
+          )
+          onUpdate(
+            `${candidate.regionIndex}-${candidate.stopIndex}`,
+            Math.max(0, viaKm - legDistancesKm![legIndex]),
+          )
+        } catch (error) {
+          // One candidate's real detour failing to resolve just leaves it
+          // showing the haversine estimate — not worth surfacing the way the
+          // main route's own failure is, since the estimate already stands
+          // on its own as a reasonable fallback.
+          console.warn('Real detour lookup failed', candidate, error)
+        }
+      }
+    }
+
+    run().catch((error: unknown) => console.warn('Real detour loop failed', error))
+
+    return () => {
+      cancelled = true
+    }
+  }, [routesLibrary, backbone, legDistancesKm, candidates, onUpdate])
+
+  return null
+}
+
+function CandidateMarker({
+  stop,
+  selected,
+}: {
+  stop: HighlightCandidateStop
+  selected: boolean
+}) {
   const mustSee = stop.priority === 'must-see'
   return (
     <div
-      className={`flex h-7 items-center rounded-full border-2 border-white px-2 text-xs font-semibold shadow-md dark:border-neutral-900 ${
+      className={`flex h-7 items-center rounded-full border-2 px-2 text-xs font-semibold shadow-md transition ${
+        selected ? 'scale-110 border-orange-500' : 'border-white dark:border-neutral-900'
+      } ${
         mustSee
           ? 'bg-orange-600 text-white'
           : 'bg-white text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
@@ -175,6 +309,122 @@ function CandidateMarker({ stop }: { stop: HighlightCandidateStop }) {
     >
       {stop.town}
     </div>
+  )
+}
+
+/**
+ * The name/chips/description/controls for one candidate — shared between its
+ * row in the list and its pop-out on the map, so promoting, demoting,
+ * removing, or just reading the detour figure works identically from either
+ * place instead of the map only being able to show a subset.
+ */
+function CandidateDetails({
+  stop,
+  regionIndex,
+  stopIndex,
+  detour,
+  testIdPrefix,
+  onFocus,
+  onRaise,
+  onLower,
+  onRemove,
+}: {
+  stop: HighlightCandidateStop
+  regionIndex: number
+  stopIndex: number
+  detour: DetourEstimate
+  testIdPrefix: string
+  onFocus?: () => void
+  onRaise: () => void
+  onLower: () => void
+  onRemove: () => void
+}) {
+  return (
+    <>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onFocus ? (
+            <button
+              type="button"
+              data-testid={`${testIdPrefix}-focus-${regionIndex}-${stopIndex}`}
+              onClick={onFocus}
+              className="font-medium text-neutral-900 underline decoration-dotted underline-offset-2 dark:text-white"
+            >
+              {stop.town}
+            </button>
+          ) : (
+            <p className="font-medium text-neutral-900 dark:text-white">
+              {stop.town}
+            </p>
+          )}
+          <span
+            data-testid={`${testIdPrefix}-priority-${regionIndex}-${stopIndex}`}
+            className="chip chip-neutral"
+          >
+            {PRIORITY_LABEL[stop.priority]}
+          </span>
+          {/* Provenance, not a control: these behave exactly like any other
+              candidate (same ▲/▼/Remove, same detour badge). The tag exists
+              so a traveler can tell at a glance which suggestions a web
+              search turned up versus which came from the curated pass,
+              instead of the two being silently indistinguishable. */}
+          {stop.source === 'search' && (
+            <span
+              data-testid={`${testIdPrefix}-source-${regionIndex}-${stopIndex}`}
+              className="chip chip-neutral"
+            >
+              Found via web search
+            </span>
+          )}
+          {detour.kind !== 'unknown-location' && (
+            <span
+              data-testid={`${testIdPrefix}-detour-${regionIndex}-${stopIndex}`}
+              className={
+                detour.kind === 'on-route' ? 'chip chip-accent' : 'chip chip-neutral'
+              }
+            >
+              {detour.kind === 'on-route'
+                ? 'On route'
+                : `${detour.isEstimate ? '≈' : ''}+${Math.round(detour.km)} km detour`}
+            </span>
+          )}
+        </div>
+        {/* Deliberately not truncated: this description is the whole reason
+            the traveler can decide here instead of going and looking the
+            town up somewhere else. */}
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{stop.why}</p>
+      </div>
+      <div className="flex shrink-0 flex-col">
+        <button
+          type="button"
+          aria-label="Raise priority"
+          data-testid={`${testIdPrefix}-up-${regionIndex}-${stopIndex}`}
+          disabled={stop.priority === 'must-see'}
+          onClick={onRaise}
+          className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          aria-label="Lower priority"
+          data-testid={`${testIdPrefix}-down-${regionIndex}-${stopIndex}`}
+          disabled={stop.priority === 'nice-if-convenient'}
+          onClick={onLower}
+          className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
+        >
+          ▼
+        </button>
+      </div>
+      <button
+        type="button"
+        data-testid={`${testIdPrefix}-remove-${regionIndex}-${stopIndex}`}
+        onClick={onRemove}
+        className="shrink-0 text-xs text-red-600 underline underline-offset-2 dark:text-red-400"
+      >
+        Remove
+      </button>
+    </>
   )
 }
 
@@ -204,6 +454,12 @@ export function HighlightsReviewPanel({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
+  const [legDistancesKm, setLegDistancesKm] = useState<number[] | null>(null)
+  const [realDetours, setRealDetours] = useState<Map<string, number>>(new Map())
+  const [selectedStop, setSelectedStop] = useState<{
+    regionIndex: number
+    stopIndex: number
+  } | null>(null)
 
   // Derived from live state, not from the pending highlights as loaded:
   // promoting a stop to must-see puts it INTO the backbone, which changes
@@ -214,32 +470,98 @@ export function HighlightsReviewPanel({
     [startPoint, highlights.regions, endPoint],
   )
 
+  // A new backbone invalidates every real detour measured against the old
+  // one — reset synchronously during render (React's documented pattern for
+  // "adjusting state when a prop changes") rather than in an effect, so a
+  // stale real figure is never shown even for one frame. The haversine
+  // estimate reappears immediately (it's recomputed from `backbone` on every
+  // render regardless) while RealDetours re-measures in the background.
+  const [lastBackbone, setLastBackbone] = useState(backbone)
+  if (lastBackbone !== backbone) {
+    setLastBackbone(backbone)
+    setRealDetours(new Map())
+  }
+
   const locatedStops = useMemo(
     () =>
-      highlights.regions.flatMap((region) =>
-        region.candidateStops.filter(hasLocation),
+      highlights.regions.flatMap((region, regionIndex) =>
+        region.candidateStops
+          .map((stop, stopIndex) => ({ regionIndex, stopIndex, stop }))
+          .filter(
+            (
+              entry,
+            ): entry is {
+              regionIndex: number
+              stopIndex: number
+              stop: LocatedStop
+            } => hasLocation(entry.stop),
+          ),
       ),
     [highlights.regions],
   )
 
+  const detourCandidates = useMemo<DetourCandidate[]>(
+    () =>
+      locatedStops
+        .filter((entry) => entry.stop.priority !== 'must-see')
+        .map((entry) => ({
+          regionIndex: entry.regionIndex,
+          stopIndex: entry.stopIndex,
+          point: { lat: entry.stop.lat, lng: entry.stop.lng },
+        })),
+    [locatedStops],
+  )
+
+  const updateRealDetour = useCallback((key: string, km: number) => {
+    setRealDetours((prev) => new Map(prev).set(key, km))
+  }, [])
+
+  function getDetour(
+    regionIndex: number,
+    stopIndex: number,
+    stop: HighlightCandidateStop,
+  ): DetourEstimate {
+    const estimate = describeDetour(stop, backbone)
+    if (estimate.kind !== 'detour') return estimate
+    const real = realDetours.get(`${regionIndex}-${stopIndex}`)
+    return real === undefined ? estimate : { kind: 'detour', km: real, isEstimate: false }
+  }
+
   const framedPoints = useMemo(
     () => [
       ...backbone,
-      ...locatedStops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
+      ...locatedStops.map((entry) => ({ lat: entry.stop.lat, lng: entry.stop.lng })),
     ],
     [backbone, locatedStops],
   )
+
+  const selectedStopPoint = useMemo(() => {
+    if (!selectedStop) return null
+    const stop =
+      highlights.regions[selectedStop.regionIndex]?.candidateStops[
+        selectedStop.stopIndex
+      ]
+    return stop && hasLocation(stop) ? { lat: stop.lat, lng: stop.lng } : null
+  }, [selectedStop, highlights.regions])
 
   function updateRegionStops(
     regionIndex: number,
     updater: (stops: HighlightCandidateStop[]) => HighlightCandidateStop[],
   ) {
     setHighlights((prev) => ({
-      regions: prev.regions.map((region, i) =>
-        i === regionIndex
-          ? { ...region, candidateStops: updater(region.candidateStops) }
-          : region,
-      ),
+      // A region a traveler has emptied out by removing every one of its
+      // candidates is dropped entirely rather than kept as a hollow shell —
+      // the server schema requires at least one candidate per region
+      // (reported as: submitting after removing a whole region's stops
+      // failed schema validation), and an empty region has nothing useful to
+      // tell the outline phase anyway.
+      regions: prev.regions
+        .map((region, i) =>
+          i === regionIndex
+            ? { ...region, candidateStops: updater(region.candidateStops) }
+            : region,
+        )
+        .filter((region) => region.candidateStops.length > 0),
     }))
   }
 
@@ -258,6 +580,11 @@ export function HighlightsReviewPanel({
     updateRegionStops(regionIndex, (stops) =>
       stops.filter((_, i) => i !== stopIndex),
     )
+    // Candidates are identified positionally (regionIndex/stopIndex), not by
+    // a stable id, so any removal can shift what a stale selection would
+    // point at — clearing outright is what guarantees the pop-out, if one
+    // reopens, is always for the stop it claims to be.
+    setSelectedStop(null)
   }
 
   async function submit() {
@@ -303,7 +630,18 @@ export function HighlightsReviewPanel({
             gestureHandling="greedy"
           >
             <FitToPoints points={framedPoints} />
-            <BackboneRoute backbone={backbone} onError={setRouteError} />
+            <BackboneRoute
+              backbone={backbone}
+              onError={setRouteError}
+              onRouted={setLegDistancesKm}
+            />
+            <RealDetours
+              backbone={backbone}
+              legDistancesKm={legDistancesKm}
+              candidates={detourCandidates}
+              onUpdate={updateRealDetour}
+            />
+            <PanToSelected target={selectedStopPoint} />
 
             <AdvancedMarker
               position={{ lat: startPoint.lat, lng: startPoint.lng }}
@@ -322,16 +660,64 @@ export function HighlightsReviewPanel({
               </div>
             </AdvancedMarker>
 
-            {locatedStops.map((stop, i) => (
-              <AdvancedMarker
-                key={`${stop.town}-${i}`}
-                position={{ lat: stop.lat, lng: stop.lng }}
-                title={`${stop.town} — ${PRIORITY_LABEL[stop.priority]}`}
-                data-testid="highlights-candidate-marker"
-              >
-                <CandidateMarker stop={stop} />
-              </AdvancedMarker>
-            ))}
+            {locatedStops.map(({ regionIndex, stopIndex, stop }) => {
+              const isSelected =
+                selectedStop?.regionIndex === regionIndex &&
+                selectedStop.stopIndex === stopIndex
+              return (
+                <AdvancedMarker
+                  key={`${regionIndex}-${stopIndex}`}
+                  position={{ lat: stop.lat, lng: stop.lng }}
+                  title={`${stop.town} — ${PRIORITY_LABEL[stop.priority]}`}
+                  data-testid="highlights-candidate-marker"
+                  onClick={() => setSelectedStop({ regionIndex, stopIndex })}
+                >
+                  <CandidateMarker stop={stop} selected={isSelected} />
+                </AdvancedMarker>
+              )
+            })}
+
+            {selectedStopPoint &&
+              selectedStop &&
+              (() => {
+                const stop =
+                  highlights.regions[selectedStop.regionIndex]?.candidateStops[
+                    selectedStop.stopIndex
+                  ]
+                if (!stop) return null
+                return (
+                  <InfoWindow
+                    position={selectedStopPoint}
+                    onCloseClick={() => setSelectedStop(null)}
+                  >
+                    <div
+                      className="flex w-64 items-start gap-2 p-1 text-sm"
+                      data-testid={`highlights-popup-${selectedStop.regionIndex}-${selectedStop.stopIndex}`}
+                    >
+                      <CandidateDetails
+                        stop={stop}
+                        regionIndex={selectedStop.regionIndex}
+                        stopIndex={selectedStop.stopIndex}
+                        detour={getDetour(
+                          selectedStop.regionIndex,
+                          selectedStop.stopIndex,
+                          stop,
+                        )}
+                        testIdPrefix="highlights-popup-stop"
+                        onRaise={() =>
+                          movePriority(selectedStop.regionIndex, selectedStop.stopIndex, 1)
+                        }
+                        onLower={() =>
+                          movePriority(selectedStop.regionIndex, selectedStop.stopIndex, -1)
+                        }
+                        onRemove={() =>
+                          removeStop(selectedStop.regionIndex, selectedStop.stopIndex)
+                        }
+                      />
+                    </div>
+                  </InfoWindow>
+                )
+              })()}
           </GoogleMap>
         ) : (
           <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">
@@ -364,90 +750,34 @@ export function HighlightsReviewPanel({
           </p>
           <div className="space-y-1">
             {region.candidateStops.map((stop, stopIndex) => {
-              const detour = describeDetour(stop, backbone)
+              const isSelected =
+                selectedStop?.regionIndex === regionIndex &&
+                selectedStop.stopIndex === stopIndex
               return (
                 <div
                   key={stopIndex}
                   data-testid={`highlights-stop-${regionIndex}-${stopIndex}`}
-                  className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-white p-2 text-sm transition hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+                  className={`flex items-start gap-2 rounded-lg border bg-white p-2 text-sm transition hover:shadow-sm dark:bg-neutral-900 ${
+                    isSelected
+                      ? 'border-orange-500 ring-2 ring-orange-500'
+                      : 'border-neutral-200 dark:border-neutral-800'
+                  }`}
                 >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="font-medium text-neutral-900 dark:text-white">
-                        {stop.town}
-                      </p>
-                      <span
-                        data-testid={`highlights-stop-priority-${regionIndex}-${stopIndex}`}
-                        className="chip chip-neutral"
-                      >
-                        {PRIORITY_LABEL[stop.priority]}
-                      </span>
-                      {/* Provenance, not a control: these behave exactly like
-                          any other candidate (same ▲/▼/Remove, same detour
-                          badge). The tag exists so a traveler can tell at a
-                          glance which suggestions a web search turned up
-                          versus which came from the curated pass, instead of
-                          the two being silently indistinguishable. */}
-                      {stop.source === 'search' && (
-                        <span
-                          data-testid={`highlights-stop-source-${regionIndex}-${stopIndex}`}
-                          className="chip chip-neutral"
-                        >
-                          Found via web search
-                        </span>
-                      )}
-                      {detour.kind !== 'unknown-location' && (
-                        <span
-                          data-testid={`highlights-stop-detour-${regionIndex}-${stopIndex}`}
-                          className={
-                            detour.kind === 'on-route'
-                              ? 'chip chip-accent'
-                              : 'chip chip-neutral'
-                          }
-                        >
-                          {detour.kind === 'on-route'
-                            ? 'On route'
-                            : `≈+${Math.round(detour.km)} km detour`}
-                        </span>
-                      )}
-                    </div>
-                    {/* Deliberately not truncated: this description is the
-                        whole reason the traveler can decide here instead of
-                        going and looking the town up somewhere else. */}
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {stop.why}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-col">
-                    <button
-                      type="button"
-                      aria-label="Raise priority"
-                      data-testid={`highlights-stop-up-${regionIndex}-${stopIndex}`}
-                      disabled={stop.priority === 'must-see'}
-                      onClick={() => movePriority(regionIndex, stopIndex, 1)}
-                      className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Lower priority"
-                      data-testid={`highlights-stop-down-${regionIndex}-${stopIndex}`}
-                      disabled={stop.priority === 'nice-if-convenient'}
-                      onClick={() => movePriority(regionIndex, stopIndex, -1)}
-                      className="px-1 text-xs text-neutral-500 disabled:opacity-30 dark:text-neutral-400"
-                    >
-                      ▼
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid={`highlights-stop-remove-${regionIndex}-${stopIndex}`}
-                    onClick={() => removeStop(regionIndex, stopIndex)}
-                    className="shrink-0 text-xs text-red-600 underline underline-offset-2 dark:text-red-400"
-                  >
-                    Remove
-                  </button>
+                  <CandidateDetails
+                    stop={stop}
+                    regionIndex={regionIndex}
+                    stopIndex={stopIndex}
+                    detour={getDetour(regionIndex, stopIndex, stop)}
+                    testIdPrefix="highlights-stop"
+                    onFocus={
+                      hasLocation(stop)
+                        ? () => setSelectedStop({ regionIndex, stopIndex })
+                        : undefined
+                    }
+                    onRaise={() => movePriority(regionIndex, stopIndex, 1)}
+                    onLower={() => movePriority(regionIndex, stopIndex, -1)}
+                    onRemove={() => removeStop(regionIndex, stopIndex)}
+                  />
                 </div>
               )
             })}

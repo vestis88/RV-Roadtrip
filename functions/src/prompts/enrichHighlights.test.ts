@@ -187,9 +187,9 @@ describe('generateEnrichedHighlights', () => {
       lng: 11,
     })
 
-    // Geocoded the same way the base highlights pass does it: town + country,
-    // biased near the trip's start point.
-    expect(geocodeQueryMock).toHaveBeenCalledWith('Nearby, NO', SETTINGS.startPoint)
+    // Biased near the corridor's centroid, not startPoint — BACKBONE's three
+    // points (50,10)/(52,10)/(54,10) average to (52,10).
+    expect(geocodeQueryMock).toHaveBeenCalledWith('Nearby, NO', { lat: 52, lng: 10 })
 
     const [params] = createMock.mock.calls[0] as [
       { tools?: { type: string }[]; thinking?: { type: string }; system: string },
@@ -198,6 +198,30 @@ describe('generateEnrichedHighlights', () => {
     expect(params.thinking).toEqual({ type: 'disabled' })
     // The no-synthetic-geography rule has to actually reach the model.
     expect(params.system).toMatch(/DO NOT invent/i)
+  })
+
+  it('biases geocoding near the corridor centroid, not the trip start — a long asymmetric backbone', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithStops([{ town: 'Nearby' }]))
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 51, lng: 11 })
+
+    // A long, asymmetric corridor where start and centroid are clearly
+    // different points — the bug this guards against biased every candidate
+    // toward `longBackbone[0]` regardless of how far the trip actually goes.
+    const longBackbone = [
+      { lat: 50, lng: 10 },
+      { lat: 60, lng: 20 },
+      { lat: 70, lng: 30 },
+    ]
+    const { generateEnrichedHighlights } = await import('./enrichHighlights.js')
+    await generateEnrichedHighlights({
+      settings: SETTINGS,
+      notesFreeText: '',
+      highlights: CURATED,
+      backbone: longBackbone,
+    })
+
+    expect(geocodeQueryMock).toHaveBeenCalledWith('Nearby, NO', { lat: 60, lng: 20 })
+    expect(geocodeQueryMock).not.toHaveBeenCalledWith('Nearby, NO', longBackbone[0])
   })
 
   it(`drops a find more than ${MAX_ENRICHMENT_DETOUR_KM} km off the route`, async () => {

@@ -1,6 +1,11 @@
-import { buildRouteBackbone, estimateDetourKm, type LatLng } from '@rv/shared'
+import {
+  buildRouteBackbone,
+  estimateDetourKm,
+  findCheapestBackboneLeg,
+  type LatLng,
+} from '@rv/shared'
 
-export { estimateDetourKm }
+export { estimateDetourKm, findCheapestBackboneLeg }
 
 export type HighlightPriority =
   'must-see' | 'worth-a-detour' | 'nice-if-convenient'
@@ -74,13 +79,19 @@ export function buildIdealRouteBackbone(
 export type DetourEstimate =
   | { kind: 'on-route' }
   | { kind: 'unknown-location' }
-  | { kind: 'detour'; km: number }
+  // isEstimate: true means the haversine straight-line figure (always
+  // available, computed instantly); false means it's since been upgraded to
+  // a real Directions-measured detour — see RealDetours in
+  // HighlightsReviewPanel.tsx, which overrides km/isEstimate once its own
+  // per-candidate Directions call resolves.
+  | { kind: 'detour'; km: number; isEstimate: boolean }
 
 /**
- * What to show for one candidate. Must-sees define the backbone, so a
- * numeric detour for them would always be ~0 and read as false precision —
- * they're "on route" by construction. Candidates that never geocoded get no
- * figure at all rather than a misleading 0.
+ * What to show for one candidate, before any real-Directions figure is
+ * available. Must-sees define the backbone, so a numeric detour for them
+ * would always be ~0 and read as false precision — they're "on route" by
+ * construction. Candidates that never geocoded get no figure at all rather
+ * than a misleading 0.
  */
 export function describeDetour(
   stop: HighlightCandidateStop,
@@ -91,5 +102,6 @@ export function describeDetour(
   return {
     kind: 'detour',
     km: estimateDetourKm({ lat: stop.lat, lng: stop.lng }, backbone),
+    isEstimate: true,
   }
 }

@@ -90,37 +90,67 @@ export function buildRouteBackbone(
 }
 
 /**
+ * Which backbone leg (A, B) is cheapest to insert `candidate` into — the
+ * index `i` such that A = backbone[i], B = backbone[i + 1] — minimising
+ * haversine(A, candidate) + haversine(candidate, B) - haversine(A, B) over
+ * every leg. Shared by the haversine detour estimate below and by the
+ * real-Directions detour lookup (which needs to know exactly which two
+ * backbone points to route the candidate between, not just the resulting
+ * number) — one selection, so the two never pick a different leg for the
+ * same candidate. Returns null for a backbone too short to have a leg at all.
+ */
+export function findCheapestBackboneLeg(
+  candidate: LatLng,
+  backbone: LatLng[],
+): number | null {
+  if (backbone.length < 2) return null
+
+  let bestIndex = 0
+  let bestDetour = Infinity
+  for (let i = 0; i < backbone.length - 1; i++) {
+    const a = backbone[i]
+    const b = backbone[i + 1]
+    const viaCandidate =
+      haversineDistanceKm(a, candidate) + haversineDistanceKm(candidate, b)
+    const detour = viaCandidate - haversineDistanceKm(a, b)
+    if (detour < bestDetour) {
+      bestDetour = detour
+      bestIndex = i
+    }
+  }
+  return bestIndex
+}
+
+/**
  * Cheapest-insertion estimate of what visiting `candidate` costs on top of
- * the backbone: for each consecutive leg (A, B), how much longer A→candidate→B
- * is than A→B, minimised over all legs. That's the extra distance of slotting
- * the stop into wherever it fits best, which is what "detour" means to a
- * traveler looking at a shortlist.
+ * the backbone: for the cheapest leg (A, B), how much longer A→candidate→B is
+ * than A→B. That's the extra distance of slotting the stop into wherever it
+ * fits best, which is what "detour" means to a traveler looking at a
+ * shortlist.
  *
  * Straight-line (haversine) rather than real driving distance on purpose:
  * this runs client-side over every candidate on every priority change, and a
  * Directions call per candidate would be both slow and expensive for a figure
  * whose only job is to make candidates comparable to each other. It reads low
  * against real roads (especially around fjords and mountains) — an ordering
- * hint, not a routing promise.
+ * hint, not a routing promise. Callers that want the real figure use
+ * findCheapestBackboneLeg themselves to know which two points to route a
+ * candidate between, then ask Directions for that leg specifically.
  */
 export function estimateDetourKm(
   candidate: LatLng,
   backbone: LatLng[],
 ): number {
-  if (backbone.length < 2) return 0
+  const legIndex = findCheapestBackboneLeg(candidate, backbone)
+  if (legIndex === null) return 0
 
-  let cheapest = Infinity
-  for (let i = 0; i < backbone.length - 1; i++) {
-    const a = backbone[i]
-    const b = backbone[i + 1]
-    const viaCandidate =
-      haversineDistanceKm(a, candidate) + haversineDistanceKm(candidate, b)
-    const direct = haversineDistanceKm(a, b)
-    const detour = viaCandidate - direct
-    if (detour < cheapest) cheapest = detour
-  }
+  const a = backbone[legIndex]
+  const b = backbone[legIndex + 1]
+  const viaCandidate =
+    haversineDistanceKm(a, candidate) + haversineDistanceKm(candidate, b)
+  const detour = viaCandidate - haversineDistanceKm(a, b)
 
   // Floating-point noise can push an exactly-on-the-line point microscopically
   // negative; a negative detour is meaningless either way.
-  return Number.isFinite(cheapest) ? Math.max(0, cheapest) : 0
+  return Math.max(0, detour)
 }

@@ -101,6 +101,17 @@ export function buildHighlightsBackbone(
   return buildRouteBackbone(settings.startPoint, mustSees, settings.endPoint)
 }
 
+/** Simple average of the backbone's points — one representative "somewhere
+ * along this corridor" coordinate, not weighted toward either end. */
+function backboneCentroid(backbone: LatLng[]): LatLng | null {
+  if (backbone.length === 0) return null
+  const sum = backbone.reduce(
+    (acc, point) => ({ lat: acc.lat + point.lat, lng: acc.lng + point.lng }),
+    { lat: 0, lng: 0 },
+  )
+  return { lat: sum.lat / backbone.length, lng: sum.lng / backbone.length }
+}
+
 async function locateCandidate(
   candidate: RegionHighlightCandidate,
   near: LatLng,
@@ -135,9 +146,22 @@ async function locateCandidate(
  * "carry on with the curated highlights".
  *
  * Filtering, after the response validates:
- * 1. Every candidate is geocoded exactly the way generateRegionHighlights
- *    does it — Places text search, biased near startPoint (a single global
- *    bias point is enough to disambiguate town names at this scale).
+ * 1. Every candidate is geocoded via Places text search, biased near the
+ *    corridor's own centroid — NOT startPoint, which was the first version
+ *    of this and a real bug: every candidate across a whole multi-country
+ *    corridor was disambiguated against one fixed point at the start of the
+ *    trip, so a same-named-town collision anywhere past the first leg
+ *    resolved toward whatever was closest to start instead of the actual
+ *    intended location, and MAX_ENRICHMENT_DETOUR_KM below then rejected the
+ *    mis-resolved (and correctly-far-from-start) point — the net effect
+ *    being finds that were reported as "along the route" actually only
+ *    survived near the start/end. The centroid is still one single bias
+ *    point for every candidate (good enough to disambiguate town names at
+ *    this scale, same tradeoff as generateRegionHighlights makes with
+ *    startPoint for the base pass, where every candidate really is being
+ *    reasoned about from a single vantage point before any route exists) —
+ *    it's just a much better single point for a pass that explicitly
+ *    searches near an already-known corridor rather than from one end of it.
  * 2. A candidate that didn't geocode is DROPPED, unlike in the base pass
  *    where it's kept without coordinates. There the model already judged the
  *    town worth listing against the trip as a whole; here the whole promise
@@ -192,7 +216,7 @@ export async function generateEnrichedHighlights(input: {
 
   if (!found) throw lastError
 
-  const near = input.settings.startPoint
+  const near = backboneCentroid(input.backbone) ?? input.settings.startPoint
   if (!near) return []
 
   const located = await Promise.all(
