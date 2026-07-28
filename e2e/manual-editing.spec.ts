@@ -144,21 +144,25 @@ test('request changes for this day submits a replan locking every other day', as
   await expect(page.getByTestId('request-changes-for-day-form')).toHaveCount(0)
 })
 
-test('opening "Change overnight stop" fails gracefully without Claude/Places credentials', async ({
+test('opening "Change overnight stop" degrades to "nothing found" without Claude/Places/Overpass access', async ({
   page,
 }) => {
-  // CLAUDE_API_KEY/GOOGLE_PLACES_API_KEY aren't configured in this sandbox
-  // (same caveat as T-14/T-16/T-18/T-22/countries.spec.ts's refresh test) —
-  // getOvernightCandidates has no synthetic fallback by design, so this
-  // confirms the callable failing shows a clear error instead of hanging
-  // or crashing the screen.
+  // CLAUDE_API_KEY/GOOGLE_PLACES_API_KEY aren't configured and Overpass is
+  // network-blocked in this sandbox (same caveat as T-14/T-16/T-18/T-22/
+  // countries.spec.ts's refresh test) — getOvernightCandidates has no
+  // synthetic fallback by design. Each of its 3 sources now fails
+  // independently (see overnightCandidatesCallable.ts's safe() helper) rather
+  // than one unreachable source taking the whole call down, so with every
+  // source unavailable the honest result is an empty list — the same
+  // "genuinely found nothing" state a traveler would see with real
+  // credentials if nothing were nearby, not an opaque error.
   await createTripWithPlan(page)
   await page.goto('/map/day/2026-07-10')
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('change-overnight-toggle').click()
   await expect(page.getByTestId('overnight-candidates-panel')).toBeVisible()
-  await expect(page.getByTestId('overnight-candidates-error')).toBeVisible({
+  await expect(page.getByTestId('overnight-candidates-empty')).toBeVisible({
     timeout: 10_000,
   })
 

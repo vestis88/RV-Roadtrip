@@ -165,6 +165,37 @@ describe('fetchOvernightCandidates', () => {
     expect(candidates.some((c) => c.name === 'OSM stellplatz')).toBe(true)
   })
 
+  it('degrades one failed source instead of failing the whole picker', async () => {
+    const { tripId } = await createTripForUser('uidOvernightE')
+    await seedDay(tripId, '2026-08-01')
+
+    searchCampsiteCandidatesMock
+      .mockReset()
+      .mockResolvedValue([fixtureCandidate('Campsite A', 'campsite')])
+    // Overpass has no SLA and can genuinely time out or 5xx in production —
+    // this must not take the campsite/wild results (already resolved) down
+    // with it.
+    searchStellplatzCandidatesMock
+      .mockReset()
+      .mockRejectedValue(new Error('Overpass query failed with 504'))
+    generateClaudeOvernightCandidatesMock
+      .mockReset()
+      .mockImplementation(async (input: { kind: string }) =>
+        input.kind === 'stellplatz'
+          ? Promise.reject(new Error('stellplatz fallback also failed'))
+          : [fixtureCandidate('Wild spot A', 'wild')],
+      )
+
+    const { fetchOvernightCandidates } = await import(
+      './overnightCandidatesCallable.js'
+    )
+    const candidates = await fetchOvernightCandidates(tripId, '2026-08-01')
+
+    // Stellplatz contributes nothing (its OSM lookup AND Claude fallback both
+    // failed), but that alone doesn't erase the sources that did succeed.
+    expect(candidates.map((c) => c.name)).toEqual(['Campsite A', 'Wild spot A'])
+  })
+
   it('throws not-found for a day that does not exist', async () => {
     const { tripId } = await createTripForUser('uidOvernightD')
     const { fetchOvernightCandidates } = await import(
