@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AdvancedMarker,
@@ -9,6 +9,7 @@ import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { CardRow } from '../components/CardRow'
+import { FitToPoints } from '../components/FitToPoints'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
@@ -16,6 +17,7 @@ import { AddRestDay } from '../components/AddRestDay'
 import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
+import { googleMapsSearchUrl } from '../lib/mapLinks'
 import {
   markDone,
   markSelected,
@@ -148,6 +150,32 @@ export function DayViewScreen() {
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
 
+  // The map doesn't remount just because the /map/day/:dayId route param
+  // changed (same route element, reused across Prev/Next) — without this, a
+  // marker/card focused on the previous day left its pan/zoom and "Showing:
+  // X" caption sitting on screen after navigating to a new day, with that
+  // day's own pins now off-screen. Reset synchronously during render
+  // (React's documented "adjusting state when a prop changes" pattern)
+  // rather than in an effect, so the stale caption is never shown even for
+  // one frame.
+  const [lastDayId, setLastDayId] = useState(dayId)
+  if (lastDayId !== dayId) {
+    setLastDayId(dayId)
+    setSelectedPlace(null)
+  }
+
+  const framedPoints = useMemo(
+    () =>
+      day
+        ? [
+            { lat: day.overnight.lat, lng: day.overnight.lng },
+            ...activities.map((a) => ({ lat: a.lat, lng: a.lng })),
+            ...restaurants.map((r) => ({ lat: r.lat, lng: r.lng })),
+          ]
+        : [],
+    [day, activities, restaurants],
+  )
+
   const dayIndex = days.findIndex((d) => d.id === dayId)
   const prevDayId = dayIndex > 0 ? days[dayIndex - 1].id : undefined
   const nextDayId =
@@ -187,6 +215,7 @@ export function DayViewScreen() {
             mapId="rv-day-view"
             gestureHandling="greedy"
           >
+            <FitToPoints points={framedPoints} />
             <MapPanner target={selectedPlace} />
 
             <AdvancedMarker
@@ -326,9 +355,24 @@ export function DayViewScreen() {
           priorDayIds={days.filter((d) => d.index < day.index).map((d) => d.id)}
         />
 
+        <p className="mx-4 mt-4 flex flex-wrap items-center gap-1.5 text-sm text-neutral-700 dark:text-neutral-200">
+          <span>
+            Overnight: <span className="font-medium">{day.overnight.name}</span>
+          </span>
+          <a
+            data-testid="overnight-navigate"
+            href={googleMapsSearchUrl(day.overnight.lat, day.overnight.lng)}
+            target="_blank"
+            rel="noreferrer"
+            className="link text-xs font-medium"
+          >
+            Navigate
+          </a>
+        </p>
+
         {day.type === 'rest' ? (
           <p
-            className="mx-4 mt-4 rounded-xl bg-orange-50 p-3 font-medium text-orange-800 dark:bg-orange-950 dark:text-orange-200"
+            className="mx-4 mt-2 rounded-xl bg-orange-50 p-3 font-medium text-orange-800 dark:bg-orange-950 dark:text-orange-200"
             data-testid="rest-day-banner"
           >
             No driving today 🎉

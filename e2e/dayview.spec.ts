@@ -78,6 +78,26 @@ test('prev/next arrows cycle days without visiting the overview', async ({
   await expect(page.getByTestId('next-day')).toBeDisabled()
 })
 
+test('changing day resets the map from a focused pin back to an overview', async ({
+  page,
+}) => {
+  await createTripWithPlan(page)
+  await page.goto('/map/day/2026-07-10')
+  await page.getByTestId('day-view').waitFor()
+
+  // Tapping a card focuses the map on it — the caption is the visible proof.
+  await page.getByTestId('activity-card-0').click()
+  await expect(page.getByTestId('map-selected-caption')).toContainText(
+    'Maihaugen',
+  )
+
+  // Reported bug: navigating to a new day left that focused pin/caption on
+  // screen instead of resetting to an overview of the new day's own pins.
+  await page.getByTestId('next-day').click()
+  await expect(page.getByTestId('day-view-date')).toContainText('2026-07-11')
+  await expect(page.getByTestId('map-selected-caption')).toHaveCount(0)
+})
+
 test('swiping over the day view does not change day — that gesture is reserved for panning the map', async ({
   page,
 }) => {

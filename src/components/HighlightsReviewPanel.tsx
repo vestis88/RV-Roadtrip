@@ -9,6 +9,7 @@ import {
 } from '@vis.gl/react-google-maps'
 import type { LatLng, NamedPoint } from '@rv/shared'
 import { db } from '../lib/firebase'
+import { FitToPoints } from './FitToPoints'
 import {
   buildIdealRouteBackbone,
   describeDetour,
@@ -165,20 +166,6 @@ function BackboneRoute({
 
   if (routedBackbone === backbone || backbone.length < 2) return null
   return <Polyline path={backbone} {...ROUTE_STROKE} />
-}
-
-/** Keeps every candidate and both endpoints in frame without hand-picking a zoom. */
-function FitToPoints({ points }: { points: LatLng[] }) {
-  const map = useMap()
-
-  useEffect(() => {
-    if (!map || points.length === 0) return
-    const bounds = new google.maps.LatLngBounds()
-    for (const point of points) bounds.extend(point)
-    map.fitBounds(bounds, 32)
-  }, [map, points])
-
-  return null
 }
 
 // How close in to zoom when a traveler asks to see one specific candidate —
