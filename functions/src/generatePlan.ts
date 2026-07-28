@@ -12,6 +12,7 @@ import {
   type Trip,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
+import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
@@ -176,6 +177,70 @@ export async function generateRealPlan(
   )
 
   return [...resumedDays, ...newlyResolved]
+}
+
+/**
+ * Replaces every existing day (and its activities/restaurants) with `days`,
+ * chunked across Firestore batches. Exported/directly-testable the same way
+ * generateRealPlan is — the Functions emulator runs the compiled bundle in
+ * its own process, so a test can't reach code that only runs inside the
+ * onDocumentCreated trigger closure below by mocking it.
+ *
+ * A trip being (re)generated may already have a full set of days from a
+ * previous generation — e.g. the traveler edited the destination in Trip
+ * Setup and clicked "Generate" again. Every existing day is cleared before
+ * the fresh ones are written; skipping this left old and new
+ * activities/restaurants sitting side by side under whichever dates
+ * happened to coincide, since each new one was written with a fresh
+ * auto-generated doc ID rather than overwriting anything. Reported as: a
+ * regenerated trip's map/day view still showing a previous plan's
+ * activities at the new stops. A brand new trip has no existing days, so
+ * this is a no-op for a first-ever generation.
+ */
+export async function writeGeneratedDays(
+  tripRef: DocumentReference,
+  days: GeneratedDay[],
+): Promise<void> {
+  const db = getFirestore()
+  const existingDaysSnap = await tripRef.collection('days').get()
+  const existingDayContents = await Promise.all(
+    existingDaysSnap.docs.map(async (doc) => {
+      const [activities, restaurants] = await Promise.all([
+        doc.ref.collection('activities').get(),
+        doc.ref.collection('restaurants').get(),
+      ])
+      return { doc, activities, restaurants }
+    }),
+  )
+
+  const writes: PendingWrite[] = []
+  for (const { doc, activities, restaurants } of existingDayContents) {
+    activities.docs.forEach((a) => writes.push({ op: 'delete', ref: a.ref }))
+    restaurants.docs.forEach((r) => writes.push({ op: 'delete', ref: r.ref }))
+    writes.push({ op: 'delete', ref: doc.ref })
+  }
+  for (const { day, activities, restaurants } of days) {
+    tripDaySchema.parse(day)
+    const dayRef = tripRef.collection('days').doc(day.date)
+    writes.push({ op: 'set', ref: dayRef, data: day })
+    for (const activity of activities) {
+      activitySchema.parse(activity)
+      writes.push({
+        op: 'set',
+        ref: dayRef.collection('activities').doc(),
+        data: activity,
+      })
+    }
+    for (const restaurant of restaurants) {
+      restaurantSchema.parse(restaurant)
+      writes.push({
+        op: 'set',
+        ref: dayRef.collection('restaurants').doc(),
+        data: restaurant,
+      })
+    }
+  }
+  await commitInChunks(db, writes)
 }
 
 export const generatePlan = onDocumentCreated(
@@ -361,21 +426,7 @@ export const generatePlan = onDocumentCreated(
         throw new Error(`Pacing validation failed: ${violation.reason}`)
       }
 
-      const batch = db.batch()
-      for (const { day, activities, restaurants } of days) {
-        tripDaySchema.parse(day)
-        const dayRef = tripRef.collection('days').doc(day.date)
-        batch.set(dayRef, day)
-        for (const activity of activities) {
-          activitySchema.parse(activity)
-          batch.set(dayRef.collection('activities').doc(), activity)
-        }
-        for (const restaurant of restaurants) {
-          restaurantSchema.parse(restaurant)
-          batch.set(dayRef.collection('restaurants').doc(), restaurant)
-        }
-      }
-      await batch.commit()
+      await writeGeneratedDays(tripRef, days)
       // Only now that the replacement is fully committed is the checkpoint
       // (skeleton + staged days) no longer needed for a future retry.
       await clearCheckpoint(tripRef)

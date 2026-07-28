@@ -1,9 +1,4 @@
-import {
-  getFirestore,
-  type DocumentData,
-  type DocumentReference,
-  type Firestore,
-} from 'firebase-admin/firestore'
+import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import {
   activitySchema,
   restaurantSchema,
@@ -11,42 +6,7 @@ import {
   type Trip,
   type TripDay,
 } from '@rv/shared'
-
-/**
- * Firestore caps a batched write at 500 operations. A single shifted day is
- * worth roughly 2 + 2 x (its activities + restaurants) operations (each
- * subcollection doc is copied to the new parent AND deleted from the old
- * one), which on a real trip is ~30 operations per day — so a multi-week
- * trip's shifted tail blows straight past 500. Every write this module makes
- * therefore goes through commitInChunks below, never a single batch.
- * 400 leaves comfortable headroom under the cap.
- */
-const MAX_OPS_PER_BATCH = 400
-
-type PendingWrite =
-  | { op: 'set'; ref: DocumentReference; data: DocumentData }
-  | { op: 'delete'; ref: DocumentReference }
-
-/**
- * Commits `writes` in order, split across as many WriteBatches as needed.
- *
- * Order matters and is preserved: batches are committed sequentially, so a
- * document's delete always lands before a later write to that same document
- * ID, even when the two fall in different chunks.
- */
-async function commitInChunks(
-  db: Firestore,
-  writes: PendingWrite[],
-): Promise<void> {
-  for (let i = 0; i < writes.length; i += MAX_OPS_PER_BATCH) {
-    const batch = db.batch()
-    for (const write of writes.slice(i, i + MAX_OPS_PER_BATCH)) {
-      if (write.op === 'set') batch.set(write.ref, write.data)
-      else batch.delete(write.ref)
-    }
-    await batch.commit()
-  }
-}
+import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 /**
  * Adds one calendar day to a `YYYY-MM-DD` date string.
