@@ -80,7 +80,22 @@ export async function resolveSkeletonDay(
     }
   }
 
-  const near = { lat: overnight.lat, lng: overnight.lng }
+  // Which town this day's activities/restaurants are searched near depends
+  // on when the drive happens (OUTLINE_SYSTEM_PROMPT's own default, see
+  // planTripPrompt.ts): "drive after that day's activities and dinner,
+  // arriving at the new overnight town late" — so for the default 'evening'
+  // slot, the day is actually spent at currentLocation (where it started,
+  // i.e. last night's overnight) and `overnight` is only reached after
+  // everything else that day is done. Only a 'morning'/'midday' slot means
+  // the drive already happened before the day's activities, making the new
+  // `overnight` the right anchor. Rest days have no drive at all, and
+  // `overnight` is already set to currentLocation for them above, so the
+  // 'drive'-only guard below is a no-op either way for those.
+  const activityAnchor =
+    skDay.type === 'drive' && (skDay.drive?.slot ?? 'evening') !== 'evening'
+      ? overnight
+      : currentLocation
+  const near = { lat: activityAnchor.lat, lng: activityAnchor.lng }
   const excludeIds = new Set<string>()
   const [activities, breakfast, lunch, dinner] = await Promise.all([
     enrichActivities(skDay.activities, near),
