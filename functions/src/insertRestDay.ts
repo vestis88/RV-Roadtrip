@@ -37,11 +37,10 @@ function asFreshSuggestion(data: DocumentData): DocumentData {
  * Purely mechanical — no Claude/Places/Routes call. Nothing about the
  * existing days' content changes; only their `date` and `index`.
  *
- * Because a day's Firestore doc ID *is* its date, "move a day" means copy
- * the day doc plus its activities/restaurants to the new date's doc and
- * delete the originals — there is no atomic rename. Days are processed
- * latest-first so that a day's old doc is always deleted before the day
- * behind it is written into that same ID.
+ * Day docs have stable (auto-generated) IDs, not date-keyed ones, so
+ * "shift a day" is just a field update on its existing doc — no copying its
+ * activities/restaurants to a new parent, no delete-before-write ordering to
+ * worry about.
  *
  * Everything is read and validated before the first write, and the writes
  * are chunked across multiple batches (see commitInChunks) so a long trip's
@@ -71,9 +70,9 @@ export async function runInsertRestDay(
 
   const newRestDate = addOneDay(afterDay.date)
 
-  // Read everything up front: the day we're copying suggestions from, and
-  // every day that has to shift (with its subcollections). Nothing is
-  // written until all of it is in hand and validated.
+  // Read everything up front — the day we're copying suggestions from, and
+  // (below) every day that has to shift. Nothing is written until all of it
+  // is in hand and validated.
   const [afterActivitiesSnap, afterRestaurantsSnap] = await Promise.all([
     afterDoc.ref.collection('activities').get(),
     afterDoc.ref.collection('restaurants').get(),
@@ -82,21 +81,14 @@ export async function runInsertRestDay(
   const shiftedDocs = daysSnap.docs.filter(
     (doc) => (doc.data() as TripDay).date > afterDay.date,
   )
-  const shiftedContents = await Promise.all(
-    shiftedDocs.map(async (doc) => {
-      const [activities, restaurants] = await Promise.all([
-        doc.ref.collection('activities').get(),
-        doc.ref.collection('restaurants').get(),
-      ])
-      return { doc, activities, restaurants }
-    }),
-  )
 
   const writes: PendingWrite[] = []
   const shiftedDays: TripDay[] = []
 
-  // Latest-dated day first — see the doc comment above.
-  for (const { doc, activities, restaurants } of [...shiftedContents].reverse()) {
+  // Order doesn't matter any more — each shift is a field update on the
+  // day's own existing doc, not a move to a new one, so there's no ID
+  // collision to sequence around.
+  for (const doc of shiftedDocs) {
     const day = doc.data() as TripDay
     const movedDay = {
       ...day,
@@ -104,31 +96,9 @@ export async function runInsertRestDay(
       index: day.index + 1,
     }
     shiftedDays.push(movedDay)
-
-    const newDayRef = tripRef.collection('days').doc(movedDay.date)
-    writes.push({ op: 'set', ref: newDayRef, data: movedDay })
-    for (const activity of activities.docs) {
-      writes.push({
-        op: 'set',
-        ref: newDayRef.collection('activities').doc(activity.id),
-        data: activity.data(),
-      })
-      writes.push({ op: 'delete', ref: activity.ref })
-    }
-    for (const restaurant of restaurants.docs) {
-      writes.push({
-        op: 'set',
-        ref: newDayRef.collection('restaurants').doc(restaurant.id),
-        data: restaurant.data(),
-      })
-      writes.push({ op: 'delete', ref: restaurant.ref })
-    }
-    writes.push({ op: 'delete', ref: doc.ref })
+    writes.push({ op: 'set', ref: doc.ref, data: movedDay })
   }
 
-  // The inserted day itself, written last: its date is the old date of the
-  // day that used to follow afterDay, which by now has been moved away and
-  // deleted.
   const newDay = tripDaySchema.parse({
     index: afterDay.index + 1,
     date: newRestDate,
@@ -136,7 +106,7 @@ export async function runInsertRestDay(
     overnight: afterDay.overnight,
     summary: `An extra day in ${afterDay.overnight.name} — no driving today.`,
   })
-  const newDayRef = tripRef.collection('days').doc(newRestDate)
+  const newDayRef = tripRef.collection('days').doc()
   writes.push({ op: 'set', ref: newDayRef, data: newDay })
 
   // The suggestions for the day being extended are already vetted and

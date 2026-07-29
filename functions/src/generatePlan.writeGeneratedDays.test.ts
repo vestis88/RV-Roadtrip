@@ -1,4 +1,8 @@
-import { getFirestore, type Firestore } from 'firebase-admin/firestore'
+import {
+  getFirestore,
+  type DocumentReference,
+  type Firestore,
+} from 'firebase-admin/firestore'
 import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createTripForUser } from './trips.js'
@@ -76,6 +80,18 @@ async function seedDays(
   }
 }
 
+/** Day docs have stable, auto-generated IDs, not date-keyed ones — look one
+ * up by its `date` field instead of assuming the ID matches. */
+async function dayByDate(tripRef: DocumentReference, date: string) {
+  const snap = await tripRef
+    .collection('days')
+    .where('date', '==', date)
+    .limit(1)
+    .get()
+  if (snap.empty) throw new Error(`No day found for date ${date}`)
+  return snap.docs[0]
+}
+
 function generatedDay(
   index: number,
   date: string,
@@ -114,23 +130,15 @@ describe('writeGeneratedDays', () => {
       ),
     ])
 
-    const daySnap = await tripRef.collection('days').doc('2026-07-11').get()
-    expect(daySnap.data()?.overnight.name).toBe('Copenhagen')
+    const dayDoc = await dayByDate(tripRef, '2026-07-11')
+    expect(dayDoc.data()?.overnight.name).toBe('Copenhagen')
 
-    const activitiesSnap = await tripRef
-      .collection('days')
-      .doc('2026-07-11')
-      .collection('activities')
-      .get()
+    const activitiesSnap = await dayDoc.ref.collection('activities').get()
     expect(activitiesSnap.docs.map((d) => d.data().name)).toEqual([
       'Tivoli Gardens',
     ])
 
-    const restaurantsSnap = await tripRef
-      .collection('days')
-      .doc('2026-07-11')
-      .collection('restaurants')
-      .get()
+    const restaurantsSnap = await dayDoc.ref.collection('restaurants').get()
     expect(restaurantsSnap.docs.map((d) => d.data().name)).toEqual([
       'Nyhavn Bistro',
     ])
@@ -158,14 +166,13 @@ describe('writeGeneratedDays', () => {
     ])
 
     const daysSnap = await tripRef.collection('days').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual(['2026-07-10'])
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual(['2026-07-10'])
 
-    const orphanedActivities = await tripRef
-      .collection('days')
-      .doc('2026-07-11')
-      .collection('activities')
-      .get()
-    expect(orphanedActivities.size).toBe(0)
+    // The 2026-07-11 day no longer exists at all — no doc under any ID has
+    // that date any more, so there's nothing to query orphaned activities
+    // under.
+    const remainingDates = daysSnap.docs.map((d) => d.data().date)
+    expect(remainingDates).not.toContain('2026-07-11')
   })
 
   it('writes a brand new trip with no prior days as a plain no-op wipe', async () => {
@@ -178,7 +185,7 @@ describe('writeGeneratedDays', () => {
     ])
 
     const daysSnap = await tripRef.collection('days').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual(['2026-07-10'])
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual(['2026-07-10'])
   })
 
   it('handles a regeneration large enough that clearing the old days alone exceeds one Firestore batch', async () => {

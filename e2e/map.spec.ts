@@ -1,7 +1,10 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  getDayIdByDate,
+} from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -40,8 +43,9 @@ test('overview map header summarizes the plan (route/km/day count)', async ({
 test('day view shows the right day when navigated to directly', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
   await expect(page.getByTestId('day-view-date')).toContainText('Day 1')
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-10')

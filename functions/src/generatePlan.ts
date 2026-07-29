@@ -274,7 +274,7 @@ export async function writeGeneratedDays(
   }
   for (const { day, activities, restaurants } of days) {
     tripDaySchema.parse(day)
-    const dayRef = tripRef.collection('days').doc(day.date)
+    const dayRef = tripRef.collection('days').doc()
     writes.push({ op: 'set', ref: dayRef, data: day })
     for (const activity of activities) {
       activitySchema.parse(activity)

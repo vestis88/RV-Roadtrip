@@ -160,7 +160,9 @@ export async function runReplan(
   // is dropped here rather than allowed to overwrite it. (Known limitation:
   // the route itself isn't planned around the locked day's location, since
   // Claude isn't told about it — only protected from being overwritten.)
-  const preservedDates = new Set(pastDocs.map((doc) => doc.id))
+  const preservedDates = new Set(
+    pastDocs.map((doc) => (doc.data() as TripDay).date),
+  )
   const daysToWrite = resolved.filter((r) => !preservedDates.has(r.day.date))
   if (daysToWrite.length !== resolved.length) {
     console.warn(
@@ -189,7 +191,7 @@ export async function runReplan(
   }
   for (const { day, activities, restaurants } of daysToWrite) {
     tripDaySchema.parse(day)
-    const dayRef = tripRef.collection('days').doc(day.date)
+    const dayRef = tripRef.collection('days').doc()
     batch.set(dayRef, day)
     for (const activity of activities) {
       activitySchema.parse(activity)

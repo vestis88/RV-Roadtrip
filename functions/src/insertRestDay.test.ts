@@ -137,7 +137,7 @@ describe('insertRestDay', () => {
     await runInsertRestDay(tripId, '2026-07-10')
 
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual([
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
       '2026-07-10',
       '2026-07-11',
       '2026-07-12',
@@ -191,15 +191,6 @@ describe('insertRestDay', () => {
       .collection('restaurants')
       .get()
     expect(ottaRestaurants.docs.map((d) => d.data().name)).toEqual(['Otta Kafe'])
-    // ...and nothing is left behind at their old dates.
-    const oldOttaActivities = await tripRef
-      .collection('days')
-      .doc('2026-07-11')
-      .collection('activities')
-      .get()
-    expect(oldOttaActivities.docs.map((d) => d.data().name)).not.toContain(
-      'Rondane hike',
-    )
 
     // The new day starts from the extended day's already-vetted suggestions,
     // but inherits none of its selections, completions or diary notes.
@@ -267,17 +258,16 @@ describe('insertRestDay', () => {
 
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
     expect(daysSnap.size).toBe(DAY_COUNT + 1)
-    expect(daysSnap.docs.map((d) => d.id)).toEqual([
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
       '2026-08-01',
       ...Array.from({ length: DAY_COUNT }, (_, i) =>
         `2026-08-${String(i + 2).padStart(2, '0')}`,
       ),
     ])
-    // Indices stay contiguous, and the doc ID still matches the day's date.
+    // Indices stay contiguous.
     daysSnap.docs.forEach((doc, i) => {
       const day = doc.data() as TripDay
       expect(day.index).toBe(i)
-      expect(day.date).toBe(doc.id)
     })
 
     // Every shifted day kept all 13 of its own subcollection docs — nothing
@@ -332,7 +322,7 @@ describe('insertRestDay', () => {
     await runInsertRestDay(tripId, '2026-07-11')
 
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual([
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
       '2026-07-10',
       '2026-07-11',
       '2026-07-12',
@@ -369,7 +359,10 @@ describe('insertRestDay', () => {
 
     // Nothing was inserted or shifted.
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual(['2026-07-10', '2026-07-11'])
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
+      '2026-07-10',
+      '2026-07-11',
+    ])
   }, 30_000)
 
   it('runs end to end through the planRequests trigger when the trip is idle', async () => {
@@ -397,7 +390,7 @@ describe('insertRestDay', () => {
     })
 
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
-    expect(daysSnap.docs.map((d) => d.id)).toEqual([
+    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
       '2026-07-10',
       '2026-07-11',
       '2026-07-12',

@@ -1,5 +1,8 @@
 import { expect, test } from './fixtures.js'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  getDayIdByDate,
+} from './helpers/seedFixturePlan.js'
 
 // PlaceAutocompleteInput renders a plain fallback <input> when the Places
 // library hasn't loaded (e.g. no network route to Google's API in this
@@ -15,8 +18,9 @@ async function setPlaceInput(locator: import('@playwright/test').Locator, value:
 test('skipping an activity removes it from the row behind a "show skipped" toggle, reversibly', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await expect(page.getByTestId('activity-card-0-status')).toContainText(
@@ -46,8 +50,9 @@ test('skipping an activity removes it from the row behind a "show skipped" toggl
 test('adding a custom activity writes a new selected activity card', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('add-custom-stop-toggle').click()
@@ -70,8 +75,9 @@ test('adding a custom activity writes a new selected activity card', async ({
 test('adding a custom restaurant writes a new selected restaurant card in the right meal row', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('add-custom-stop-toggle').click()
@@ -94,8 +100,9 @@ test('adding a custom restaurant writes a new selected restaurant card in the ri
 test('add-custom-stop form requires a name and description', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('add-custom-stop-toggle').click()
@@ -107,8 +114,9 @@ test('add-custom-stop form requires a name and description', async ({
 test('selecting an activity gives it a distinct look from tapping it', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   const card = page.getByTestId('activity-card-0')
@@ -133,8 +141,9 @@ test('selecting an activity gives it a distinct look from tapping it', async ({
 test('the same button unselects a selected activity, back to suggested', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   const toggleButton = page.getByTestId('activity-card-0-mark-selected')
@@ -157,8 +166,9 @@ test('the same button unselects a selected activity, back to suggested', async (
 test('request changes for this day submits a replan locking every other day', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-11')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-11')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('request-changes-for-day-button').click()
@@ -185,8 +195,9 @@ test('opening "Change overnight stop" degrades to "nothing found" without Claude
   // source unavailable the honest result is an empty list — the same
   // "genuinely found nothing" state a traveler would see with real
   // credentials if nothing were nearby, not an opaque error.
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('change-overnight-toggle').click()

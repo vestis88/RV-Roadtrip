@@ -146,7 +146,10 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
   const batch = adminDb.batch()
 
   for (const { day, activities, restaurants } of FIXTURE_DAYS) {
-    const dayRef = tripRef.collection('days').doc(day.date)
+    // Auto-generated, matching the real backend (day docs are no longer
+    // date-keyed) — see getDayIdByDate below for how specs reach a specific
+    // day.
+    const dayRef = tripRef.collection('days').doc()
     batch.set(dayRef, day)
     for (const activity of activities) {
       batch.set(dayRef.collection('activities').doc(), activity)
@@ -182,4 +185,28 @@ export async function createTripWithPlan(page: Page): Promise<string> {
   if (!tripId) throw new Error('tripId missing from localStorage')
   await seedFixturePlan(tripId)
   return tripId
+}
+
+/**
+ * Day docs have stable, auto-generated Firestore IDs, not date-keyed ones —
+ * there's no other way to reach a specific day directly (e.g.
+ * `/map/day/<id>`) in this sandbox, since Google Maps JS is network-blocked
+ * here and clicking a day badge (the only in-app way to navigate to Day
+ * View) has never been testable in this suite.
+ */
+export async function getDayIdByDate(
+  tripId: string,
+  date: string,
+): Promise<string> {
+  const snap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .where('date', '==', date)
+    .limit(1)
+    .get()
+  if (snap.empty) {
+    throw new Error(`No day found for date ${date} on trip ${tripId}`)
+  }
+  return snap.docs[0].id
 }

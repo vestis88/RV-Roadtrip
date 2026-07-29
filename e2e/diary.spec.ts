@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures.js'
-import { seedFixturePlan } from './helpers/seedFixturePlan.js'
+import { getDayIdByDate, seedFixturePlan } from './helpers/seedFixturePlan.js'
 
 test('marking cards done with notes logs them to the diary, synced live to a second device', async ({
   browser,
@@ -22,7 +22,8 @@ test('marking cards done with notes logs them to the diary, synced live to a sec
   await pageB.goto(`/?join=${code}`)
   await pageB.getByTestId('nav-diary').waitFor()
 
-  await pageA.goto('/map/day/2026-07-10')
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await pageA.goto(`/map/day/${dayId}`)
   await pageA.getByTestId('day-view').waitFor()
 
   await pageA.getByTestId('activity-card-0-mark-done').click()

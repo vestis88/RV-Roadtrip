@@ -1,4 +1,4 @@
-import { getFirestore } from 'firebase-admin/firestore'
+import { getFirestore, type DocumentReference } from 'firebase-admin/firestore'
 import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTripForUser } from './trips.js'
@@ -32,6 +32,19 @@ vi.mock('./planPipeline.js', async (importOriginal) => {
     resolveSkeletonDays: (...args: unknown[]) => resolveSkeletonDaysMock(...args),
   }
 })
+
+/** A day replanTrip rewrites (an unlocked future day) gets a fresh
+ * auto-generated ID — look it up by its `date` field, not by the date string
+ * it might have coincidentally had before the replan. */
+async function dayByDate(tripRef: DocumentReference, date: string) {
+  const snap = await tripRef
+    .collection('days')
+    .where('date', '==', date)
+    .limit(1)
+    .get()
+  if (snap.empty) throw new Error(`No day found for date ${date}`)
+  return snap.docs[0]
+}
 
 function placeholderActivity(lat: number, lng: number) {
   return {
@@ -168,12 +181,12 @@ describe('replanTrip', () => {
 
     // Stale future day: replaced, not left in place, and reindexed to
     // continue from pastDocs.length (2) rather than the skeleton's own 0.
-    const staleSnap = await tripRef.collection('days').doc('2026-07-12').get()
+    const staleSnap = await dayByDate(tripRef, '2026-07-12')
     expect(staleSnap.data()?.summary).toBe('REPLANNED day 2')
     expect(staleSnap.data()?.index).toBe(2)
 
     // New remainder day at the requested end date exists, also reindexed.
-    const finalDaySnap = await tripRef.collection('days').doc('2026-07-13').get()
+    const finalDaySnap = await dayByDate(tripRef, '2026-07-13')
     expect(finalDaySnap.data()?.summary).toBe('REPLANNED day 3')
     expect(finalDaySnap.data()?.index).toBe(3)
 
@@ -293,12 +306,12 @@ describe('replanTrip', () => {
     // Stale, unlocked future day: still replaced as normal. pastDocs is
     // [pastDay, lockedMidRangeDay] (locked counts as "preserved" regardless
     // of date), so reindexing starts at 2 — this is skeleton position 0.
-    const staleSnap = await tripRef.collection('days').doc('2026-07-12').get()
+    const staleSnap = await dayByDate(tripRef, '2026-07-12')
     expect(staleSnap.data()?.summary).toBe('REPLANNED day 2')
 
     // The day after the locked one still gets written normally, at
     // skeleton position 2 → reindexed to 4.
-    const afterLockedSnap = await tripRef.collection('days').doc('2026-07-14').get()
+    const afterLockedSnap = await dayByDate(tripRef, '2026-07-14')
     expect(afterLockedSnap.data()?.summary).toBe('REPLANNED day 4')
 
     // planTrip received the change request text folded into the notes.

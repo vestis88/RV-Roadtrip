@@ -1,5 +1,8 @@
 import { expect, test } from './fixtures.js'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  getDayIdByDate,
+} from './helpers/seedFixturePlan.js'
 
 // The Google Maps JS API itself can't load in this sandbox (see master_plan.md's
 // T-20 note — the agent proxy's egress policy blocks Google domains from the
@@ -10,8 +13,9 @@ import { createTripWithPlan } from './helpers/seedFixturePlan.js'
 test('tapping a card selects it and updates the map caption', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   const card = page.getByTestId('activity-card-0')
@@ -28,8 +32,9 @@ test('tapping a card selects it and updates the map caption', async ({
 test('Navigate link href equals the stored googleMapsUrl', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await expect(page.getByTestId('activity-card-0-navigate')).toHaveAttribute(

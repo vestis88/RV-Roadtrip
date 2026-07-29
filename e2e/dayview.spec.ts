@@ -1,7 +1,10 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  getDayIdByDate,
+} from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -32,8 +35,9 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
     page,
   }) => {
     await page.setViewportSize(viewport)
-    await createTripWithPlan(page)
-    await page.goto('/map/day/2026-07-10')
+    const tripId = await createTripWithPlan(page)
+    const dayId = await getDayIdByDate(tripId, '2026-07-10')
+    await page.goto(`/map/day/${dayId}`)
     await page.getByTestId('day-view').waitFor()
 
     await expect(page.getByTestId('day-view-date')).toContainText('Day 1')
@@ -51,8 +55,9 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
 test('rest day shows the no-driving banner instead of a drive card', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-12')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-12')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
   await expect(page.getByTestId('rest-day-banner')).toContainText(
     'No driving today',
@@ -63,26 +68,30 @@ test('rest day shows the no-driving banner instead of a drive card', async ({
 test('prev/next arrows cycle days without visiting the overview', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId10 = await getDayIdByDate(tripId, '2026-07-10')
+  const dayId11 = await getDayIdByDate(tripId, '2026-07-11')
+  const dayId12 = await getDayIdByDate(tripId, '2026-07-12')
+  await page.goto(`/map/day/${dayId10}`)
   await page.getByTestId('day-view').waitFor()
   await expect(page.getByTestId('prev-day')).toBeDisabled()
 
   await page.getByTestId('next-day').click()
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-11')
-  expect(page.url()).toContain('/map/day/2026-07-11')
+  expect(page.url()).toContain(`/map/day/${dayId11}`)
 
   await page.getByTestId('next-day').click()
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-12')
-  expect(page.url()).toContain('/map/day/2026-07-12')
+  expect(page.url()).toContain(`/map/day/${dayId12}`)
   await expect(page.getByTestId('next-day')).toBeDisabled()
 })
 
 test('changing day resets the map from a focused pin back to an overview', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   // Tapping a card focuses the map on it — the caption is the visible proof.
@@ -101,8 +110,9 @@ test('changing day resets the map from a focused pin back to an overview', async
 test('swiping over the day view does not change day — that gesture is reserved for panning the map', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   const dayView = page.getByTestId('day-view')
@@ -116,7 +126,7 @@ test('swiping over the day view does not change day — that gesture is reserved
     changedTouches: [{ identifier: 0, clientX: box.x + 20, clientY: midY }],
   })
   await expect(page.getByTestId('day-view-date')).toContainText('2026-07-10')
-  expect(page.url()).toContain('/map/day/2026-07-10')
+  expect(page.url()).toContain(`/map/day/${dayId}`)
 })
 
 // "Add a rest day" is the one plan operation that runs entirely in the
@@ -127,7 +137,8 @@ test('adding a rest day inserts a day and pushes every later day back one', asyn
   page,
 }) => {
   const tripId = await createTripWithPlan(page)
-  await page.goto('/map/day/2026-07-10')
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
   await page.getByTestId('add-rest-day-button').click()
@@ -137,19 +148,19 @@ test('adding a rest day inserts a day and pushes every later day back one', asyn
   await page.getByTestId('add-rest-day-confirm').click()
   await expect(page.getByTestId('add-rest-day-form')).toHaveCount(0)
 
-  const dayIds = await waitFor(async () => {
+  const dayDates = await waitFor(async () => {
     const snap = await adminDb
       .collection('trips')
       .doc(tripId)
       .collection('days')
       .orderBy('date')
       .get()
-    return snap.size === 4 ? snap.docs.map((d) => d.id) : undefined
+    return snap.size === 4 ? snap.docs.map((d) => d.data().date) : undefined
   })
 
   // The fixture plan is 2026-07-10..12; the extra day lands on the 11th and
   // the two days that followed slide to the 12th and 13th.
-  expect(dayIds).toEqual([
+  expect(dayDates).toEqual([
     '2026-07-10',
     '2026-07-11',
     '2026-07-12',
@@ -160,21 +171,25 @@ test('adding a rest day inserts a day and pushes every later day back one', asyn
     .collection('trips')
     .doc(tripId)
     .collection('days')
-    .doc('2026-07-11')
+    .where('date', '==', '2026-07-11')
+    .limit(1)
     .get()
-  expect(insertedSnap.data()?.type).toBe('rest')
-  expect(insertedSnap.data()?.overnight.name).toBe('Lillehammer Camping')
+  expect(insertedSnap.docs[0].data().type).toBe('rest')
+  expect(insertedSnap.docs[0].data().overnight.name).toBe(
+    'Lillehammer Camping',
+  )
 
   // The day that used to be the 11th kept its content, one date later.
   const shiftedSnap = await adminDb
     .collection('trips')
     .doc(tripId)
     .collection('days')
-    .doc('2026-07-12')
+    .where('date', '==', '2026-07-12')
+    .limit(1)
     .get()
-  expect(shiftedSnap.data()?.summary).toContain('Gudbrandsdalen')
-  expect(shiftedSnap.data()?.index).toBe(2)
+  expect(shiftedSnap.docs[0].data().summary).toContain('Gudbrandsdalen')
+  expect(shiftedSnap.docs[0].data().index).toBe(2)
 
-  await page.goto('/map/day/2026-07-11')
+  await page.goto(`/map/day/${insertedSnap.docs[0].id}`)
   await expect(page.getByTestId('rest-day-banner')).toBeVisible()
 })
