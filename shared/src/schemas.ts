@@ -211,6 +211,20 @@ export const corridorStopSchema = z.object({
   linkedDayIds: z.array(z.string()),
 })
 
+// Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per
+// day whose date actually moved when the traveler's proposed new stop order
+// was reconciled against the existing day sequence. Returned by both the
+// dry-run preview callable and the real commit, so the same diff a traveler
+// reviewed before confirming is exactly what happened.
+export const reconcileDayChangeSchema = z.object({
+  dayId: z.string(),
+  overnightName: z.string(),
+  oldDate: isoDate,
+  newDate: isoDate,
+  newDistanceKm: z.number().nonnegative().optional(),
+  newDurationMin: z.number().nonnegative().optional(),
+})
+
 export const activityCategorySchema = z.enum([
   'sight',
   'hike',
@@ -303,7 +317,13 @@ export const logEntrySchema = z.object({
 
 export const planRequestSchema = z.object({
   tripId: z.string(),
-  kind: z.enum(['full', 'replan', 'continueFromHighlights', 'insertRestDay']),
+  kind: z.enum([
+    'full',
+    'replan',
+    'continueFromHighlights',
+    'insertRestDay',
+    'reconcileCorridor',
+  ]),
   replanContext: z
     .object({
       currentLocation: latLngSchema,
@@ -328,6 +348,17 @@ export const planRequestSchema = z.object({
   insertRestDayContext: z
     .object({
       afterDayId: z.string(),
+    })
+    .optional(),
+  // Set on a 'reconcileCorridor' request: the traveler reordered the
+  // corridor's committed stops (via the reorder panel's up/down buttons, no
+  // drag-and-drop — see reconcileCorridor.ts's own comment for why) and
+  // confirmed the previewed diff. newStopOrder must be exactly a permutation
+  // of the trip's currently committed corridorStops — adding/removing a stop
+  // is phase 4b, not this request kind.
+  reconcileCorridorContext: z
+    .object({
+      newStopOrder: z.array(z.string()),
     })
     .optional(),
   // Set on a 'full' request to pause after the highlights phase for review
@@ -368,6 +399,7 @@ export type DriveLeg = z.infer<typeof driveLegSchema>
 export type TripDay = z.infer<typeof tripDaySchema>
 export type CorridorStopStatus = z.infer<typeof corridorStopStatusSchema>
 export type CorridorStop = z.infer<typeof corridorStopSchema>
+export type ReconcileDayChange = z.infer<typeof reconcileDayChangeSchema>
 export type ActivityCategory = z.infer<typeof activityCategorySchema>
 export type ItemStatus = z.infer<typeof itemStatusSchema>
 export type Activity = z.infer<typeof activitySchema>

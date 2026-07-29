@@ -36,6 +36,7 @@ import { MarkerBadge } from '../components/MarkerBadge'
 import { CorridorStopCard } from '../components/CorridorStopCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
+import { ReorderCorridorPanel } from '../components/ReorderCorridorPanel'
 
 const ROUTE_STROKE = {
   strokeColor: '#ea580c',
@@ -208,6 +209,24 @@ export function OverviewMapScreen() {
     editableCorridorStops.find((stop) => stop.id === selectedCorridorStopId) ??
     null
 
+  const [reorderOpen, setReorderOpen] = useState(false)
+  // Committed stops in their current order — derived from each stop's
+  // earliest linked day's index, since that's the real ordering key
+  // (corridorStops itself carries no sequence field; linkedDayIds already
+  // ties each stop back to real, already-ordered TripDays).
+  const dayIndexById = new Map(days.map((day) => [day.id, day.index]))
+  const committedCorridorStops = corridorStops
+    .filter((stop) => stop.status === 'committed')
+    .map((stop) => ({
+      id: stop.id,
+      name: stop.name,
+      earliestIndex: stop.linkedDayIds.reduce(
+        (min, dayId) => Math.min(min, dayIndexById.get(dayId) ?? Infinity),
+        Infinity,
+      ),
+    }))
+    .sort((a, b) => a.earliestIndex - b.earliestIndex)
+
   const planStatus = trip.planMeta.status
   // Only a ready-ish plan has anything for the header stats/route/"Request
   // changes" to report on or act against — everything else (no plan yet,
@@ -282,7 +301,25 @@ export function OverviewMapScreen() {
           >
             Request changes
           </button>
+          {committedCorridorStops.length > 1 && (
+            <button
+              type="button"
+              data-testid="reorder-stops-button"
+              className="btn btn-ghost"
+              onClick={() => setReorderOpen(true)}
+            >
+              Reorder stops
+            </button>
+          )}
         </div>
+      )}
+
+      {reorderOpen && (
+        <ReorderCorridorPanel
+          tripId={tripId}
+          stops={committedCorridorStops}
+          onClose={() => setReorderOpen(false)}
+        />
       )}
 
       {planStatus === 'idle' && (

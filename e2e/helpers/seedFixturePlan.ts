@@ -145,6 +145,14 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
   const tripRef = adminDb.collection('trips').doc(tripId)
   const batch = adminDb.batch()
 
+  // Mirrors functions/src/corridorStops.ts's buildCorridorStopWrites
+  // (not importable here — e2e helpers are a separate TS project from
+  // functions/src): one committed corridorStops doc per distinct overnight
+  // location, so specs exercising phase-3/4 corridor features (reorder,
+  // lock/unlock, rescan) have real data to work against, same as a trip
+  // generated through the real pipeline would.
+  const corridorGroups = new Map<string, string[]>()
+
   for (const { day, activities, restaurants } of FIXTURE_DAYS) {
     // Auto-generated, matching the real backend (day docs are no longer
     // date-keyed) — see getDayIdByDate below for how specs reach a specific
@@ -157,7 +165,30 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
     for (const restaurant of restaurants) {
       batch.set(dayRef.collection('restaurants').doc(), restaurant)
     }
+
+    const key = `${day.overnight.lat}|${day.overnight.lng}`
+    const dayIds = corridorGroups.get(key) ?? []
+    dayIds.push(dayRef.id)
+    corridorGroups.set(key, dayIds)
   }
+
+  for (const { day } of FIXTURE_DAYS) {
+    const key = `${day.overnight.lat}|${day.overnight.lng}`
+    const dayIds = corridorGroups.get(key)
+    if (!dayIds) continue
+    const stopRef = tripRef.collection('corridorStops').doc()
+    batch.set(stopRef, {
+      name: day.overnight.name,
+      lat: day.overnight.lat,
+      lng: day.overnight.lng,
+      country: day.overnight.country,
+      status: 'committed',
+      linkedDayIds: dayIds,
+    })
+    // Only materialize each distinct stop once.
+    corridorGroups.delete(key)
+  }
+
   await batch.commit()
 
   const driveDays = FIXTURE_DAYS.filter((d) => d.day.drive)
@@ -170,6 +201,14 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
     driveDays.length
 
   await tripRef.update({
+    // Real geography matching the fixture's own first/last stops (day 0's
+    // drive.fromName is literally 'Oslo') — a real trip always has these
+    // set, and features that compute a leg back to the trip's own start
+    // (e.g. reconcileCorridor reordering a stop into the first position)
+    // need a genuine point to measure from, not the {lat:0,lng:0} a bare
+    // createTrip call defaults to.
+    'settings.startPoint': { name: 'Oslo', lat: 59.9139, lng: 10.7522 },
+    'settings.endPoint': { name: 'Otta', lat: 61.7725, lng: 9.5406 },
     'planMeta.status': 'ready',
     'planMeta.totalKm': totalKm,
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,

@@ -15,6 +15,7 @@ import {
 import { validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
+import { runReconcileCorridor } from './corridorReconciliation.js'
 import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
@@ -48,12 +49,22 @@ import {
 
 interface PlanRequestData {
   tripId: string
-  kind: 'full' | 'replan' | 'continueFromHighlights' | 'insertRestDay'
+  kind:
+    | 'full'
+    | 'replan'
+    | 'continueFromHighlights'
+    | 'insertRestDay'
+    | 'reconcileCorridor'
   replanContext?: ReplanContext
   // "Add a rest day" (implemented 2026-07-28): a purely mechanical reschedule
   // — no Claude/Places call — routed through this trigger anyway so it shares
   // the one-operation-per-trip cost guard below with replan/full.
   insertRestDayContext?: { afterDayId: string }
+  // "Reorder the corridor" (phase 4a, implemented 2026-07-29): also purely
+  // mechanical (no Claude call) but mutates real day data (dates, drive
+  // legs), so it needs the same busy guard for the same reason
+  // insertRestDay does.
+  reconcileCorridorContext?: { newStopOrder: string[] }
   // Interactive/transparent route planning (implemented 2026-07-27):
   reviewHighlights?: boolean
   editedHighlights?: unknown
@@ -409,6 +420,41 @@ export const generatePlan = onDocumentCreated(
         await snap.ref.update({ status: 'done' })
       } catch (error) {
         console.error('runInsertRestDay failed', error)
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': String(error),
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+        await snap.ref.update({ status: 'error', error: String(error) })
+      }
+      return
+    }
+
+    if (request.kind === 'reconcileCorridor') {
+      const newStopOrder = request.reconcileCorridorContext?.newStopOrder
+      if (!newStopOrder) {
+        const message =
+          'reconcileCorridor request is missing reconcileCorridorContext'
+        await tripRef.update({
+          'planMeta.status': 'error',
+          'planMeta.error': message,
+        })
+        await snap.ref.update({ status: 'error', error: message })
+        return
+      }
+      try {
+        await tripRef.update({
+          'planMeta.status': 'generating',
+          'planMeta.progressLabel': FieldValue.delete(),
+          'planMeta.progressCurrent': FieldValue.delete(),
+          'planMeta.progressTotal': FieldValue.delete(),
+        })
+        await runReconcileCorridor(request.tripId, newStopOrder)
+        await snap.ref.update({ status: 'done' })
+      } catch (error) {
+        console.error('runReconcileCorridor failed', error)
         await tripRef.update({
           'planMeta.status': 'error',
           'planMeta.error': String(error),
