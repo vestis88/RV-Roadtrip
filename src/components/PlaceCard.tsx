@@ -13,7 +13,10 @@ interface PlaceCardProps {
   selected?: boolean
   onTap?: () => void
   status?: ItemStatus
-  onMarkSelected?: () => void
+  /** Toggles between 'selected' and 'suggested' — the caller decides which
+   * way based on the current `status`, this button just always shows the
+   * opposite of whatever's current ("Select" / "Unselect"). */
+  onToggleSelected?: () => void
   onMarkDone?: (note: string) => void
   onMarkSkipped?: () => void
 }
@@ -30,7 +33,7 @@ export function PlaceCard({
   selected,
   onTap,
   status,
-  onMarkSelected,
+  onToggleSelected,
   onMarkDone,
   onMarkSkipped,
 }: PlaceCardProps) {
@@ -105,7 +108,7 @@ export function PlaceCard({
           </a>
         )}
 
-        {(onMarkSelected || onMarkDone || onMarkSkipped) && (
+        {(onToggleSelected || onMarkDone || onMarkSkipped) && (
           <div className="mt-auto border-t border-neutral-100 pt-2 dark:border-neutral-800">
             <p
               data-testid={`${testId}-status`}
@@ -136,17 +139,17 @@ export function PlaceCard({
               </div>
             ) : (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {onMarkSelected && (
+                {onToggleSelected && (
                   <button
                     type="button"
                     data-testid={`${testId}-mark-selected`}
                     onClick={(event) => {
                       stop(event)
-                      onMarkSelected()
+                      onToggleSelected()
                     }}
                     className="btn btn-sm btn-secondary"
                   >
-                    Select
+                    {status === 'selected' ? 'Unselect' : 'Select'}
                   </button>
                 )}
                 {onMarkDone && (

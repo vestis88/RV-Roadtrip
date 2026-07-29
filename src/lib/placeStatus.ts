@@ -20,6 +20,19 @@ export async function markSelected(
   )
 }
 
+/** Reverts a selected item back to the neutral default — "unselect". */
+export async function markSuggested(
+  tripId: string,
+  dayId: string,
+  kind: PlaceKind,
+  placeId: string,
+) {
+  await updateDoc(
+    doc(db, 'trips', tripId, 'days', dayId, SUBCOLLECTION[kind], placeId),
+    { status: 'suggested' },
+  )
+}
+
 export async function markSkipped(
   tripId: string,
   dayId: string,

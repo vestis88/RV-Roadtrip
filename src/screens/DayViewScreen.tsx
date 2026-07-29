@@ -22,6 +22,7 @@ import {
   markDone,
   markSelected,
   markSkipped,
+  markSuggested,
   type PlaceKind,
 } from '../lib/placeStatus'
 
@@ -123,8 +124,13 @@ function PlaceCardSection({
                   lng: place.lng,
                 })
               }
-              onMarkSelected={() =>
-                markSelected(tripId, dayId, kind, place.id).catch(console.error)
+              onToggleSelected={() =>
+                (place.status === 'selected' ? markSuggested : markSelected)(
+                  tripId,
+                  dayId,
+                  kind,
+                  place.id,
+                ).catch(console.error)
               }
               onMarkDone={(note) =>
                 markDone(tripId, dayId, kind, place.id, date, note).catch(
