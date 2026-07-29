@@ -12,16 +12,30 @@ import type { Activity, LatLng } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayPlaces } from '../hooks/useDayPlaces'
+import { useCorridorStops } from '../hooks/useCorridorStops'
 import {
   buildOverviewRoutePoints,
   chunkRouteSegments,
 } from '../lib/buildOverviewRoute'
 import { getZoomTiers } from '../lib/mapZoomTiers'
-import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
+import {
+  CATEGORY_ICON,
+  CORRIDOR_LOCKED_ICON,
+  CORRIDOR_PROPOSED_ICON,
+  OVERNIGHT_ICON,
+  RESTAURANT_ICON,
+} from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
+import {
+  deleteCorridorStop,
+  setCorridorStopStatus,
+} from '../lib/corridorStopActions'
 import { MarkerBadge } from '../components/MarkerBadge'
+import { CorridorStopCard } from '../components/CorridorStopCard'
+import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
+import { RescanCorridorButton } from '../components/RescanCorridorButton'
 
 const ROUTE_STROKE = {
   strokeColor: '#ea580c',
@@ -162,7 +176,12 @@ export function OverviewMapScreen() {
   const navigate = useNavigate()
   const online = useOnlineStatus()
   const { days } = useTripDays(tripId)
+  const { corridorStops } = useCorridorStops(tripId)
   const [zoom, setZoom] = useState(6)
+  const [center, setCenter] = useState<LatLng>({
+    lat: trip.settings.startPoint.lat,
+    lng: trip.settings.startPoint.lng,
+  })
   const tiers = getZoomTiers(zoom)
   const dayIds = days.map((d) => d.id)
   // Fetched unconditionally, unlike the marker tiers below: the route threads
@@ -175,6 +194,19 @@ export function OverviewMapScreen() {
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
   const [routeError, setRouteError] = useState<string | null>(null)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
+  const [selectedCorridorStopId, setSelectedCorridorStopId] = useState<
+    string | null
+  >(null)
+  // committed stops are already represented by their day's own overnight
+  // badge — this tier only ever shows the two kinds of stop that AREN'T
+  // reconciled into a day yet: proposed (rescan finds) and locked
+  // (traveler-pinned).
+  const editableCorridorStops = corridorStops.filter(
+    (stop) => stop.status !== 'committed',
+  )
+  const selectedCorridorStop =
+    editableCorridorStops.find((stop) => stop.id === selectedCorridorStopId) ??
+    null
 
   const planStatus = trip.planMeta.status
   // Only a ready-ish plan has anything for the header stats/route/"Request
@@ -354,9 +386,10 @@ export function OverviewMapScreen() {
             defaultZoom={zoom}
             mapId="rv-trip-overview"
             gestureHandling="greedy"
-            onCameraChanged={(event: MapCameraChangedEvent) =>
+            onCameraChanged={(event: MapCameraChangedEvent) => {
               setZoom(event.detail.zoom)
-            }
+              setCenter(event.detail.center)
+            }}
           >
             <TripRoute points={routePoints} onError={setRouteError} />
             <MapPanner target={selectedPlace} />
@@ -455,6 +488,26 @@ export function OverviewMapScreen() {
                   )
                 })
               })}
+
+            {tiers.showCorridorStops &&
+              editableCorridorStops.map((stop) => (
+                <AdvancedMarker
+                  key={stop.id}
+                  position={{ lat: stop.lat, lng: stop.lng }}
+                  title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
+                  data-testid={`corridor-stop-marker-${stop.id}`}
+                  onClick={() => setSelectedCorridorStopId(stop.id)}
+                >
+                  <MarkerBadge
+                    icon={
+                      stop.status === 'locked'
+                        ? CORRIDOR_LOCKED_ICON
+                        : CORRIDOR_PROPOSED_ICON
+                    }
+                    highlighted={selectedCorridorStopId === stop.id}
+                  />
+                </AdvancedMarker>
+              ))}
           </GoogleMap>
         ) : (
           <p className="p-4 text-neutral-500">
@@ -468,6 +521,28 @@ export function OverviewMapScreen() {
           >
             Showing: {selectedPlace.name}
           </p>
+        )}
+
+        {apiKey && (
+          <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+            <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
+            <RescanCorridorButton tripId={tripId} center={center} />
+          </div>
+        )}
+
+        {selectedCorridorStop && (
+          <CorridorStopCard
+            stop={selectedCorridorStop}
+            onLock={() => setCorridorStopStatus(tripId, selectedCorridorStop.id, 'locked')}
+            onUnlock={() =>
+              setCorridorStopStatus(tripId, selectedCorridorStop.id, 'proposed')
+            }
+            onRemove={() => {
+              deleteCorridorStop(tripId, selectedCorridorStop.id)
+              setSelectedCorridorStopId(null)
+            }}
+            onClose={() => setSelectedCorridorStopId(null)}
+          />
         )}
       </div>
     </div>

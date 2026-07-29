@@ -181,9 +181,20 @@ export const tripDaySchema = z.object({
 // actually written by generatePlan.ts/replanTrip.ts/insertRestDay.ts rather
 // than from Claude's pre-selection highlight candidates — those have no
 // stable identity (addressed purely positionally) and don't reliably map
-// 1:1 to the days a generation finally produces. 'proposed' and 'locked'
-// are unused until phase 3 (corridor editing + rescan) lands; everything
-// this phase writes is 'committed' — it came from a completed generation.
+// 1:1 to the days a generation finally produces. Everything the generation
+// pipeline itself writes is 'committed' and always carries a real country
+// (from TripDay.overnight) and at least one linkedDayId.
+//
+// Phase 3 (corridor editing + rescan, 2026-07-29) adds two more sources:
+// a traveler manually pinning a stop on the map (status 'locked' —
+// deliberate, no review step needed) and a "rescan this area" callable
+// (status 'proposed' — a suggestion to review). Neither is backed by a
+// TripDay, so both `country` and `linkedDayIds` had to loosen from the
+// generation-only case: `country` is optional (a hand-placed pin has no
+// geocoded country the way an overnight stop always does — Places
+// autocomplete alone doesn't resolve one), and `linkedDayIds` may be empty
+// (a stop with no day yet is exactly what "not yet reconciled into the
+// plan" means — that reconciliation is phase 4's job, not this schema's).
 export const corridorStopStatusSchema = z.enum([
   'proposed',
   'committed',
@@ -194,10 +205,10 @@ export const corridorStopSchema = z.object({
   name: z.string(),
   lat: z.number(),
   lng: z.number(),
-  country: z.string().length(2),
+  country: z.string().length(2).optional(),
   why: z.string().optional(),
   status: corridorStopStatusSchema,
-  linkedDayIds: z.array(z.string()).min(1),
+  linkedDayIds: z.array(z.string()),
 })
 
 export const activityCategorySchema = z.enum([

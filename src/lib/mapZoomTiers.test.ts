@@ -7,14 +7,16 @@ describe('getZoomTiers', () => {
       showOvernightStops: false,
       showSelectedActivities: false,
       showAllPlaces: false,
+      showCorridorStops: false,
     })
   })
 
-  it('adds overnight stops at zoom 7 (6-8)', () => {
+  it('adds overnight stops and corridor stops at zoom 7 (6-8)', () => {
     expect(getZoomTiers(7)).toEqual({
       showOvernightStops: true,
       showSelectedActivities: false,
       showAllPlaces: false,
+      showCorridorStops: true,
     })
   })
 
@@ -23,6 +25,7 @@ describe('getZoomTiers', () => {
       showOvernightStops: true,
       showSelectedActivities: true,
       showAllPlaces: false,
+      showCorridorStops: true,
     })
   })
 
@@ -31,6 +34,7 @@ describe('getZoomTiers', () => {
       showOvernightStops: true,
       showSelectedActivities: true,
       showAllPlaces: true,
+      showCorridorStops: true,
     })
   })
 })

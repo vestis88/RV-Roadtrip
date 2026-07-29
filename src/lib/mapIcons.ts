@@ -10,3 +10,5 @@ export const CATEGORY_ICON: Record<ActivityCategory, string> = {
 }
 export const RESTAURANT_ICON = '🍴'
 export const OVERNIGHT_ICON = '🛏️'
+export const CORRIDOR_PROPOSED_ICON = '🔍'
+export const CORRIDOR_LOCKED_ICON = '📌'
