@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTripForUser } from './trips.js'
 import { validatePacing } from './pacingValidator.js'
-import type { TripDay } from '@rv/shared'
+import type { CorridorStop, TripDay } from '@rv/shared'
 
 const PROJECT_ID = 'demo-rv-trip-planner'
 
@@ -427,5 +427,110 @@ describe('replanTrip', () => {
         notesFreeText: expect.not.stringContaining('behind the original plan'),
       }),
     )
+  })
+
+  it('preserves a corridor stop linked only to a past day, and rematerializes one linked to a regenerated future day', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorReplan')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    const pastDay: TripDay = {
+      index: 0,
+      date: '2026-07-11',
+      type: 'drive',
+      overnight: { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' },
+      drive: {
+        fromName: 'Lillehammer',
+        toName: 'Otta',
+        distanceKm: 140,
+        durationMin: 120,
+        slot: 'midday',
+      },
+      summary: 'ORIGINAL day 1',
+    }
+    const staleFutureDay: TripDay = {
+      index: 1,
+      date: '2026-07-12',
+      type: 'drive',
+      overnight: { name: 'Dombas', lat: 62.07, lng: 9.13, country: 'NO' },
+      drive: {
+        fromName: 'Otta',
+        toName: 'Dombas',
+        distanceKm: 50,
+        durationMin: 45,
+        slot: 'morning',
+      },
+      summary: 'STALE — should be replaced by replan',
+    }
+    const pastDayRef = tripRef.collection('days').doc()
+    const staleFutureDayRef = tripRef.collection('days').doc()
+    await pastDayRef.set(pastDay)
+    await staleFutureDayRef.set(staleFutureDay)
+    await tripRef.update({ 'planMeta.status': 'ready' })
+
+    const preservedStopRef = tripRef.collection('corridorStops').doc()
+    await preservedStopRef.set({
+      name: 'Otta',
+      lat: 61.77,
+      lng: 9.54,
+      country: 'NO',
+      status: 'committed',
+      linkedDayIds: [pastDayRef.id],
+    } satisfies CorridorStop)
+
+    const staleStopRef = tripRef.collection('corridorStops').doc()
+    await staleStopRef.set({
+      name: 'Dombas',
+      lat: 62.07,
+      lng: 9.13,
+      country: 'NO',
+      status: 'committed',
+      linkedDayIds: [staleFutureDayRef.id],
+    } satisfies CorridorStop)
+
+    planTripMock.mockReset().mockResolvedValue({ days: [{ index: 0 }] })
+    resolveSkeletonDaysMock.mockReset().mockImplementation(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+      ) => {
+        const result = skeletonDays.map((d) =>
+          fixtureGeneratedDay(d.index, '2026-07-12', 'REPLANNED'),
+        )
+        onDayResolved?.(result.length)
+        return result
+      },
+    )
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.77, lng: 9.54 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-12',
+      remainingEndPoint: { name: 'Stop 0', lat: 61, lng: 9 },
+    })
+
+    const corridorSnap = await tripRef.collection('corridorStops').get()
+    const stops = corridorSnap.docs.map((d) => d.data() as CorridorStop)
+
+    // Preserved: still linked only to the past day, untouched by the replan.
+    const ottaStop = stops.find((s) => s.name === 'Otta')
+    expect(ottaStop?.linkedDayIds).toEqual([pastDayRef.id])
+
+    // Stale: no surviving stop still points at the deleted Dombas day.
+    expect(
+      stops.some((s) => s.linkedDayIds.includes(staleFutureDayRef.id)),
+    ).toBe(false)
+
+    // Fresh: a new committed stop exists for the regenerated day.
+    const newDaysSnap = await tripRef.collection('days').orderBy('date').get()
+    const newDay = newDaysSnap.docs.find((d) => d.id !== pastDayRef.id)
+    expect(newDay).toBeDefined()
+    const newStop = stops.find(
+      (s) => newDay && s.linkedDayIds.includes(newDay.id),
+    )
+    expect(newStop?.status).toBe('committed')
   })
 })

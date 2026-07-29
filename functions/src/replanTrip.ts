@@ -1,8 +1,9 @@
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore, type DocumentReference } from 'firebase-admin/firestore'
 import {
   activitySchema,
   restaurantSchema,
   tripDaySchema,
+  type CorridorStop,
   type LatLng,
   type NamedPoint,
   type Trip,
@@ -12,6 +13,8 @@ import {
 import { validatePacing } from './pacingValidator.js'
 import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
 import { planTrip } from './prompts/planTrip.js'
+import { buildCorridorStopWrites } from './corridorStops.js'
+import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 export interface ReplanContext {
   currentLocation: LatLng
@@ -179,30 +182,56 @@ export async function runReplan(
   }
 
   // Only now — once the replacement is known-good — touch existing docs.
-  const batch = db.batch()
+  const futureIds = new Set(futureDocs.map((doc) => doc.id))
+  const corridorSnap = await tripRef.collection('corridorStops').get()
+  // Any stop touching a day about to be deleted is stale — either it's
+  // entirely within the regenerated range, or it straddles the
+  // today/locked boundary and is getting split; either way it's rebuilt
+  // fresh below rather than patched. Stops linked only to past/locked days
+  // are untouched.
+  const staleCorridorStops = corridorSnap.docs.filter((doc) =>
+    (doc.data() as CorridorStop).linkedDayIds.some((id) => futureIds.has(id)),
+  )
+
+  const writes: PendingWrite[] = []
   for (const doc of futureDocs) {
     const [activities, restaurants] = await Promise.all([
       doc.ref.collection('activities').get(),
       doc.ref.collection('restaurants').get(),
     ])
-    activities.docs.forEach((a) => batch.delete(a.ref))
-    restaurants.docs.forEach((r) => batch.delete(r.ref))
-    batch.delete(doc.ref)
+    activities.docs.forEach((a) => writes.push({ op: 'delete', ref: a.ref }))
+    restaurants.docs.forEach((r) => writes.push({ op: 'delete', ref: r.ref }))
+    writes.push({ op: 'delete', ref: doc.ref })
   }
+  staleCorridorStops.forEach((doc) =>
+    writes.push({ op: 'delete', ref: doc.ref }),
+  )
+
+  const writtenDays: { ref: DocumentReference; day: TripDay }[] = []
   for (const { day, activities, restaurants } of daysToWrite) {
     tripDaySchema.parse(day)
     const dayRef = tripRef.collection('days').doc()
-    batch.set(dayRef, day)
+    writes.push({ op: 'set', ref: dayRef, data: day })
+    writtenDays.push({ ref: dayRef, day })
     for (const activity of activities) {
       activitySchema.parse(activity)
-      batch.set(dayRef.collection('activities').doc(), activity)
+      writes.push({
+        op: 'set',
+        ref: dayRef.collection('activities').doc(),
+        data: activity,
+      })
     }
     for (const restaurant of restaurants) {
       restaurantSchema.parse(restaurant)
-      batch.set(dayRef.collection('restaurants').doc(), restaurant)
+      writes.push({
+        op: 'set',
+        ref: dayRef.collection('restaurants').doc(),
+        data: restaurant,
+      })
     }
   }
-  await batch.commit()
+  writes.push(...buildCorridorStopWrites(tripRef, writtenDays))
+  await commitInChunks(db, writes)
 
   const allDays: TripDay[] = [
     ...pastDocs.map((doc) => doc.data() as TripDay),

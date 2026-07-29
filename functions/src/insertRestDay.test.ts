@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createTripForUser } from './trips.js'
 import { runInsertRestDay } from './insertRestDay.js'
-import type { TripDay } from '@rv/shared'
+import type { CorridorStop, TripDay } from '@rv/shared'
 
 const PROJECT_ID = 'demo-rv-trip-planner'
 
@@ -416,5 +416,51 @@ describe('insertRestDay', () => {
       return snap.data()?.status === 'error' ? snap.data() : undefined
     })
     expect(request?.error).toContain('insertRestDayContext')
+  }, 30_000)
+
+  it("links the inserted rest day into the extended day's existing corridor stop", async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidInsertCorridorLink')
+    const tripRef = db.collection('trips').doc(tripId)
+    const lillehammer = driveDay(0, '2026-07-10', 'Lillehammer')
+    await seedDays(db, tripId, [
+      { day: lillehammer },
+      { day: driveDay(1, '2026-07-11', 'Otta') },
+    ])
+
+    const stopRef = tripRef.collection('corridorStops').doc()
+    await stopRef.set({
+      name: 'Lillehammer',
+      lat: lillehammer.overnight.lat,
+      lng: lillehammer.overnight.lng,
+      country: 'NO',
+      status: 'committed',
+      linkedDayIds: ['2026-07-10'],
+    } satisfies CorridorStop)
+
+    await runInsertRestDay(tripId, '2026-07-10')
+
+    const daysSnap = await tripRef.collection('days').orderBy('date').get()
+    const insertedDay = daysSnap.docs[1]
+    expect(insertedDay.data().type).toBe('rest')
+
+    const stopSnap = await stopRef.get()
+    const stop = stopSnap.data() as CorridorStop
+    expect(stop.linkedDayIds).toEqual(['2026-07-10', insertedDay.id])
+  }, 30_000)
+
+  it('leaves corridor stops alone when none exists yet for the extended day', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidInsertNoCorridor')
+    const tripRef = db.collection('trips').doc(tripId)
+    await seedDays(db, tripId, [
+      { day: driveDay(0, '2026-07-10', 'Lillehammer') },
+      { day: driveDay(1, '2026-07-11', 'Otta') },
+    ])
+
+    await runInsertRestDay(tripId, '2026-07-10')
+
+    const corridorSnap = await tripRef.collection('corridorStops').get()
+    expect(corridorSnap.empty).toBe(true)
   }, 30_000)
 })

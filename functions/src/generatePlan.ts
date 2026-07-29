@@ -10,9 +10,11 @@ import {
   tripDaySchema,
   type NamedPoint,
   type Trip,
+  type TripDay,
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
+import { buildCorridorStopWrites } from './corridorStops.js'
 import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
@@ -255,7 +257,10 @@ export async function writeGeneratedDays(
   days: GeneratedDay[],
 ): Promise<void> {
   const db = getFirestore()
-  const existingDaysSnap = await tripRef.collection('days').get()
+  const [existingDaysSnap, existingCorridorSnap] = await Promise.all([
+    tripRef.collection('days').get(),
+    tripRef.collection('corridorStops').get(),
+  ])
   const existingDayContents = await Promise.all(
     existingDaysSnap.docs.map(async (doc) => {
       const [activities, restaurants] = await Promise.all([
@@ -272,10 +277,16 @@ export async function writeGeneratedDays(
     restaurants.docs.forEach((r) => writes.push({ op: 'delete', ref: r.ref }))
     writes.push({ op: 'delete', ref: doc.ref })
   }
+  existingCorridorSnap.docs.forEach((stop) =>
+    writes.push({ op: 'delete', ref: stop.ref }),
+  )
+
+  const writtenDays: { ref: DocumentReference; day: TripDay }[] = []
   for (const { day, activities, restaurants } of days) {
     tripDaySchema.parse(day)
     const dayRef = tripRef.collection('days').doc()
     writes.push({ op: 'set', ref: dayRef, data: day })
+    writtenDays.push({ ref: dayRef, day })
     for (const activity of activities) {
       activitySchema.parse(activity)
       writes.push({
@@ -293,6 +304,7 @@ export async function writeGeneratedDays(
       })
     }
   }
+  writes.push(...buildCorridorStopWrites(tripRef, writtenDays))
   await commitInChunks(db, writes)
 }
 

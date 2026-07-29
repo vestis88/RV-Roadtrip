@@ -131,6 +131,47 @@ describe('trips/{tripId}/days (and other subcollections)', () => {
   })
 })
 
+describe('trips/{tripId}/corridorStops', () => {
+  it('lets a member create, read, update, and delete a corridor stop', async () => {
+    const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    const stopRef = doc(db, 'trips', TRIP_ID, 'corridorStops', 'stop1')
+
+    await assertSucceeds(
+      setDoc(stopRef, {
+        name: 'Otta',
+        lat: 61.77,
+        lng: 9.54,
+        country: 'NO',
+        status: 'committed',
+        linkedDayIds: ['day1'],
+      }),
+    )
+    await assertSucceeds(getDoc(stopRef))
+    await assertSucceeds(updateDoc(stopRef, { status: 'locked' }))
+    await assertSucceeds(deleteDoc(stopRef))
+  })
+
+  it('denies a stranger reading or writing a corridor stop', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), 'trips', TRIP_ID, 'corridorStops', 'stop1'),
+        {
+          name: 'Otta',
+          lat: 61.77,
+          lng: 9.54,
+          country: 'NO',
+          status: 'committed',
+          linkedDayIds: ['day1'],
+        },
+      )
+    })
+    const db = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    const stopRef = doc(db, 'trips', TRIP_ID, 'corridorStops', 'stop1')
+    await assertFails(getDoc(stopRef))
+    await assertFails(updateDoc(stopRef, { status: 'locked' }))
+  })
+})
+
 describe('trips/{tripId}/members', () => {
   it('lets a member read the members list', async () => {
     const db = testEnv.authenticatedContext(MEMBER_UID).firestore()

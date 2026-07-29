@@ -1,8 +1,10 @@
 import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import {
   activitySchema,
+  corridorStopSchema,
   restaurantSchema,
   tripDaySchema,
+  type CorridorStop,
   type Trip,
   type TripDay,
 } from '@rv/shared'
@@ -127,6 +129,26 @@ export async function runInsertRestDay(
       op: 'set',
       ref: newDayRef.collection('restaurants').doc(),
       data: copy,
+    })
+  }
+
+  // The new rest day shares afterDay's overnight verbatim, so it belongs to
+  // whatever corridor stop afterDayId already belongs to. A trip created
+  // before corridor stops existed has none yet — skip silently and let it
+  // catch up lazily on its next full regen/replan.
+  const corridorSnap = await tripRef.collection('corridorStops').get()
+  const afterStopDoc = corridorSnap.docs.find((doc) =>
+    (doc.data() as CorridorStop).linkedDayIds.includes(afterDayId),
+  )
+  if (afterStopDoc) {
+    const stop = afterStopDoc.data() as CorridorStop
+    writes.push({
+      op: 'set',
+      ref: afterStopDoc.ref,
+      data: corridorStopSchema.parse({
+        ...stop,
+        linkedDayIds: [...stop.linkedDayIds, newDayRef.id],
+      }),
     })
   }
 

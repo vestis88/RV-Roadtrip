@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { createTripForUser } from './trips.js'
 import { writeGeneratedDays } from './generatePlan.js'
 import type { GeneratedDay } from './planPipeline.js'
-import type { Activity, Restaurant, TripDay } from '@rv/shared'
+import type { Activity, CorridorStop, Restaurant, TripDay } from '@rv/shared'
 
 const PROJECT_ID = 'demo-rv-trip-planner'
 
@@ -239,4 +239,34 @@ describe('writeGeneratedDays', () => {
       }
     }
   }, 30_000)
+
+  it('wipes and rematerializes corridorStops alongside days', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorRegen')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    // A stale corridor stop left over from a previous generation, linked to
+    // a day ID that no longer exists — must not survive the regeneration.
+    await tripRef.collection('corridorStops').add({
+      name: 'Stale town',
+      lat: 1,
+      lng: 1,
+      country: 'NO',
+      status: 'committed',
+      linkedDayIds: ['stale-day-id'],
+    } satisfies CorridorStop)
+
+    await writeGeneratedDays(tripRef, [
+      generatedDay(0, '2026-07-10', 'Oslo', [activity('Vigeland Park')], []),
+    ])
+
+    const corridorSnap = await tripRef.collection('corridorStops').get()
+    expect(corridorSnap.size).toBe(1)
+    const stop = corridorSnap.docs[0].data() as CorridorStop
+    expect(stop.name).toBe('Oslo')
+    expect(stop.status).toBe('committed')
+
+    const daysSnap = await tripRef.collection('days').get()
+    expect(stop.linkedDayIds).toEqual([daysSnap.docs[0].id])
+  })
 })

@@ -34,6 +34,10 @@ service cloud.firestore {
         allow read, write: if isMember(tripId);
       }
 
+      match /corridorStops/{stopId} {
+        allow read, write: if isMember(tripId);
+      }
+
       match /log/{entryId} {
         allow read, write: if isMember(tripId);
       }

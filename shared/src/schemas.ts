@@ -175,6 +175,31 @@ export const tripDaySchema = z.object({
   highlightReason: z.string().optional(),
 })
 
+// Persistent, always-editable route corridor (2026-07-29): one entry per
+// distinct overnight stop in the committed plan (consecutive rest days at
+// the same stop share one entry via linkedDayIds), derived from the days
+// actually written by generatePlan.ts/replanTrip.ts/insertRestDay.ts rather
+// than from Claude's pre-selection highlight candidates — those have no
+// stable identity (addressed purely positionally) and don't reliably map
+// 1:1 to the days a generation finally produces. 'proposed' and 'locked'
+// are unused until phase 3 (corridor editing + rescan) lands; everything
+// this phase writes is 'committed' — it came from a completed generation.
+export const corridorStopStatusSchema = z.enum([
+  'proposed',
+  'committed',
+  'locked',
+])
+
+export const corridorStopSchema = z.object({
+  name: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  country: z.string().length(2),
+  why: z.string().optional(),
+  status: corridorStopStatusSchema,
+  linkedDayIds: z.array(z.string()).min(1),
+})
+
 export const activityCategorySchema = z.enum([
   'sight',
   'hike',
@@ -330,6 +355,8 @@ export type DaySlot = z.infer<typeof daySlotSchema>
 export type OvernightStop = z.infer<typeof overnightStopSchema>
 export type DriveLeg = z.infer<typeof driveLegSchema>
 export type TripDay = z.infer<typeof tripDaySchema>
+export type CorridorStopStatus = z.infer<typeof corridorStopStatusSchema>
+export type CorridorStop = z.infer<typeof corridorStopSchema>
 export type ActivityCategory = z.infer<typeof activityCategorySchema>
 export type ItemStatus = z.infer<typeof itemStatusSchema>
 export type Activity = z.infer<typeof activitySchema>
