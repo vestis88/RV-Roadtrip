@@ -121,6 +121,118 @@ test('reordering committed stops previews and commits a date/drive-leg swap', as
   expect(days[2].drive.fromName).toBe('Otta Camping')
 })
 
+test('removing a stop deletes its day and requires accepting the end-date change', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await page.getByTestId('reorder-stops-button').click()
+  const panel = page.getByTestId('reorder-corridor-panel')
+  await panel.waitFor()
+
+  const rows = panel.locator('li')
+  await expect(rows).toHaveCount(2)
+
+  // Remove Lillehammer (the first row) — a day count change, so the
+  // trip's own end date moves too.
+  await panel.locator('button[data-testid$="-remove"]').first().click()
+  await expect(rows).toHaveCount(1)
+  await expect(rows.nth(0)).toContainText('Otta')
+
+  await page.getByTestId('reorder-preview-button').click()
+  await expect(page.getByTestId('reorder-removed-list')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByTestId('reorder-removed-list')).toContainText(
+    'Removed: Lillehammer Camping',
+  )
+
+  const enddateNotice = page.getByTestId('reorder-enddate-change')
+  await expect(enddateNotice).toBeVisible()
+  const confirmButton = page.getByTestId('reorder-confirm-button')
+  await expect(confirmButton).toBeDisabled()
+
+  await page.getByTestId('reorder-enddate-accept').check()
+  await expect(confirmButton).toBeEnabled()
+  await confirmButton.click()
+  await expect(panel).toHaveCount(0)
+
+  await expect
+    .poll(
+      async () => {
+        const daysSnap = await adminDb
+          .collection('trips')
+          .doc(tripId)
+          .collection('days')
+          .orderBy('date')
+          .get()
+        return daysSnap.docs.map((d) => d.data().date)
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual(['2026-07-10', '2026-07-11'])
+
+  // commitInChunks(days) and the trip-level settings/planMeta update are two
+  // separate writes within the same async function — the days poll above
+  // only proves the first has landed, not the second, so settings.endDate
+  // needs its own poll rather than an immediate read right after.
+  await expect
+    .poll(
+      async () => (await adminDb.collection('trips').doc(tripId).get()).data()
+        ?.settings.endDate,
+      { timeout: 15_000 },
+    )
+    .toBe('2026-07-11')
+
+  const daysSnap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .orderBy('date')
+    .get()
+  const days = daysSnap.docs.map((d) => d.data())
+  expect(days.every((d) => d.overnight.name === 'Otta Camping')).toBe(true)
+  // Otta's arrival now comes straight from the trip's own start point.
+  expect(days[0].drive.fromName).toBe('Oslo')
+
+  const corridorSnap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('corridorStops')
+    .where('name', '==', 'Lillehammer Camping')
+    .get()
+  expect(corridorSnap.empty).toBe(true)
+})
+
+test('adding a locked stop degrades to an error banner without Claude/Places access', async ({
+  page,
+}) => {
+  await createTripWithPlan(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await page.getByTestId('add-corridor-stop-toggle').click()
+  await page.getByTestId('corridor-stop-name').fill('Vinstra viewpoint')
+  await setPlaceInput(page.getByTestId('corridor-stop-location'), 'Vinstra, Norway')
+  await page.getByTestId('corridor-stop-submit').click()
+  await expect(page.getByTestId('add-corridor-stop-form')).toHaveCount(0)
+
+  await page.getByTestId('reorder-stops-button').click()
+  const panel = page.getByTestId('reorder-corridor-panel')
+  await panel.waitFor()
+
+  const addButton = panel.locator('button[data-testid$="-add"]')
+  await expect(addButton).toBeVisible()
+  await addButton.click()
+
+  await page.getByTestId('reorder-preview-button').click()
+  await expect(page.getByTestId('reorder-preview-error')).toBeVisible({
+    timeout: 10_000,
+  })
+})
+
 test('rescanning this area degrades to an error banner without Claude/Places access', async ({
   page,
 }) => {

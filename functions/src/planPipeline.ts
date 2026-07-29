@@ -36,30 +36,40 @@ export interface GeneratedDay {
 export async function resolveSkeletonDay(
   skDay: PlanTripSkeletonDay,
   currentLocation: NamedPoint,
+  // Set when the overnight stop's coordinates are already known and trusted
+  // — a corridor stop the traveler placed directly (AddCorridorStopForm) or
+  // located via a rescan (phase 4b of the persistent-corridor overhaul:
+  // reconciling that stop into a real day). Skips the geocodeQuery lookup
+  // below entirely: re-geocoding by name/town/country text search could
+  // silently resolve to a DIFFERENT point than the one the traveler actually
+  // pinned (e.g. a same-named town elsewhere), which would defeat the whole
+  // point of letting them place it themselves. Every other caller (fresh
+  // generation, replan) has no such prior point and geocodes as before.
+  knownOvernight?: { lat: number; lng: number; country?: string },
 ): Promise<{ generated: GeneratedDay; nextLocation: NamedPoint }> {
   let overnight: OvernightStop
   let drive: TripDay['drive']
 
   if (skDay.type === 'drive') {
-    const geocoded = await geocodeQuery(
+    const point = knownOvernight ?? (await geocodeQuery(
       `${skDay.overnight.name}, ${skDay.overnight.town}, ${skDay.overnight.country}`,
       currentLocation,
-    )
-    if (!geocoded) {
+    ))
+    if (!point) {
       throw new Error(
         `Could not geocode overnight stop "${skDay.overnight.name}, ${skDay.overnight.town}"`,
       )
     }
     overnight = {
       name: skDay.overnight.name,
-      lat: geocoded.lat,
-      lng: geocoded.lng,
-      country: skDay.overnight.country,
+      lat: point.lat,
+      lng: point.lng,
+      country: knownOvernight?.country ?? skDay.overnight.country,
       ...(skDay.overnight.campsiteSuggestion
         ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
         : {}),
     }
-    const leg = await computeRouteLeg(currentLocation, geocoded)
+    const leg = await computeRouteLeg(currentLocation, point)
     drive = {
       fromName: currentLocation.name,
       toName: overnight.name,

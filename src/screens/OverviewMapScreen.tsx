@@ -226,6 +226,13 @@ export function OverviewMapScreen() {
       ),
     }))
     .sort((a, b) => a.earliestIndex - b.earliestIndex)
+  // Locked stops with no linked day yet (a traveler-placed pin or a locked
+  // rescan find) — these are the ones phase 4b's reconciliation can add into
+  // the route; a 'proposed' stop must be locked first (CorridorStopCard's
+  // own gate for every other action on one).
+  const addableCorridorStops = corridorStops
+    .filter((stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0)
+    .map((stop) => ({ id: stop.id, name: stop.name }))
 
   const planStatus = trip.planMeta.status
   // Only a ready-ish plan has anything for the header stats/route/"Request
@@ -301,14 +308,15 @@ export function OverviewMapScreen() {
           >
             Request changes
           </button>
-          {committedCorridorStops.length > 1 && (
+          {(committedCorridorStops.length > 1 ||
+            addableCorridorStops.length > 0) && (
             <button
               type="button"
               data-testid="reorder-stops-button"
               className="btn btn-ghost"
               onClick={() => setReorderOpen(true)}
             >
-              Reorder stops
+              Edit route
             </button>
           )}
         </div>
@@ -318,6 +326,7 @@ export function OverviewMapScreen() {
         <ReorderCorridorPanel
           tripId={tripId}
           stops={committedCorridorStops}
+          addableStops={addableCorridorStops}
           onClose={() => setReorderOpen(false)}
         />
       )}

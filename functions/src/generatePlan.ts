@@ -63,8 +63,14 @@ interface PlanRequestData {
   // "Reorder the corridor" (phase 4a, implemented 2026-07-29): also purely
   // mechanical (no Claude call) but mutates real day data (dates, drive
   // legs), so it needs the same busy guard for the same reason
-  // insertRestDay does.
-  reconcileCorridorContext?: { newStopOrder: string[] }
+  // insertRestDay does. Extended in phase 4b to also add/remove a stop
+  // (which DOES call Claude/Places for a newly-added one, and — unlike a
+  // pure reorder — can change the trip's day count, hence
+  // acceptEndDateChange: see corridorReconciliation.ts's own doc comment.
+  reconcileCorridorContext?: {
+    newStopOrder: string[]
+    acceptEndDateChange?: boolean
+  }
   // Interactive/transparent route planning (implemented 2026-07-27):
   reviewHighlights?: boolean
   editedHighlights?: unknown
@@ -451,7 +457,11 @@ export const generatePlan = onDocumentCreated(
           'planMeta.progressCurrent': FieldValue.delete(),
           'planMeta.progressTotal': FieldValue.delete(),
         })
-        await runReconcileCorridor(request.tripId, newStopOrder)
+        await runReconcileCorridor(
+          request.tripId,
+          newStopOrder,
+          request.reconcileCorridorContext?.acceptEndDateChange ?? false,
+        )
         await snap.ref.update({ status: 'done' })
       } catch (error) {
         console.error('runReconcileCorridor failed', error)

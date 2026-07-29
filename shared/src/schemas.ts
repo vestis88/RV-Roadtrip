@@ -350,15 +350,20 @@ export const planRequestSchema = z.object({
       afterDayId: z.string(),
     })
     .optional(),
-  // Set on a 'reconcileCorridor' request: the traveler reordered the
-  // corridor's committed stops (via the reorder panel's up/down buttons, no
-  // drag-and-drop — see reconcileCorridor.ts's own comment for why) and
-  // confirmed the previewed diff. newStopOrder must be exactly a permutation
-  // of the trip's currently committed corridorStops — adding/removing a stop
-  // is phase 4b, not this request kind.
+  // Set on a 'reconcileCorridor' request: the traveler edited the corridor
+  // (reordered via up/down buttons, no drag-and-drop — see
+  // corridorReconciliation.ts's own comment for why; or included/excluded a
+  // stop — phase 4b) and confirmed the previewed diff. newStopOrder is the
+  // full desired list of committed/locked stop IDs in order — a currently
+  // committed stop left out is removed, a locked stop included is added.
+  // acceptEndDateChange must be set when the previewed diff showed an
+  // endDateChange (add/remove can change the trip's day count, unlike a
+  // pure reorder) — otherwise the commit refuses to touch settings.endDate
+  // as a side effect of an edit the traveler didn't ask to extend/shorten.
   reconcileCorridorContext: z
     .object({
       newStopOrder: z.array(z.string()),
+      acceptEndDateChange: z.boolean().optional(),
     })
     .optional(),
   // Set on a 'full' request to pause after the highlights phase for review

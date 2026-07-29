@@ -55,6 +55,11 @@ export function CorridorStopCard({
       >
         Status: {stop.status}
       </p>
+      {stop.status === 'locked' && stop.linkedDayIds.length === 0 && (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Use "Edit route" to add this stop to your itinerary.
+        </p>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {stop.status === 'proposed' && (
           <button

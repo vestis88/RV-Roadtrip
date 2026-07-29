@@ -209,6 +209,13 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
     // createTrip call defaults to.
     'settings.startPoint': { name: 'Oslo', lat: 59.9139, lng: 10.7522 },
     'settings.endPoint': { name: 'Otta', lat: 61.7725, lng: 9.5406 },
+    // Phase 4b's reconciliation always recomputes the final date sequence as
+    // settings.startDate + i (add/remove changes the day count, so it can no
+    // longer just reuse the existing day dates verbatim the way a pure
+    // reorder could) — a bare createTrip call defaults this to "today", which
+    // wouldn't match FIXTURE_DAYS's own 2026-07-10..12 dates at all.
+    'settings.startDate': '2026-07-10',
+    'settings.endDate': '2026-07-12',
     'planMeta.status': 'ready',
     'planMeta.totalKm': totalKm,
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,

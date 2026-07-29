@@ -17,6 +17,7 @@ import {
   type PlanTripSkeletonDay,
   type RegionHighlightsResponse,
   type RouteOutline,
+  type RouteOutlineDay,
 } from './planTripSchema.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
@@ -154,6 +155,38 @@ async function callWithRetry<T>(
 }
 
 /**
+ * One chunk's worth of the detail phase (phase 3 — see generateSkeletonFromHighlights's
+ * loop below and the corridor reconciliation's own use for a single
+ * traveler-added stop, phase 4b of the persistent-corridor overhaul):
+ * factored out so both callers share the exact same prompt-building,
+ * retry-on-schema-failure, and cache-breakpoint-placement logic rather than
+ * a second hand-rolled copy.
+ */
+export async function generateChunkDetail(
+  client: Anthropic,
+  input: {
+    settings: TripSettings
+    notesFreeText: string
+    outline: RouteOutline
+    chunkDays: RouteOutlineDay[]
+  },
+  options?: { cacheStableBlock?: boolean },
+): Promise<ChunkDetailResponse> {
+  const { system, stableUser, variableUser } = buildChunkDetailPrompt(input)
+  const stableBlock: Anthropic.TextBlockParam = { type: 'text', text: stableUser }
+  if (options?.cacheStableBlock) {
+    stableBlock.cache_control = { type: 'ephemeral' }
+  }
+  return callWithRetry(
+    client,
+    system,
+    [stableBlock, { type: 'text', text: variableUser }],
+    16000,
+    parseChunkDetail,
+  )
+}
+
+/**
  * Phase 1 alone (see planTrip's own doc comment below for the full
  * three-phase picture) — split out for the interactive/transparent route
  * planning review pause (implemented 2026-07-27): generatePlan.ts can run
@@ -267,31 +300,18 @@ export async function generateSkeletonFromHighlights(input: {
       chunkIndex: c + 1,
       chunkCount: chunks.length,
     })
-    const { system, stableUser, variableUser } = buildChunkDetailPrompt({
-      settings: input.settings,
-      notesFreeText: input.notesFreeText,
-      outline,
-      chunkDays: chunks[c],
-    })
-    // stableUser (settings/notes/fullRouteOutline) is byte-identical across
-    // every chunk of this trip — cache it so chunk 2+ reads it back instead
-    // of reprocessing the whole outline every time. Only worth the ~1.25x
-    // write premium when there's a second chunk to actually read it; a
-    // single-chunk trip (<= CHUNK_SIZE days) would just pay that premium for
-    // zero reads.
-    const stableBlock: Anthropic.TextBlockParam = {
-      type: 'text',
-      text: stableUser,
-    }
-    if (chunks.length > 1) {
-      stableBlock.cache_control = { type: 'ephemeral' }
-    }
-    const detail = await callWithRetry(
+    const detail = await generateChunkDetail(
       client,
-      system,
-      [stableBlock, { type: 'text', text: variableUser }],
-      16000,
-      parseChunkDetail,
+      {
+        settings: input.settings,
+        notesFreeText: input.notesFreeText,
+        outline,
+        chunkDays: chunks[c],
+      },
+      // Only worth caching the stable settings/notes/fullRouteOutline block
+      // when there's a second chunk to read it back — a single-chunk trip
+      // (<= CHUNK_SIZE days) would just pay the write premium for zero reads.
+      { cacheStableBlock: chunks.length > 1 },
     )
     for (const day of detail.days) {
       detailByIndex.set(day.index, day)

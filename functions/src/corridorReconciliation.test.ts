@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { initializeApp } from 'firebase-admin/app'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTripForUser } from './trips.js'
 import {
   computeCorridorReconciliation,
@@ -13,6 +13,76 @@ const PROJECT_ID = 'demo-rv-trip-planner'
 beforeAll(() => {
   initializeApp({ projectId: PROJECT_ID })
   getFirestore().settings({ ignoreUndefinedProperties: true })
+})
+
+// Only the "add a locked stop" path (phase 4b) ever reaches these — reorder
+// and remove are both purely mechanical. Same module-mock approach
+// generatePlan.enrichHighlights.test.ts and planPipeline.test.ts already use
+// for an emulator-backed test that also needs Claude/Places mocked (neither
+// has real credentials here, matching every other Claude/Places-touching
+// test in this codebase). geocodeQuery is deliberately NOT mocked here: the
+// "add" path always passes resolveSkeletonDay a knownOvernight (the corridor
+// stop's own already-resolved lat/lng), so it's never called — a test
+// accidentally relying on it would be exercising the wrong code path.
+const createMock = vi.fn()
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = { create: createMock }
+  },
+}))
+
+const enrichActivitiesMock = vi.fn()
+const enrichRestaurantsForMealMock = vi.fn()
+vi.mock('./placesApi.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./placesApi.js')>()
+  return {
+    ...actual,
+    enrichActivities: (...args: unknown[]) => enrichActivitiesMock(...args),
+    enrichRestaurantsForMeal: (...args: unknown[]) =>
+      enrichRestaurantsForMealMock(...args),
+  }
+})
+
+function chunkDetailResponse(overnightName: string) {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          days: [
+            {
+              index: 0,
+              summary: `A day in ${overnightName}.`,
+              activities: Array.from({ length: 5 }, (_, i) => ({
+                name: `${overnightName} activity ${i}`,
+                town: overnightName,
+                category: 'sight',
+                kidFriendly: true,
+                blurb: 'x',
+              })),
+              restaurants: [
+                ...['breakfast', 'lunch', 'dinner'].flatMap((meal) =>
+                  Array.from({ length: 3 }, (_, i) => ({
+                    name: `${overnightName} ${meal} ${i}`,
+                    town: overnightName,
+                    meal,
+                    blurb: 'x',
+                  })),
+                ),
+              ],
+            },
+          ],
+        }),
+      },
+    ],
+    stop_reason: 'end_turn',
+  }
+}
+
+beforeEach(() => {
+  createMock.mockReset()
+  enrichActivitiesMock.mockReset().mockResolvedValue([])
+  enrichRestaurantsForMealMock.mockReset().mockResolvedValue([])
 })
 
 async function waitFor<T>(
@@ -53,6 +123,15 @@ async function seedThreeStopTrip(uid: string) {
   const tripRef = db.collection('trips').doc(tripId)
 
   await tripRef.update({
+    // Phase 4b's reconciliation always recomputes the final date sequence
+    // as settings.startDate + i (it can no longer just reuse the existing
+    // day dates verbatim, since add/remove changes the day count) — matching
+    // this to the seeded days' own first date is what a real trip already
+    // guarantees (generatePlan lays day 0 down on settings.startDate), so
+    // the fixture has to guarantee it too, or every reconciliation here
+    // would compute dates from whatever "today" happens to be instead.
+    'settings.startDate': '2026-07-10',
+    'settings.endDate': '2026-07-12',
     'settings.startPoint': { name: 'Oslo', lat: 59.91, lng: 10.75 },
     'settings.endPoint': { name: 'Dombas', lat: 62.07, lng: 9.13 },
     'settings.maxDriveHoursPerDay': 8,
@@ -137,19 +216,22 @@ describe('computeCorridorReconciliation', () => {
     expect(changes).toEqual([])
   })
 
-  it('rejects an order that adds, removes, or substitutes a stop', async () => {
+  it('rejects an order containing an unknown stop id', async () => {
     const { tripId, stopIds } = await seedThreeStopTrip('uidReconcileBadOrder')
     const [a, b] = stopIds
 
-    // Missing the third stop.
-    await expect(
-      computeCorridorReconciliation(tripId, [a, b]),
-    ).rejects.toThrow(/permutation/)
-
-    // An unknown extra ID substituted in.
     await expect(
       computeCorridorReconciliation(tripId, [a, b, 'not-a-real-stop']),
-    ).rejects.toThrow()
+    ).rejects.toThrow(/unknown corridor stop/)
+  })
+
+  it('rejects a duplicate stop id in newStopOrder', async () => {
+    const { tripId, stopIds } = await seedThreeStopTrip('uidReconcileDupe')
+    const [a, b] = stopIds
+
+    await expect(
+      computeCorridorReconciliation(tripId, [a, b, a]),
+    ).rejects.toThrow(/duplicate/)
   })
 
   it('keeps a multi-day stop (e.g. a rest day) moving together as one block', async () => {
@@ -157,6 +239,8 @@ describe('computeCorridorReconciliation', () => {
     const { tripId } = await createTripForUser('uidReconcileMultiDay')
     const tripRef = db.collection('trips').doc(tripId)
     await tripRef.update({
+      'settings.startDate': '2026-07-10',
+      'settings.endDate': '2026-07-13',
       'settings.startPoint': { name: 'Oslo', lat: 59.91, lng: 10.75 },
       'settings.endPoint': { name: 'Dombas', lat: 62.07, lng: 9.13 },
       'settings.maxDriveHoursPerDay': 8,
@@ -234,12 +318,13 @@ describe('runReconcileCorridor', () => {
     const [, ottaId, dombasId] = dayIds
     const [lillehammerStop, ottaStop, dombasStop] = stopIds
 
-    const changes = await runReconcileCorridor(tripId, [
+    const result = await runReconcileCorridor(tripId, [
       lillehammerStop,
       dombasStop,
       ottaStop,
     ])
-    expect(changes.length).toBe(2)
+    expect(result.changes.length).toBe(2)
+    expect(result.endDateChange).toBeUndefined()
 
     const [dombasSnap, ottaSnap] = await Promise.all([
       tripRef.collection('days').doc(dombasId).get(),
@@ -260,6 +345,8 @@ describe('runReconcileCorridor', () => {
     // A max-drive-hours so tight that any real leg between these far-apart
     // points blows the tolerance once reordered to be non-adjacent.
     await tripRef.update({
+      'settings.startDate': '2026-07-10',
+      'settings.endDate': '2026-07-11',
       'settings.startPoint': { name: 'Oslo', lat: 59.91, lng: 10.75 },
       'settings.endPoint': { name: 'Rome', lat: 41.9, lng: 12.5 },
       'settings.maxDriveHoursPerDay': 0.01,
@@ -298,6 +385,192 @@ describe('runReconcileCorridor', () => {
       '2026-07-10',
       '2026-07-11',
     ])
+  })
+})
+
+describe('removing a stop (phase 4b)', () => {
+  it('deletes the removed stop\'s day (and its subcollections) and collapses later days forward', async () => {
+    const { tripId, tripRef, dayIds, stopIds } = await seedThreeStopTrip(
+      'uidReconcileRemove',
+    )
+    const [lillehammerId, ottaId, dombasId] = dayIds
+    const [lillehammerStop, ottaStop, dombasStop] = stopIds
+
+    const ottaDayRef = tripRef.collection('days').doc(ottaId)
+    await ottaDayRef.collection('activities').add({
+      name: 'x',
+      category: 'sight',
+      lat: 0,
+      lng: 0,
+      blurb: 'x',
+      kidFriendly: true,
+      status: 'suggested',
+    })
+
+    const result = await runReconcileCorridor(
+      tripId,
+      [lillehammerStop, dombasStop],
+      true,
+    )
+    expect(result.removedStopNames).toEqual(['Otta'])
+    expect(result.endDateChange).toEqual({
+      from: '2026-07-12',
+      to: '2026-07-11',
+    })
+
+    const [lillehammerSnap, ottaSnap, dombasSnap, ottaActivitiesSnap, ottaStopSnap] =
+      await Promise.all([
+        tripRef.collection('days').doc(lillehammerId).get(),
+        tripRef.collection('days').doc(ottaId).get(),
+        tripRef.collection('days').doc(dombasId).get(),
+        ottaDayRef.collection('activities').get(),
+        tripRef.collection('corridorStops').doc(ottaStop).get(),
+      ])
+    expect(lillehammerSnap.data()?.date).toBe('2026-07-10')
+    expect(ottaSnap.exists).toBe(false)
+    expect(dombasSnap.data()?.date).toBe('2026-07-11')
+    expect(ottaActivitiesSnap.empty).toBe(true)
+    expect(ottaStopSnap.exists).toBe(false)
+
+    const trip = (await tripRef.get()).data()
+    expect(trip?.settings.endDate).toBe('2026-07-11')
+  })
+
+  it('reports an accountedDayCount mismatch as a hard failure rather than silently dropping a day', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidReconcileOrphanDay')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.update({
+      'settings.startPoint': { name: 'Oslo', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Lillehammer', lat: 61.11, lng: 10.47 },
+    })
+    // A day with no corridor stop linking to it at all.
+    await tripRef.collection('days').doc().set(driveDay(0, '2026-07-10', 'Lillehammer', 61.11, 10.47))
+
+    await expect(computeCorridorReconciliation(tripId, [])).rejects.toThrow(
+      /do not cover every day/,
+    )
+  })
+})
+
+describe('adding a locked stop (phase 4b)', () => {
+  it('generates a new day via the detail phase, resolved through resolveSkeletonDay with the known coordinates', async () => {
+    const { tripId, tripRef, dayIds, stopIds } = await seedThreeStopTrip(
+      'uidReconcileAdd',
+    )
+    const [lillehammerStop, ottaStop, dombasStop] = stopIds
+
+    const newStopRef = tripRef.collection('corridorStops').doc()
+    await newStopRef.set({
+      name: 'Vinstra',
+      lat: 61.6,
+      lng: 9.75,
+      country: 'NO',
+      why: 'A quiet valley stop.',
+      status: 'locked',
+      linkedDayIds: [],
+    } satisfies CorridorStop)
+
+    createMock.mockResolvedValue(chunkDetailResponse('Vinstra'))
+    enrichActivitiesMock.mockResolvedValue([])
+    enrichRestaurantsForMealMock.mockResolvedValue([])
+
+    const result = await runReconcileCorridor(
+      tripId,
+      [lillehammerStop, ottaStop, newStopRef.id, dombasStop],
+      true,
+    )
+    expect(result.addedDays).toEqual([
+      { overnightName: 'Vinstra', date: '2026-07-12' },
+    ])
+    expect(result.endDateChange).toEqual({ from: '2026-07-12', to: '2026-07-13' })
+
+    const daysSnap = await tripRef.collection('days').orderBy('date').get()
+    expect(daysSnap.docs.map((d) => d.data().overnight.name)).toEqual([
+      'Lillehammer',
+      'Otta',
+      'Vinstra',
+      'Dombas',
+    ])
+    const vinstraDay = daysSnap.docs[2].data()
+    expect(vinstraDay.overnight.lat).toBe(61.6)
+    expect(vinstraDay.overnight.lng).toBe(9.75)
+    expect(vinstraDay.drive?.fromName).toBe('Otta')
+    expect(vinstraDay.drive?.toName).toBe('Vinstra')
+
+    const newStopSnap = await newStopRef.get()
+    expect(newStopSnap.data()?.status).toBe('committed')
+    expect(newStopSnap.data()?.linkedDayIds).toEqual([daysSnap.docs[2].id])
+
+    const trip = (await tripRef.get()).data()
+    expect(trip?.settings.endDate).toBe('2026-07-13')
+    void dayIds
+  })
+
+  it('rejects adding a locked stop with no country', async () => {
+    const { tripId, tripRef, stopIds } = await seedThreeStopTrip('uidReconcileNoCountry')
+    const [lillehammerStop, ottaStop, dombasStop] = stopIds
+
+    const newStopRef = tripRef.collection('corridorStops').doc()
+    await newStopRef.set({
+      name: 'Mystery stop',
+      lat: 61.5,
+      lng: 9.8,
+      status: 'locked',
+      linkedDayIds: [],
+    } satisfies CorridorStop)
+
+    await expect(
+      computeCorridorReconciliation(tripId, [
+        lillehammerStop,
+        ottaStop,
+        newStopRef.id,
+        dombasStop,
+      ]),
+    ).rejects.toThrow(/needs a country/)
+  })
+
+  it('rejects an order including a proposed (not yet locked) stop', async () => {
+    const { tripId, tripRef, stopIds } = await seedThreeStopTrip('uidReconcileProposed')
+    const [lillehammerStop, ottaStop, dombasStop] = stopIds
+
+    const proposedStopRef = tripRef.collection('corridorStops').doc()
+    await proposedStopRef.set({
+      name: 'Rescan find',
+      lat: 61.5,
+      lng: 9.8,
+      country: 'NO',
+      status: 'proposed',
+      linkedDayIds: [],
+    } satisfies CorridorStop)
+
+    await expect(
+      computeCorridorReconciliation(tripId, [
+        lillehammerStop,
+        ottaStop,
+        proposedStopRef.id,
+        dombasStop,
+      ]),
+    ).rejects.toThrow(/must be committed or locked/)
+  })
+})
+
+describe('end-date-change guard', () => {
+  it('runReconcileCorridor refuses to commit when the day count changes and acceptEndDateChange is not set', async () => {
+    const { tripId, tripRef, dayIds, stopIds } = await seedThreeStopTrip(
+      'uidReconcileEndDateGuard',
+    )
+    const [, ottaStop, dombasStop] = stopIds
+
+    await expect(
+      runReconcileCorridor(tripId, [ottaStop, dombasStop]),
+    ).rejects.toThrow(/end date/)
+
+    // Nothing written — the trip is exactly as seeded.
+    const daysSnap = await tripRef.collection('days').orderBy('date').get()
+    expect(daysSnap.docs.map((d) => d.id)).toEqual(dayIds)
+    const trip = (await tripRef.get()).data()
+    expect(trip?.settings.endDate).not.toBe('2026-07-11')
   })
 })
 
