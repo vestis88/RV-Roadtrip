@@ -96,10 +96,20 @@ function describeResponse(response: Anthropic.Message, text: string): string {
   return `stop_reason=${response.stop_reason} blocks=[${blockTypes}] textLength=${text.length} preview=${JSON.stringify(preview)}`
 }
 
+// userContent accepts pre-built content blocks (not just a plain string) so
+// callers can attach a prompt-cache `cache_control` breakpoint to part of it
+// — see the chunk-detail loop in generateSkeletonFromHighlights below, the
+// one call site in this codebase where the exact same large prefix
+// (settings/notes/fullRouteOutline) is guaranteed to repeat across multiple
+// back-to-back calls. Every other Claude call in functions/src/prompts is
+// one-shot per trip with request-specific content (different settings/notes
+// each time) and no other call sharing its prefix within the cache TTL, so a
+// breakpoint there would only pay the ~1.25x cache-write premium for zero
+// reads — not added for that reason, not an oversight.
 async function callWithRetry<T>(
   client: Anthropic,
   system: string,
-  userContent: string,
+  userContent: string | Anthropic.TextBlockParam[],
   maxTokens: number,
   parse: (text: string) => T,
 ): Promise<T> {
@@ -257,16 +267,29 @@ export async function generateSkeletonFromHighlights(input: {
       chunkIndex: c + 1,
       chunkCount: chunks.length,
     })
-    const { system, user } = buildChunkDetailPrompt({
+    const { system, stableUser, variableUser } = buildChunkDetailPrompt({
       settings: input.settings,
       notesFreeText: input.notesFreeText,
       outline,
       chunkDays: chunks[c],
     })
+    // stableUser (settings/notes/fullRouteOutline) is byte-identical across
+    // every chunk of this trip — cache it so chunk 2+ reads it back instead
+    // of reprocessing the whole outline every time. Only worth the ~1.25x
+    // write premium when there's a second chunk to actually read it; a
+    // single-chunk trip (<= CHUNK_SIZE days) would just pay that premium for
+    // zero reads.
+    const stableBlock: Anthropic.TextBlockParam = {
+      type: 'text',
+      text: stableUser,
+    }
+    if (chunks.length > 1) {
+      stableBlock.cache_control = { type: 'ephemeral' }
+    }
     const detail = await callWithRetry(
       client,
       system,
-      user,
+      [stableBlock, { type: 'text', text: variableUser }],
       16000,
       parseChunkDetail,
     )

@@ -290,6 +290,11 @@ describe('planTrip', () => {
     expect(result.days[1].type).toBe('rest')
     expect(onProgress).toHaveBeenCalledWith({ phase: 'highlights' })
     expect(onProgress).toHaveBeenCalledWith({ phase: 'outline' })
+
+    // A single-chunk trip has no second call to read a cache back — caching
+    // it would only pay the write premium for zero reads, so no breakpoint.
+    const chunkCallArgs = createMock.mock.calls[2][0]
+    expect(chunkCallArgs.messages[0].content[0].cache_control).toBeUndefined()
   })
 
   it('splits a longer route into multiple chunk calls and reassembles them in order', async () => {
@@ -347,6 +352,20 @@ describe('planTrip', () => {
       chunkIndex: 2,
       chunkCount: 2,
     })
+
+    // Both chunk calls share the same settings/notes/fullRouteOutline
+    // prefix — it's cached on the first call and read back on the second.
+    const firstChunkArgs = createMock.mock.calls[2][0]
+    const secondChunkArgs = createMock.mock.calls[3][0]
+    const firstStableBlock = firstChunkArgs.messages[0].content[0]
+    const secondStableBlock = secondChunkArgs.messages[0].content[0]
+    expect(firstStableBlock.cache_control).toEqual({ type: 'ephemeral' })
+    expect(secondStableBlock.cache_control).toEqual({ type: 'ephemeral' })
+    expect(firstStableBlock.text).toBe(secondStableBlock.text)
+    // The varying suffix (daysNeedingDetail) differs between chunks.
+    expect(firstChunkArgs.messages[0].content[1].text).not.toBe(
+      secondChunkArgs.messages[0].content[1].text,
+    )
   })
 
   it('retries the outline call once on a schema failure and succeeds on the second attempt', async () => {

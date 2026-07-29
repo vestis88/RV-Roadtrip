@@ -132,17 +132,27 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
   ]
 }`
 
+/**
+ * Split (rather than one merged `user` string) so the caller can put a
+ * prompt-cache breakpoint after `stableUser`: generateSkeletonFromHighlights
+ * calls this once per chunk with the same `outline`/`settings`/`notes` every
+ * time, only `chunkDays` changes, so `stableUser` is byte-identical across
+ * every chunk of a given trip and is exactly the shared-prefix/varying-suffix
+ * shape prompt caching is for.
+ */
 export function buildChunkDetailPrompt(input: {
   settings: TripSettings
   notesFreeText: string
   outline: RouteOutline
   chunkDays: RouteOutlineDay[]
-}): { system: string; user: string } {
-  const user = JSON.stringify({
+}): { system: string; stableUser: string; variableUser: string } {
+  const stableUser = JSON.stringify({
     settings: input.settings,
     notes: input.notesFreeText,
     fullRouteOutline: input.outline.days,
+  })
+  const variableUser = JSON.stringify({
     daysNeedingDetail: input.chunkDays,
   })
-  return { system: DETAIL_SYSTEM_PROMPT, user }
+  return { system: DETAIL_SYSTEM_PROMPT, stableUser, variableUser }
 }
