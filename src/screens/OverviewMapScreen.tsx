@@ -560,12 +560,15 @@ export function OverviewMapScreen() {
           </p>
         )}
 
-        {apiKey && (
-          <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
-            <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
-            <RescanCorridorButton tripId={tripId} center={center} />
-          </div>
-        )}
+        {/* Plain forms/buttons, not GoogleMap children — they only need
+            `center` (sourced from trip.settings, independent of apiKey), so
+            unlike the marker tiers above they render with no Maps key too
+            (this sandbox's own CI runs e2e with none set, same as every
+            other Maps-JS-blocked screen's fallback-input pattern). */}
+        <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+          <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
+          <RescanCorridorButton tripId={tripId} center={center} />
+        </div>
 
         {selectedCorridorStop && (
           <CorridorStopCard
