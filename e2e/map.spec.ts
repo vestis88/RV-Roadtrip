@@ -1,5 +1,20 @@
 import { expect, test } from './fixtures.js'
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+const PROJECT_ID = 'demo-rv-trip-planner'
+if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
+const adminDb = getFirestore()
+
+async function getTripId(page: import('@playwright/test').Page): Promise<string> {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+  return tripId
+}
 
 test('overview map header summarizes the plan (route/km/day count)', async ({
   page,
@@ -47,4 +62,51 @@ test('request changes flow submits a replan with locked days preserved', async (
 
   await page.getByTestId('submit-change-request').click()
   await expect(page.getByTestId('change-request-text')).toHaveCount(0)
+})
+
+test('map tab shows an idle banner and no header stats before a plan exists', async ({
+  page,
+}) => {
+  await getTripId(page)
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-idle-banner').waitFor()
+
+  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('request-changes-button')).toHaveCount(0)
+})
+
+test('map tab shows a generating banner with progress and no header stats', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await adminDb.collection('trips').doc(tripId).update({
+    'planMeta.status': 'generating',
+    'planMeta.progressCurrent': 2,
+    'planMeta.progressTotal': 8,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-generating-banner').waitFor()
+
+  await expect(page.getByTestId('map-generating-banner')).toContainText('2/8 days')
+  await expect(page.getByTestId('map-header')).toHaveCount(0)
+})
+
+test('map tab shows the plan error and no header stats when generation failed', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await adminDb.collection('trips').doc(tripId).update({
+    'planMeta.status': 'error',
+    'planMeta.error': 'Could not resolve the start point.',
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-error-banner').waitFor()
+
+  await expect(page.getByTestId('map-error-banner')).toContainText(
+    'Could not resolve the start point.',
+  )
+  await expect(page.getByTestId('map-header')).toHaveCount(0)
 })

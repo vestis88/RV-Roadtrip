@@ -49,6 +49,22 @@ function describeDirectionsError(error: unknown): string {
   return String(error)
 }
 
+interface SelectedPlace {
+  id: string
+  name: string
+  lat: number
+  lng: number
+}
+
+/** Pans the map to whichever activity/restaurant marker was last tapped. */
+function MapPanner({ target }: { target: SelectedPlace | null }) {
+  const map = useMap()
+  useEffect(() => {
+    if (map && target) map.panTo({ lat: target.lat, lng: target.lng })
+  }, [map, target])
+  return null
+}
+
 /**
  * The whole-trip driving route.
  *
@@ -158,6 +174,13 @@ export function OverviewMapScreen() {
   const [changeText, setChangeText] = useState('')
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
   const [routeError, setRouteError] = useState<string | null>(null)
+  const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
+
+  const planStatus = trip.planMeta.status
+  // Only a ready-ish plan has anything for the header stats/route/"Request
+  // changes" to report on or act against — everything else (no plan yet,
+  // mid-generation, failed) gets a status banner instead further down.
+  const hasPlan = planStatus === 'ready' || planStatus === 'stale'
 
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
@@ -196,37 +219,73 @@ export function OverviewMapScreen() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div
-        className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
-        data-testid="map-header"
-      >
-        <span
-          data-testid="header-total-km"
-          className="chip chip-neutral px-3 py-1"
+      {hasPlan && (
+        <div
+          className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
+          data-testid="map-header"
         >
-          {(trip.planMeta.totalKm ?? 0).toFixed(0)} km
-        </span>
-        <span
-          data-testid="header-avg-drive-minutes"
-          className="chip chip-neutral px-3 py-1"
+          <span
+            data-testid="header-total-km"
+            className="chip chip-neutral px-3 py-1"
+          >
+            {(trip.planMeta.totalKm ?? 0).toFixed(0)} km
+          </span>
+          <span
+            data-testid="header-avg-drive-minutes"
+            className="chip chip-neutral px-3 py-1"
+          >
+            {(trip.planMeta.avgDriveMinutesPerDay ?? 0).toFixed(0)} min/day avg
+          </span>
+          <span
+            data-testid="header-day-count"
+            className="chip chip-accent px-3 py-1"
+          >
+            {days.length} days
+          </span>
+          <button
+            type="button"
+            data-testid="request-changes-button"
+            className="btn btn-ghost"
+            onClick={() => setChangeRequestOpen(true)}
+          >
+            Request changes
+          </button>
+        </div>
+      )}
+
+      {planStatus === 'idle' && (
+        <p
+          data-testid="map-idle-banner"
+          className="border-b border-neutral-200 bg-white p-3 text-center text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
         >
-          {(trip.planMeta.avgDriveMinutesPerDay ?? 0).toFixed(0)} min/day avg
-        </span>
-        <span
-          data-testid="header-day-count"
-          className="chip chip-accent px-3 py-1"
+          No plan yet — head to Trip setup to generate one.
+        </p>
+      )}
+
+      {(planStatus === 'pending' ||
+        planStatus === 'generating' ||
+        planStatus === 'awaiting-highlights-review') && (
+        <p
+          data-testid="map-generating-banner"
+          className="border-b border-neutral-200 bg-white p-3 text-center text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
         >
-          {days.length} days
-        </span>
-        <button
-          type="button"
-          data-testid="request-changes-button"
-          className="btn btn-ghost"
-          onClick={() => setChangeRequestOpen(true)}
+          {trip.planMeta.progressTotal
+            ? `${trip.planMeta.progressCurrent ?? 0}/${trip.planMeta.progressTotal} days (${Math.round(
+                ((trip.planMeta.progressCurrent ?? 0) / trip.planMeta.progressTotal) *
+                  100,
+              )}%)`
+            : (trip.planMeta.progressLabel ?? 'Planning your route…')}
+        </p>
+      )}
+
+      {planStatus === 'error' && (
+        <p
+          data-testid="map-error-banner"
+          className="border-b border-red-300 bg-red-50 p-3 text-center text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
         >
-          Request changes
-        </button>
-      </div>
+          {trip.planMeta.error ?? 'Something went wrong generating this plan.'}
+        </p>
+      )}
 
       {!online && (
         <p
@@ -300,6 +359,7 @@ export function OverviewMapScreen() {
             }
           >
             <TripRoute points={routePoints} onError={setRouteError} />
+            <MapPanner target={selectedPlace} />
 
             <AdvancedMarker
               position={{
@@ -338,43 +398,75 @@ export function OverviewMapScreen() {
                 const activities: Activity[] = tiers.showAllPlaces
                   ? dayPlaces.activities
                   : dayPlaces.activities.filter((a) => a.status === 'selected')
-                return activities.map((activity, i) => (
-                  <AdvancedMarker
-                    key={`${day.id}-activity-${i}`}
-                    position={{ lat: activity.lat, lng: activity.lng }}
-                    title={activity.name}
-                    data-testid="activity-marker"
-                  >
-                    <MarkerBadge
-                      icon={CATEGORY_ICON[activity.category]}
-                      selected={activity.status === 'selected'}
-                    />
-                  </AdvancedMarker>
-                ))
+                return activities.map((activity, i) => {
+                  const placeId = `${day.id}-activity-${i}`
+                  return (
+                    <AdvancedMarker
+                      key={placeId}
+                      position={{ lat: activity.lat, lng: activity.lng }}
+                      title={activity.name}
+                      data-testid="activity-marker"
+                      onClick={() =>
+                        setSelectedPlace({
+                          id: placeId,
+                          name: activity.name,
+                          lat: activity.lat,
+                          lng: activity.lng,
+                        })
+                      }
+                    >
+                      <MarkerBadge
+                        icon={CATEGORY_ICON[activity.category]}
+                        selected={activity.status === 'selected'}
+                        highlighted={selectedPlace?.id === placeId}
+                      />
+                    </AdvancedMarker>
+                  )
+                })
               })}
 
             {tiers.showAllPlaces &&
               days.flatMap((day) => {
                 const dayPlaces = places[day.id]
                 if (!dayPlaces) return []
-                return dayPlaces.restaurants.map((restaurant, i) => (
-                  <AdvancedMarker
-                    key={`${day.id}-restaurant-${i}`}
-                    position={{ lat: restaurant.lat, lng: restaurant.lng }}
-                    title={restaurant.name}
-                    data-testid="restaurant-marker"
-                  >
-                    <MarkerBadge
-                      icon={RESTAURANT_ICON}
-                      selected={restaurant.status === 'selected'}
-                    />
-                  </AdvancedMarker>
-                ))
+                return dayPlaces.restaurants.map((restaurant, i) => {
+                  const placeId = `${day.id}-restaurant-${i}`
+                  return (
+                    <AdvancedMarker
+                      key={placeId}
+                      position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                      title={restaurant.name}
+                      data-testid="restaurant-marker"
+                      onClick={() =>
+                        setSelectedPlace({
+                          id: placeId,
+                          name: restaurant.name,
+                          lat: restaurant.lat,
+                          lng: restaurant.lng,
+                        })
+                      }
+                    >
+                      <MarkerBadge
+                        icon={RESTAURANT_ICON}
+                        selected={restaurant.status === 'selected'}
+                        highlighted={selectedPlace?.id === placeId}
+                      />
+                    </AdvancedMarker>
+                  )
+                })
               })}
           </GoogleMap>
         ) : (
           <p className="p-4 text-neutral-500">
             Set VITE_GOOGLE_MAPS_API_KEY to display the map.
+          </p>
+        )}
+        {selectedPlace && (
+          <p
+            data-testid="map-selected-caption"
+            className="absolute bottom-3 left-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-neutral-900 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-white"
+          >
+            Showing: {selectedPlace.name}
           </p>
         )}
       </div>
