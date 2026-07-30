@@ -1,6 +1,7 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -27,7 +28,7 @@ test('hammering the Generate button creates exactly one plan request', async ({
   await page.getByTestId('trip-name-input').waitFor()
   await page.getByTestId('nav-setup').click()
 
-  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
 
   await page.getByTestId('generate-plan-button').waitFor()
@@ -37,7 +38,7 @@ test('hammering the Generate button creates exactly one plan request', async ({
   // actionability checks for each call can race independently of the
   // page's JS thread, which isn't the failure mode this guard defends
   // against.
-  await page.evaluate(() => {
+  await evaluateWithRetry(page, () => {
     const button = document.querySelector<HTMLButtonElement>(
       '[data-testid="generate-plan-button"]',
     )

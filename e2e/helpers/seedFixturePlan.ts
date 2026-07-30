@@ -2,6 +2,37 @@ import type { Page } from '@playwright/test'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 
+/**
+ * `page.evaluate()` binds to one execution context and throws "Execution
+ * context was destroyed, most likely because of a navigation" if the page
+ * reloads mid-call — unlike Playwright's locator actions (`waitFor`,
+ * `click`, `fill`), which retry automatically across a navigation. A reload
+ * can land in the gap between a `waitFor()` resolving and the very next
+ * `evaluate()` — the service worker's `controllerchange` reload in
+ * src/main.tsx used to fire on every first-ever page load (fixed — it now
+ * only fires on a genuine cross-deploy update, not the initial claim of an
+ * uncontrolled page), and general contention under a full-suite run can
+ * still land a reload in that exact window regardless. Retrying the whole
+ * `evaluate()` call absorbs a reload landing there instead of failing the
+ * test outright.
+ */
+export async function evaluateWithRetry<T>(
+  page: Page,
+  fn: () => T,
+  attempts = 5,
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await page.evaluate(fn)
+    } catch (error) {
+      lastError = error
+      await page.waitForTimeout(200)
+    }
+  }
+  throw lastError
+}
+
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
 if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
@@ -227,7 +258,7 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
 export async function createTripWithPlan(page: Page): Promise<string> {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
-  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
   await seedFixturePlan(tripId)
   return tripId

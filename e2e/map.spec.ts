@@ -3,6 +3,7 @@ import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import {
   createTripWithPlan,
+  evaluateWithRetry,
   getDayIdByDate,
 } from './helpers/seedFixturePlan.js'
 
@@ -14,7 +15,7 @@ const adminDb = getFirestore()
 async function getTripId(page: import('@playwright/test').Page): Promise<string> {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
-  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
   return tripId
 }

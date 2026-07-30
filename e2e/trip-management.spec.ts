@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { expect, test } from './fixtures.js'
+import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -16,7 +17,7 @@ test('the New trip button creates a fresh trip with an empty name, distinct from
   await page.keyboard.press('Tab')
   await expect(page.getByTestId('trip-name-input')).toHaveValue('Norway Loop')
 
-  const firstTripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   expect(firstTripId).toBeTruthy()
 
   await page.getByTestId('trip-switcher-toggle').click()
@@ -29,7 +30,7 @@ test('the New trip button creates a fresh trip with an empty name, distinct from
     timeout: 10_000,
   })
 
-  const secondTripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const secondTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   expect(secondTripId).toBeTruthy()
   expect(secondTripId).not.toBe(firstTripId)
 
@@ -43,7 +44,7 @@ test('switching trips shows each one\'s own diary, and a new trip starts with an
 }) => {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
-  const firstTripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!firstTripId) throw new Error('tripId missing from localStorage')
 
   await adminDb
@@ -91,7 +92,7 @@ test('joining a trip by share code adds it to the trip switcher without losing t
 }) => {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
-  const firstTripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   const shareCodeText = await page.getByTestId('share-code').textContent()
   const code = shareCodeText?.replace('Share code:', '').trim()
   expect(code).toBeTruthy()
@@ -103,7 +104,7 @@ test('joining a trip by share code adds it to the trip switcher without losing t
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
     .not.toBe(firstTripId)
-  const secondTripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const secondTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
 
   // Re-joining the first trip by its own share code, from this second
   // trip's session, should land it in the switcher alongside the second

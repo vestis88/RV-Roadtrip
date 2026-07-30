@@ -1,5 +1,9 @@
 import { expect, test } from './fixtures.js'
-import { getDayIdByDate, seedFixturePlan } from './helpers/seedFixturePlan.js'
+import {
+  evaluateWithRetry,
+  getDayIdByDate,
+  seedFixturePlan,
+} from './helpers/seedFixturePlan.js'
 
 test('marking cards done with notes logs them to the diary, synced live to a second device', async ({
   browser,
@@ -15,7 +19,7 @@ test('marking cards done with notes logs them to the diary, synced live to a sec
   const code = shareCodeText?.replace('Share code:', '').trim()
   expect(code).toBeTruthy()
 
-  const tripId = await pageA.evaluate(() => localStorage.getItem('tripId'))
+  const tripId = await evaluateWithRetry(pageA, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
   await seedFixturePlan(tripId)
 

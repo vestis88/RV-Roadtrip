@@ -1,5 +1,8 @@
 import { expect, test } from './fixtures.js'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  evaluateWithRetry,
+} from './helpers/seedFixturePlan.js'
 
 const VIEWPORTS = {
   phone: { width: 375, height: 812 },
@@ -16,7 +19,8 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
 
     for (const testId of ['nav-setup', 'nav-map', 'nav-diary', 'nav-countries']) {
       await page.getByTestId(testId).click()
-      const overflow = await page.evaluate(
+      const overflow = await evaluateWithRetry(
+        page,
         () => document.documentElement.scrollWidth - window.innerWidth,
       )
       expect(overflow, `horizontal overflow on ${testId} at ${name}`).toBeLessThanOrEqual(
@@ -53,7 +57,7 @@ test('map screen shows an offline banner and keeps cached header data when offli
   context,
 }) => {
   await createTripWithPlan(page)
-  await page.evaluate(() => navigator.serviceWorker.ready)
+  await evaluateWithRetry(page, () => navigator.serviceWorker.ready)
   await page.getByTestId('nav-map').click()
   await page.getByTestId('map-header').waitFor()
   await expect(page.getByTestId('header-day-count')).toHaveText('3 days')

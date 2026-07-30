@@ -1,6 +1,7 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -15,7 +16,7 @@ async function createTripAndSeedTodayDay(
 ) {
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
-  const tripId = await page.evaluate(() => localStorage.getItem('tripId'))
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
 
   await adminDb
