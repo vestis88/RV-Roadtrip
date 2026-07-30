@@ -37,3 +37,23 @@ test('copy-link button is present next to the share code, behind the collapsed s
   await page.getByTestId('share-menu-toggle').click()
   await expect(page.getByTestId('copy-share-link')).toBeVisible()
 })
+
+// The actual Google OAuth popup can't be driven here (no real Google
+// credentials in this sandbox, same limitation as every other
+// credential-gated flow's e2e coverage) — this only checks the entry point
+// itself renders and offers the link action to an unlinked (anonymous)
+// session.
+test('account backup menu offers a Google link button for an unlinked session', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('account-backup-toggle').waitFor()
+  await expect(page.getByTestId('account-backup-link')).not.toBeVisible()
+
+  await page.getByTestId('account-backup-toggle').click()
+  await expect(page.getByTestId('account-backup-link')).toBeVisible()
+  await expect(page.getByTestId('account-backup-link')).toHaveText(
+    'Back up with Google',
+  )
+  await expect(page.getByTestId('account-backup-linked')).not.toBeVisible()
+})

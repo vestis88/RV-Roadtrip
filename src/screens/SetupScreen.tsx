@@ -1,3 +1,4 @@
+import { AccountBackupMenu } from '../components/AccountBackupMenu'
 import { ShareTripMenu } from '../components/ShareTripMenu'
 import { useTripContext } from '../context/TripContext'
 import { NotesScreen } from './NotesScreen'
@@ -8,6 +9,7 @@ export function SetupScreen() {
   return (
     <>
       <ShareTripMenu trip={trip} />
+      <AccountBackupMenu />
       <SettingsScreen tripId={tripId} trip={trip} />
       <NotesScreen tripId={tripId} trip={trip} />
     </>
