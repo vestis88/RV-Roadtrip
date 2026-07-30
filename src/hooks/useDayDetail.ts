@@ -27,7 +27,12 @@ export function useDayDetail(tripId: string, dayId: string | undefined) {
       collection(dayRef, 'activities'),
       (snap) =>
         setActivities(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Activity) })),
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Activity) }))
+            // Dismiss-and-requeue's hidden reserve pool (see activitySchema's
+            // own comment) — invisible everywhere until promoted, at which
+            // point it's indistinguishable from any other suggested item.
+            .filter((activity) => !activity.reserve),
         ),
       (error) =>
         console.error('[useDayDetail] activities onSnapshot error', dayId, error),
@@ -36,7 +41,9 @@ export function useDayDetail(tripId: string, dayId: string | undefined) {
       collection(dayRef, 'restaurants'),
       (snap) =>
         setRestaurants(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Restaurant) })),
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Restaurant) }))
+            .filter((restaurant) => !restaurant.reserve),
         ),
       (error) =>
         console.error('[useDayDetail] restaurants onSnapshot error', dayId, error),

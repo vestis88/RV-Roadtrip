@@ -5,6 +5,7 @@ import {
   Map as GoogleMap,
   useMap,
 } from '@vis.gl/react-google-maps'
+import type { Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
@@ -21,9 +22,10 @@ import { googleMapsSearchUrl } from '../lib/mapLinks'
 import {
   markDone,
   markSelected,
-  markSkipped,
   markSuggested,
+  skipAndRequeue,
   type PlaceKind,
+  type SkipAndRequeueResult,
 } from '../lib/placeStatus'
 
 interface SelectedPlace {
@@ -54,11 +56,19 @@ interface IndexedPlace {
  * room for whatever else was generated for this slot), reversible by
  * expanding the toggle and tapping Select again rather than lost outright.
  */
+const REQUEUE_MESSAGE: Record<SkipAndRequeueResult, string | null> = {
+  skipped: null,
+  requeued: null,
+  researched: 'Found more options nearby.',
+  exhausted: 'No more nearby options found.',
+}
+
 function PlaceCardSection({
   title,
   rowTestId,
   cardIdPrefix,
   kind,
+  meal,
   entries,
   tripId,
   dayId,
@@ -70,6 +80,7 @@ function PlaceCardSection({
   rowTestId: string
   cardIdPrefix: string
   kind: PlaceKind
+  meal?: Meal
   entries: IndexedPlace[]
   tripId: string
   dayId: string
@@ -78,24 +89,60 @@ function PlaceCardSection({
   onSelect: (cardId: string, place: { name: string; lat: number; lng: number }) => void
 }) {
   const [showSkipped, setShowSkipped] = useState(false)
+  const [requeuing, setRequeuing] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const active = entries.filter(({ place }) => place.status !== 'skipped')
   const skipped = entries.filter(({ place }) => place.status === 'skipped')
   const visible = showSkipped ? [...active, ...skipped] : active
+
+  async function handleSkip(placeId: string) {
+    setRequeuing(true)
+    setNotice(null)
+    try {
+      const result = await skipAndRequeue(tripId, dayId, kind, placeId, meal)
+      setNotice(REQUEUE_MESSAGE[result])
+    } catch (error) {
+      console.error('skipAndRequeue failed', error)
+      setNotice('Could not find more options right now.')
+    } finally {
+      setRequeuing(false)
+    }
+  }
 
   return (
     <CardRow
       title={title}
       testId={rowTestId}
       footer={
-        skipped.length > 0 ? (
-          <button
-            type="button"
-            data-testid={`${rowTestId}-show-skipped`}
-            onClick={() => setShowSkipped((v) => !v)}
-            className="text-xs text-neutral-500 underline underline-offset-2 dark:text-neutral-400"
-          >
-            {showSkipped ? 'Hide' : 'Show'} {skipped.length} skipped
-          </button>
+        skipped.length > 0 || requeuing || notice ? (
+          <span className="flex flex-wrap items-center gap-2">
+            {skipped.length > 0 && (
+              <button
+                type="button"
+                data-testid={`${rowTestId}-show-skipped`}
+                onClick={() => setShowSkipped((v) => !v)}
+                className="text-xs text-neutral-500 underline underline-offset-2 dark:text-neutral-400"
+              >
+                {showSkipped ? 'Hide' : 'Show'} {skipped.length} skipped
+              </button>
+            )}
+            {requeuing && (
+              <span
+                data-testid={`${rowTestId}-researching`}
+                className="text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                Looking for more options…
+              </span>
+            )}
+            {!requeuing && notice && (
+              <span
+                data-testid={`${rowTestId}-requeue-notice`}
+                className="text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                {notice}
+              </span>
+            )}
+          </span>
         ) : undefined
       }
     >
@@ -137,9 +184,9 @@ function PlaceCardSection({
                   console.error,
                 )
               }
-              onMarkSkipped={() =>
-                markSkipped(tripId, dayId, kind, place.id).catch(console.error)
-              }
+              onMarkSkipped={() => {
+                handleSkip(place.id).catch(console.error)
+              }}
             />
           </div>
         )
@@ -433,6 +480,7 @@ export function DayViewScreen() {
           rowTestId="breakfast-row"
           cardIdPrefix="breakfast"
           kind="restaurant"
+          meal="breakfast"
           entries={breakfast.map((place, index) => ({ index, place }))}
           tripId={tripId}
           dayId={dayId}
@@ -446,6 +494,7 @@ export function DayViewScreen() {
           rowTestId="lunch-row"
           cardIdPrefix="lunch"
           kind="restaurant"
+          meal="lunch"
           entries={lunch.map((place, index) => ({ index, place }))}
           tripId={tripId}
           dayId={dayId}
@@ -459,6 +508,7 @@ export function DayViewScreen() {
           rowTestId="dinner-row"
           cardIdPrefix="dinner"
           kind="restaurant"
+          meal="dinner"
           entries={dinner.map((place, index) => ({ index, place }))}
           tripId={tripId}
           dayId={dayId}

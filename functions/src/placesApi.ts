@@ -16,6 +16,18 @@ const SEARCH_RADIUS_METERS = 30_000
 const ACTIVITIES_PER_DAY = 5
 const RESTAURANTS_PER_MEAL = 3
 const MAX_BACKFILL_ATTEMPTS = 8
+// Dismiss-and-requeue (implemented 2026-07-30): a couple of extra
+// activities/restaurants resolved at generation time, alongside the
+// displayed count, and stored with reserve: true (see activitySchema's own
+// comment) — an instant, no-round-trip swap-in when a traveler skips a
+// displayed item, rather than either a gap or a live Places call on every
+// dismiss.
+const RESERVE_ACTIVITY_COUNT = 2
+const RESERVE_RESTAURANTS_PER_MEAL = 1
+// Once both the displayed items AND their reserve are exhausted for a given
+// day/meal, researchMoreAlternativesCallable.ts tops the pool back up by
+// this many — see that file for the full flow.
+export const RESEARCH_BATCH_SIZE = 3
 
 // Places API (New) rejects 'point_of_interest'/'establishment' as an
 // includedTypes value for searchNearby (they're Text-Search-only generic
@@ -225,7 +237,64 @@ export interface ProposedActivity {
   blurb: string
 }
 
-/** Resolves proposed activities against Places, backfilling by category until exactly 5 are found. */
+/**
+ * Resolves `count` generic activities via Places, rotating through every
+ * category so a single exhausted category can't stall the whole backfill.
+ * Shared by enrichActivities's own backfill (filling up to the displayed
+ * count) and researchMoreAlternativesCallable.ts (topping the pool back up
+ * once both the displayed items and their reserve are gone) — same logic,
+ * different caller, not a hand-rolled second copy.
+ */
+export async function backfillActivities(
+  near: LatLng,
+  excludeIds: Set<string>,
+  apiKey: string,
+  count: number,
+  reserve: boolean,
+): Promise<Activity[]> {
+  const categories = Object.keys(ACTIVITY_PLACE_TYPE) as ActivityCategory[]
+  const resolved: Activity[] = []
+  for (
+    let attempt = 0;
+    resolved.length < count && attempt < MAX_BACKFILL_ATTEMPTS;
+    attempt++
+  ) {
+    const category = categories[attempt % categories.length]
+    const match = await resolveOne(
+      category,
+      ACTIVITY_PLACE_TYPE[category],
+      near,
+      excludeIds,
+      apiKey,
+    )
+    if (match) {
+      resolved.push({
+        name: match.name,
+        category,
+        lat: match.lat,
+        lng: match.lng,
+        rating: match.rating,
+        ratingCount: match.ratingCount,
+        googleMapsUrl: match.googleMapsUrl,
+        photoUrl: match.photoUrl,
+        openingHours: match.openingHours,
+        blurb: `A well-rated local ${category}.`,
+        kidFriendly: false,
+        status: 'suggested',
+        ...(reserve ? { reserve: true } : {}),
+        placeId: match.id,
+      })
+    }
+  }
+  return resolved
+}
+
+/**
+ * Resolves proposed activities against Places, backfilling by category until
+ * exactly `ACTIVITIES_PER_DAY` are found, then resolves `RESERVE_ACTIVITY_COUNT`
+ * more on top — invisible until dismiss-and-requeue needs one (see
+ * activitySchema's own comment).
+ */
 export async function enrichActivities(
   proposed: ProposedActivity[],
   near: LatLng,
@@ -262,43 +331,29 @@ export async function enrichActivities(
         blurb: item.blurb,
         kidFriendly: item.kidFriendly,
         status: 'suggested',
+        placeId: match.id,
       })
     }
   }
 
-  const categories = Object.keys(ACTIVITY_PLACE_TYPE) as ActivityCategory[]
-  for (
-    let attempt = 0;
-    resolved.length < ACTIVITIES_PER_DAY && attempt < MAX_BACKFILL_ATTEMPTS;
-    attempt++
-  ) {
-    const category = categories[attempt % categories.length]
-    const match = await resolveOne(
-      category,
-      ACTIVITY_PLACE_TYPE[category],
+  resolved.push(
+    ...(await backfillActivities(
       near,
       excludeIds,
       apiKey,
-    )
-    if (match) {
-      resolved.push({
-        name: match.name,
-        category,
-        lat: match.lat,
-        lng: match.lng,
-        rating: match.rating,
-        ratingCount: match.ratingCount,
-        googleMapsUrl: match.googleMapsUrl,
-        photoUrl: match.photoUrl,
-        openingHours: match.openingHours,
-        blurb: `A well-rated local ${category}.`,
-        kidFriendly: false,
-        status: 'suggested',
-      })
-    }
-  }
-
-  return resolved.slice(0, ACTIVITIES_PER_DAY)
+      ACTIVITIES_PER_DAY - resolved.length,
+      false,
+    )),
+  )
+  const primary = resolved.slice(0, ACTIVITIES_PER_DAY)
+  const reserve = await backfillActivities(
+    near,
+    excludeIds,
+    apiKey,
+    RESERVE_ACTIVITY_COUNT,
+    true,
+  )
+  return [...primary, ...reserve]
 }
 
 export interface ProposedRestaurant {
@@ -309,7 +364,59 @@ export interface ProposedRestaurant {
   blurb: string
 }
 
-/** Resolves proposed restaurants for one meal, backfilling until exactly 3 are found. */
+/**
+ * Resolves `count` generic restaurants for one meal via Places. Shared by
+ * enrichRestaurantsForMeal's own backfill and researchMoreAlternativesCallable.ts
+ * — see backfillActivities's own comment for why this isn't duplicated.
+ */
+export async function backfillRestaurantsForMeal(
+  meal: Meal,
+  near: LatLng,
+  excludeIds: Set<string>,
+  apiKey: string,
+  count: number,
+  reserve: boolean,
+): Promise<Restaurant[]> {
+  const resolved: Restaurant[] = []
+  for (
+    let attempt = 0;
+    resolved.length < count && attempt < MAX_BACKFILL_ATTEMPTS;
+    attempt++
+  ) {
+    const match = await resolveOne(
+      MEAL_PLACE_TYPE[meal],
+      MEAL_PLACE_TYPE[meal],
+      near,
+      excludeIds,
+      apiKey,
+    )
+    if (match) {
+      resolved.push({
+        name: match.name,
+        meal,
+        lat: match.lat,
+        lng: match.lng,
+        rating: match.rating,
+        ratingCount: match.ratingCount,
+        googleMapsUrl: match.googleMapsUrl,
+        photoUrl: match.photoUrl,
+        priceLevel: match.priceLevel,
+        blurb: `A well-rated spot for ${meal}.`,
+        status: 'suggested',
+        ...(reserve ? { reserve: true } : {}),
+        placeId: match.id,
+      })
+    }
+  }
+  return resolved
+}
+
+/**
+ * Resolves proposed restaurants for one meal, backfilling until exactly
+ * `RESTAURANTS_PER_MEAL` are found, then resolves
+ * `RESERVE_RESTAURANTS_PER_MEAL` more on top — same reserve mechanism as
+ * enrichActivities.
+ */
 export async function enrichRestaurantsForMeal(
   proposed: ProposedRestaurant[],
   meal: Meal,
@@ -347,40 +454,31 @@ export async function enrichRestaurantsForMeal(
         cuisine: item.cuisine,
         blurb: item.blurb,
         status: 'suggested',
+        placeId: match.id,
       })
     }
   }
 
-  for (
-    let attempt = 0;
-    resolved.length < RESTAURANTS_PER_MEAL && attempt < MAX_BACKFILL_ATTEMPTS;
-    attempt++
-  ) {
-    const match = await resolveOne(
-      MEAL_PLACE_TYPE[meal],
-      MEAL_PLACE_TYPE[meal],
+  resolved.push(
+    ...(await backfillRestaurantsForMeal(
+      meal,
       near,
       excludeIds,
       apiKey,
-    )
-    if (match) {
-      resolved.push({
-        name: match.name,
-        meal,
-        lat: match.lat,
-        lng: match.lng,
-        rating: match.rating,
-        ratingCount: match.ratingCount,
-        googleMapsUrl: match.googleMapsUrl,
-        photoUrl: match.photoUrl,
-        priceLevel: match.priceLevel,
-        blurb: `A well-rated spot for ${meal}.`,
-        status: 'suggested',
-      })
-    }
-  }
-
-  return resolved.slice(0, RESTAURANTS_PER_MEAL)
+      RESTAURANTS_PER_MEAL - resolved.length,
+      false,
+    )),
+  )
+  const primary = resolved.slice(0, RESTAURANTS_PER_MEAL)
+  const reserve = await backfillRestaurantsForMeal(
+    meal,
+    near,
+    excludeIds,
+    apiKey,
+    RESERVE_RESTAURANTS_PER_MEAL,
+    true,
+  )
+  return [...primary, ...reserve]
 }
 
 /**

@@ -1,8 +1,15 @@
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { expect, test } from './fixtures.js'
 import {
   createTripWithPlan,
   getDayIdByDate,
 } from './helpers/seedFixturePlan.js'
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+const PROJECT_ID = 'demo-rv-trip-planner'
+if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
+const adminDb = getFirestore()
 
 // PlaceAutocompleteInput renders a plain fallback <input> when the Places
 // library hasn't loaded (e.g. no network route to Google's API in this
@@ -208,4 +215,70 @@ test('opening "Change overnight stop" degrades to "nothing found" without Claude
 
   await page.getByTestId('change-overnight-cancel').click()
   await expect(page.getByTestId('overnight-candidates-panel')).toHaveCount(0)
+})
+
+test('skipping the day\'s only activity, with a reserve one waiting, promotes it instantly', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  // The shared fixture only ever seeds one displayed activity per day, no
+  // reserve — dismiss-and-requeue's own generation-time reserve pool
+  // (placesApi.ts) needs its own seed here to exercise the "promote a
+  // reserve item" path rather than the credential-less "research more"
+  // fallback the other skip test already covers.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .collection('activities')
+    .add({
+      name: 'Reserve hike',
+      category: 'hike',
+      lat: 61.11,
+      lng: 10.47,
+      blurb: 'Waiting in reserve.',
+      kidFriendly: true,
+      status: 'suggested',
+      reserve: true,
+    })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  // Invisible until promoted.
+  await expect(page.getByTestId('activities-row')).not.toContainText(
+    'Reserve hike',
+  )
+
+  await page.getByTestId('activity-card-0-mark-skipped').click()
+
+  await expect(page.getByTestId('activities-row')).toContainText(
+    'Reserve hike',
+    { timeout: 10_000 },
+  )
+  // No "researching"/"exhausted" notice — the reserve promotion was instant,
+  // no researchMoreAlternatives call was needed.
+  await expect(page.getByTestId('activities-row-requeue-notice')).toHaveCount(0)
+})
+
+test('skipping the day\'s only activity with no reserve left degrades to a "no more options" notice without Places access', async ({
+  page,
+}) => {
+  // GOOGLE_PLACES_API_KEY isn't configured in this sandbox — researchMoreAlternatives
+  // has no synthetic fallback by design, same caveat as every other
+  // Places-touching callable in this suite. The fixture's day has exactly
+  // one activity and no reserve, so skipping it exhausts both tiers at once.
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('activity-card-0-mark-skipped').click()
+
+  await expect(page.getByTestId('activities-row-requeue-notice')).toBeVisible({
+    timeout: 10_000,
+  })
 })

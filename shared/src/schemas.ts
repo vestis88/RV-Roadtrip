@@ -244,6 +244,25 @@ export const activitySchema = z.object({
   status: itemStatusSchema,
   doneAt: isoDateTime.optional(),
   diaryNote: z.string().optional(),
+  // Dismiss-and-requeue (implemented 2026-07-30): generation resolves a
+  // couple of extra activities/restaurants beyond the displayed count and
+  // stores them with `reserve: true` — invisible to every UI consumer
+  // (useDayDetail filters them out) until a traveler skips a displayed one
+  // and there's nothing left to show, at which point the client promotes a
+  // reserve item in place (flips this to false/absent) rather than leaving a
+  // gap or making the traveler wait on a live Places round-trip. Absent
+  // means false — every pre-existing activity (and everything written by
+  // paths that don't know about reserves, e.g. AddCustomStopForm) is a real,
+  // displayed item by default.
+  reserve: z.boolean().optional(),
+  // The Places (New) place ID the item resolved to — internal-use only,
+  // never rendered. Lets a later "research more alternatives" call (once
+  // both the displayed item AND its reserve are exhausted) exclude every
+  // place already shown or already dismissed for this day, not just the
+  // ones from its own single generation pass. Optional because it didn't
+  // exist before this feature — older items simply can't be excluded by ID,
+  // a known, acceptable v1 gap.
+  placeId: z.string().optional(),
 })
 
 export const mealSchema = z.enum(['breakfast', 'lunch', 'dinner'])
@@ -263,6 +282,9 @@ export const restaurantSchema = z.object({
   status: itemStatusSchema,
   doneAt: isoDateTime.optional(),
   diaryNote: z.string().optional(),
+  // See activitySchema's own comment — same dismiss-and-requeue mechanism.
+  reserve: z.boolean().optional(),
+  placeId: z.string().optional(),
 })
 
 export const roadFeesSchema = z.object({

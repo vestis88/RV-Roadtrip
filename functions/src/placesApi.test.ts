@@ -50,7 +50,7 @@ describe('enrichActivities', () => {
     blurb: 'A nice spot.',
   }))
 
-  it('resolves all 5 proposed activities when each meets the quality bar', async () => {
+  it('resolves all 5 proposed activities when each meets the quality bar, plus 2 hidden reserve activities', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
@@ -58,16 +58,19 @@ describe('enrichActivities', () => {
 
     const activities = await enrichActivities(proposed, NEAR)
 
-    expect(activities).toHaveLength(5)
+    expect(activities).toHaveLength(7)
     for (const activity of activities) {
       expect(activity.rating).toBeGreaterThanOrEqual(3.8)
       expect(activity.googleMapsUrl).toMatch(/^https:\/\//)
+      expect(activity.placeId).toBeDefined()
     }
     const uniqueNames = new Set(activities.map((a) => a.name))
-    expect(uniqueNames.size).toBe(5)
+    expect(uniqueNames.size).toBe(7)
+    expect(activities.slice(0, 5).every((a) => !a.reserve)).toBe(true)
+    expect(activities.slice(5).every((a) => a.reserve === true)).toBe(true)
   })
 
-  it('drops a low-quality match and backfills by category to still return exactly 5', async () => {
+  it('drops a low-quality match and backfills by category to still return exactly 5 displayed + 2 reserve', async () => {
     const fetchMock = vi
       .fn()
       // item 0: good text-search match
@@ -80,15 +83,16 @@ describe('enrichActivities', () => {
       )
       // item 1: nearby-search fallback also comes up empty
       .mockImplementationOnce(() => jsonResponse({ places: [] }))
-      // remaining items (2, 3, 4) resolve fine
+      // remaining items (2, 3, 4), the backfill to 5, and the 2 reserve slots
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
     vi.stubGlobal('fetch', fetchMock)
 
     const activities = await enrichActivities(proposed, NEAR)
 
-    expect(activities).toHaveLength(5)
+    expect(activities).toHaveLength(7)
     const uniqueNames = new Set(activities.map((a) => a.name))
-    expect(uniqueNames.size).toBe(5)
+    expect(uniqueNames.size).toBe(7)
+    expect(activities.filter((a) => a.reserve).length).toBe(2)
   })
 
   it('throws when the Places API key is not configured', async () => {
@@ -153,7 +157,7 @@ describe('enrichRestaurantsForMeal', () => {
     blurb: 'Good food.',
   }))
 
-  it('resolves exactly 3 restaurants for a meal, each with rating, a maps link, and a photo', async () => {
+  it('resolves exactly 3 displayed restaurants for a meal plus 1 hidden reserve, each with rating, a maps link, and a photo', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
@@ -167,7 +171,7 @@ describe('enrichRestaurantsForMeal', () => {
       excludeIds,
     )
 
-    expect(restaurants).toHaveLength(3)
+    expect(restaurants).toHaveLength(4)
     for (const restaurant of restaurants) {
       expect(restaurant.rating).toBeGreaterThanOrEqual(3.8)
       expect(restaurant.googleMapsUrl).toMatch(/^https:\/\//)
@@ -176,7 +180,10 @@ describe('enrichRestaurantsForMeal', () => {
       // rendered without a photo.
       expect(restaurant.photoUrl).toMatch(/^https:\/\//)
       expect(restaurant.meal).toBe('dinner')
+      expect(restaurant.placeId).toBeDefined()
     }
+    expect(restaurants.slice(0, 3).every((r) => !r.reserve)).toBe(true)
+    expect(restaurants[3].reserve).toBe(true)
   })
 
   it('never resolves a place already excluded by an earlier meal', async () => {
