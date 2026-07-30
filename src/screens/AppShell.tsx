@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { doc, updateDoc } from 'firebase/firestore'
 import { APIProvider } from '@vis.gl/react-google-maps'
@@ -56,6 +56,39 @@ function AppShell() {
   if (trip && !isEditingName && nameDraft !== trip.meta.name) {
     setNameDraft(trip.meta.name)
   }
+
+  // iOS Safari resizes the *visual* viewport for the on-screen keyboard
+  // without resizing the layout viewport, so its native "scroll the focused
+  // field into view" behavior — which targets the layout/document scroll —
+  // doesn't reliably land inside the nested `overflow-y-auto` pane below
+  // (needed for h-svh's fixed-height flex column, see its own comment).
+  // Reported symptom: focusing a field (e.g. Settings' "Finish point" via
+  // PlaceAutocompleteInput) opens the keyboard with the field left off the
+  // top of the visible area, only found by scrolling back up manually.
+  // Re-scrolling the actually-focused element once the visual viewport
+  // settles after the keyboard animation fixes it for any field, not just
+  // that one.
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+    function scrollFocusedFieldIntoView() {
+      // The Places autocomplete fields (PlaceAutocompleteInput) render
+      // Google's PlaceAutocompleteElement web component, whose actual
+      // <input> lives inside an open shadow root — document.activeElement
+      // only ever reports the shadow host in that case, so this walks down
+      // to the real focused element instead of stopping there.
+      let active: Element | null = document.activeElement
+      while (active?.shadowRoot?.activeElement) {
+        active = active.shadowRoot.activeElement
+      }
+      if (active instanceof HTMLElement) {
+        active.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+    }
+    viewport.addEventListener('resize', scrollFocusedFieldIntoView)
+    return () =>
+      viewport.removeEventListener('resize', scrollFocusedFieldIntoView)
+  }, [])
 
   async function saveName() {
     setIsEditingName(false)
