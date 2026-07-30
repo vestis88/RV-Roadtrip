@@ -571,8 +571,11 @@ export function OverviewMapScreen() {
             `center` (sourced from trip.settings, independent of apiKey), so
             unlike the marker tiers above they render with no Maps key too
             (this sandbox's own CI runs e2e with none set, same as every
-            other Maps-JS-blocked screen's fallback-input pattern). */}
-        <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+            other Maps-JS-blocked screen's fallback-input pattern). On the
+            right, not the left: Google's own map type (Satellit/Karta)
+            control sits top-left by default and these used to sit right on
+            top of it. */}
+        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
           <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
           <RescanCorridorButton tripId={tripId} center={center} />
         </div>
