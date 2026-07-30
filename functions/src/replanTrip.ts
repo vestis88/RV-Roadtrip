@@ -115,6 +115,7 @@ export async function runReplan(
   const skeleton = await planTrip({
     settings: remainderSettings,
     notesFreeText,
+    tripId,
     onProgress: (progress) => {
       tripRef
         .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })

@@ -17,6 +17,7 @@ export async function refreshCountryGuideForTrip(
   const guide = await generateCountryGuide({
     countryCode,
     vehicle: settings.vehicle,
+    tripId,
   })
 
   await db

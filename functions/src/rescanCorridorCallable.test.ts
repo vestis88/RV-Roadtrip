@@ -71,6 +71,7 @@ describe('runRescanCorridor', () => {
       center: CENTER,
       radiusKm: 15,
       notesFreeText: 'We like hands-on museums.',
+      tripId,
     })
   })
 

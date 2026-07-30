@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { defineSecret } from 'firebase-functions/params'
 import type { TripSettings } from '@rv/shared'
 import { geocodeQuery } from '../placesApi.js'
+import { logClaudeUsage, type ClaudeCallType } from '../claudeUsageLogger.js'
 import {
   buildChunkDetailPrompt,
   buildRegionHighlightsPrompt,
@@ -113,6 +114,7 @@ async function callWithRetry<T>(
   userContent: string | Anthropic.TextBlockParam[],
   maxTokens: number,
   parse: (text: string) => T,
+  usageContext: { callType: ClaudeCallType; tripId?: string },
 ): Promise<T> {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: userContent },
@@ -135,6 +137,7 @@ async function callWithRetry<T>(
       system,
       messages,
     })
+    logClaudeUsage({ ...usageContext, attempt, response })
     const text = textFromResponse(response)
 
     try {
@@ -170,7 +173,11 @@ export async function generateChunkDetail(
     outline: RouteOutline
     chunkDays: RouteOutlineDay[]
   },
-  options?: { cacheStableBlock?: boolean },
+  options?: {
+    cacheStableBlock?: boolean
+    tripId?: string
+    callType?: ClaudeCallType
+  },
 ): Promise<ChunkDetailResponse> {
   const { system, stableUser, variableUser } = buildChunkDetailPrompt(input)
   const stableBlock: Anthropic.TextBlockParam = { type: 'text', text: stableUser }
@@ -183,6 +190,7 @@ export async function generateChunkDetail(
     [stableBlock, { type: 'text', text: variableUser }],
     16000,
     parseChunkDetail,
+    { callType: options?.callType ?? 'detail', tripId: options?.tripId },
   )
 }
 
@@ -197,6 +205,7 @@ export async function generateChunkDetail(
 export async function generateRegionHighlights(input: {
   settings: TripSettings
   notesFreeText: string
+  tripId?: string
 }): Promise<RegionHighlightsResponse> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRegionHighlightsPrompt(input)
@@ -206,6 +215,7 @@ export async function generateRegionHighlights(input: {
     user,
     8000,
     parseRegionHighlights,
+    { callType: 'highlights', tripId: input.tripId },
   )
   return geocodeHighlights(highlights, input.settings)
 }
@@ -268,6 +278,7 @@ export async function generateSkeletonFromHighlights(input: {
   settings: TripSettings
   notesFreeText: string
   highlights: RegionHighlightsResponse
+  tripId?: string
   onProgress?: (
     progress: Extract<PlanTripProgress, { phase: 'outline' | 'detail' }>,
   ) => void
@@ -286,6 +297,7 @@ export async function generateSkeletonFromHighlights(input: {
     outlineUser,
     8000,
     parseAndValidateRouteOutline,
+    { callType: 'outline', tripId: input.tripId },
   )
 
   const chunks: RouteOutline['days'][] = []
@@ -308,10 +320,13 @@ export async function generateSkeletonFromHighlights(input: {
         outline,
         chunkDays: chunks[c],
       },
-      // Only worth caching the stable settings/notes/fullRouteOutline block
-      // when there's a second chunk to read it back — a single-chunk trip
-      // (<= CHUNK_SIZE days) would just pay the write premium for zero reads.
-      { cacheStableBlock: chunks.length > 1 },
+      {
+        // Only worth caching the stable settings/notes/fullRouteOutline block
+        // when there's a second chunk to read it back — a single-chunk trip
+        // (<= CHUNK_SIZE days) would just pay the write premium for zero reads.
+        cacheStableBlock: chunks.length > 1,
+        tripId: input.tripId,
+      },
     )
     for (const day of detail.days) {
       detailByIndex.set(day.index, day)
@@ -374,6 +389,7 @@ export async function generateSkeletonFromHighlights(input: {
 export async function planTrip(input: {
   settings: TripSettings
   notesFreeText: string
+  tripId?: string
   onProgress?: (progress: PlanTripProgress) => void
 }): Promise<PlanTripSkeleton> {
   input.onProgress?.({ phase: 'highlights' })

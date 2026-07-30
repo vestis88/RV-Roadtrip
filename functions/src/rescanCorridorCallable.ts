@@ -35,6 +35,7 @@ export async function runRescanCorridor(
     center,
     radiusKm,
     notesFreeText: trip.notes.freeText,
+    tripId,
   })
 
   await Promise.all(

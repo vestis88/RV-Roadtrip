@@ -316,12 +316,16 @@ export async function computeCorridorReconciliation(
         highlightReason: stop.why || `${stop.name}, added directly to the route.`,
       }
 
-      const detailResponse = await generateChunkDetail(client, {
-        settings: trip.settings,
-        notesFreeText: trip.notes.freeText,
-        outline: { days: [...fullOutlineDays, syntheticDay] },
-        chunkDays: [syntheticDay],
-      })
+      const detailResponse = await generateChunkDetail(
+        client,
+        {
+          settings: trip.settings,
+          notesFreeText: trip.notes.freeText,
+          outline: { days: [...fullOutlineDays, syntheticDay] },
+          chunkDays: [syntheticDay],
+        },
+        { tripId, callType: 'reconcileDetail' },
+      )
       const detail = detailResponse.days[0]
       if (!detail) {
         throw new Error(

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import type { LatLng, OvernightStopCandidate } from '@rv/shared'
+import { logClaudeUsage } from '../claudeUsageLogger.js'
 import {
   buildOvernightCandidatesPrompt,
   type ClaudeOvernightCandidateKind,
@@ -57,6 +58,7 @@ export async function generateClaudeOvernightCandidates(input: {
   near: LatLng
   country: string
   freeCampingRules?: string[]
+  tripId?: string
 }): Promise<OvernightStopCandidate[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildOvernightCandidatesPrompt(input)
@@ -70,8 +72,12 @@ export async function generateClaudeOvernightCandidates(input: {
       thinking: { type: 'disabled' },
       system,
       messages,
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+      // Uncapped web_search bills every search result back in as input
+      // tokens on top of the per-search fee — a single overnight-stop
+      // lookup never legitimately needs more than a couple of searches.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
     })
+    logClaudeUsage({ callType: 'overnight', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 
     try {

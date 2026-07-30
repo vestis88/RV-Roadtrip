@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { defineSecret } from 'firebase-functions/params'
 import { countryGuideSchema, type CountryGuide, type Vehicle } from '@rv/shared'
+import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildCountryGuidePrompt } from './countryGuidePrompt.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
@@ -34,6 +35,7 @@ function textFromResponse(response: Anthropic.Message): string {
 export async function generateCountryGuide(input: {
   countryCode: string
   vehicle: Vehicle
+  tripId?: string
 }): Promise<CountryGuide> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const today = new Date().toISOString().slice(0, 10)
@@ -52,8 +54,14 @@ export async function generateCountryGuide(input: {
       thinking: { type: 'disabled' },
       system,
       messages,
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+      // Uncapped web_search bills every search result back in as input
+      // tokens on top of the per-search fee. 8 gives headroom for the
+      // prompt's 6 topics (roadFees/speedLimits often need more than one
+      // search each — vignette price plus a per-length ferry/bridge rate,
+      // for instance) without being open-ended.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8 }],
     })
+    logClaudeUsage({ callType: 'countryGuide', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 
     try {

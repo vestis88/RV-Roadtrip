@@ -84,6 +84,7 @@ export async function fetchOvernightCandidates(
         near,
         country,
         freeCampingRules,
+        tripId,
       }),
       'wild camping generation (Claude)',
     ),
@@ -101,6 +102,7 @@ export async function fetchOvernightCandidates(
             near,
             country,
             freeCampingRules,
+            tripId,
           }).then((results) => results.slice(0, STELLPLATZ_CANDIDATE_COUNT)),
           'stellplatz fallback generation (Claude)',
         )

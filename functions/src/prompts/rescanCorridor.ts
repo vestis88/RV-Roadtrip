@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import { haversineDistanceKm, type LatLng } from '@rv/shared'
 import { geocodeQuery } from '../placesApi.js'
+import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
@@ -73,6 +74,7 @@ export async function generateRescanCandidates(input: {
   center: LatLng
   radiusKm: number
   notesFreeText?: string
+  tripId?: string
 }): Promise<RescanFind[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRescanCorridorPrompt(input)
@@ -87,8 +89,12 @@ export async function generateRescanCandidates(input: {
       thinking: { type: 'disabled' },
       system,
       messages,
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+      // Uncapped web_search bills every search result back in as input
+      // tokens on top of the per-search fee — a rescan of one small area
+      // never legitimately needs more than a couple of searches.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
     })
+    logClaudeUsage({ callType: 'rescan', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 
     try {

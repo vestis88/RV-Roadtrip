@@ -88,6 +88,7 @@ export async function generateRealPlan(
     skeleton = await planTrip({
       settings: trip.settings,
       notesFreeText: trip.notes.freeText,
+      tripId: tripRef.id,
       onProgress: (progress) => {
         tripRef
           .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
