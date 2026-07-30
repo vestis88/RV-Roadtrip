@@ -229,6 +229,21 @@ export const itemStatusSchema = z.enum([
   'skipped',
 ])
 
+// Traveler-set, not generated: picked when selecting an activity (see
+// PlaceCard's time-of-day control), so the day's route can be sequenced
+// through breakfast/morning-activity/lunch/evening-activity/dinner/
+// night-activity/overnight in a sensible order rather than an arbitrary one.
+// Absent (or 'all-day') means "no particular slot" — every activity selected
+// before this feature existed, and every activity a traveler doesn't bother
+// tagging, still counts as a route waypoint, just without a specific slot to
+// sort it into.
+export const activityTimeOfDaySchema = z.enum([
+  'morning',
+  'evening',
+  'night',
+  'all-day',
+])
+
 export const activitySchema = z.object({
   name: z.string(),
   category: activityCategorySchema,
@@ -244,6 +259,7 @@ export const activitySchema = z.object({
   status: itemStatusSchema,
   doneAt: isoDateTime.optional(),
   diaryNote: z.string().optional(),
+  timeOfDay: activityTimeOfDaySchema.optional(),
   // Dismiss-and-requeue (implemented 2026-07-30): generation resolves a
   // couple of extra activities/restaurants beyond the displayed count and
   // stores them with `reserve: true` — invisible to every UI consumer
@@ -394,6 +410,7 @@ export type CorridorStop = z.infer<typeof corridorStopSchema>
 export type ReconcileDayChange = z.infer<typeof reconcileDayChangeSchema>
 export type ActivityCategory = z.infer<typeof activityCategorySchema>
 export type ItemStatus = z.infer<typeof itemStatusSchema>
+export type ActivityTimeOfDay = z.infer<typeof activityTimeOfDaySchema>
 export type Activity = z.infer<typeof activitySchema>
 export type Meal = z.infer<typeof mealSchema>
 export type Restaurant = z.infer<typeof restaurantSchema>

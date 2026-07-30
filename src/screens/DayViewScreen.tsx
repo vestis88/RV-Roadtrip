@@ -5,12 +5,14 @@ import {
   Map as GoogleMap,
   useMap,
 } from '@vis.gl/react-google-maps'
-import type { Meal } from '@rv/shared'
+import type { ActivityTimeOfDay, Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
+import { buildDayRoutePoints } from '../lib/buildOverviewRoute'
 import { CardRow } from '../components/CardRow'
 import { FitToPoints } from '../components/FitToPoints'
+import { DirectionsRoute } from '../components/DirectionsRoute'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
@@ -23,6 +25,7 @@ import {
   markDone,
   markSuggested,
   selectAndRequeue,
+  setActivityTimeOfDay,
   skipAndRequeue,
   type PlaceKind,
   type RequeueResult,
@@ -196,6 +199,19 @@ function PlaceCardSection({
               onMarkSkipped={() => {
                 advance(place.id, 'skip').catch(console.error)
               }}
+              timeOfDay={
+                kind === 'activity' && 'timeOfDay' in place
+                  ? place.timeOfDay
+                  : undefined
+              }
+              onSetTimeOfDay={
+                kind === 'activity'
+                  ? (timeOfDay: ActivityTimeOfDay) =>
+                      setActivityTimeOfDay(tripId, dayId, place.id, timeOfDay).catch(
+                        console.error,
+                      )
+                  : undefined
+              }
             />
           </div>
         )
@@ -211,6 +227,7 @@ export function DayViewScreen() {
   const { days } = useTripDays(tripId)
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
+  const [routeError, setRouteError] = useState<string | null>(null)
 
   // The map doesn't remount just because the /map/day/:dayId route param
   // changed (same route element, reused across Prev/Next) — without this, a
@@ -234,6 +251,22 @@ export function DayViewScreen() {
             ...activities.map((a) => ({ lat: a.lat, lng: a.lng })),
             ...restaurants.map((r) => ({ lat: r.lat, lng: r.lng })),
           ]
+        : [],
+    [day, activities, restaurants],
+  )
+
+  // Always shown, not just on the overview map — routing through a day's
+  // meals/activities used to only exist as text (the drive card below), with
+  // the day map itself drawing markers only, no route line at all.
+  const routePoints = useMemo(
+    () =>
+      day
+        ? buildDayRoutePoints({
+            overnight: day.overnight,
+            driveSlot: day.drive?.slot,
+            activities,
+            restaurants,
+          })
         : [],
     [day, activities, restaurants],
   )
@@ -279,6 +312,7 @@ export function DayViewScreen() {
           >
             <FitToPoints points={framedPoints} />
             <MapPanner target={selectedPlace} />
+            <DirectionsRoute points={routePoints} onError={setRouteError} />
 
             <AdvancedMarker
               position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
@@ -350,6 +384,15 @@ export function DayViewScreen() {
             className="absolute bottom-3 left-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-neutral-900 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-white"
           >
             Showing: {selectedPlace.name}
+          </p>
+        )}
+        {routeError && (
+          <p
+            data-testid="day-route-error-banner"
+            className="absolute top-3 left-3 max-w-[70%] rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-900 shadow-md dark:bg-amber-950 dark:text-amber-100"
+          >
+            Showing a straight line instead of the real route — the driving
+            directions request failed ({routeError}).
           </p>
         )}
       </div>

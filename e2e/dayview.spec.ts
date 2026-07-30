@@ -193,3 +193,45 @@ test('adding a rest day inserts a day and pushes every later day back one', asyn
   await page.goto(`/map/day/${insertedSnap.docs[0].id}`)
   await expect(page.getByTestId('rest-day-banner')).toBeVisible()
 })
+
+test('selecting an activity reveals a time-of-day picker that writes the chosen slot', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  // No picker until the activity is actually selected — picking a time of
+  // day is meaningless before that (see PlaceCard's own comment).
+  await expect(page.getByTestId('activity-card-0-time-of-day')).toHaveCount(0)
+
+  await page.getByTestId('activity-card-0-mark-selected').click()
+  await expect(page.getByTestId('activity-card-0-time-of-day')).toBeVisible()
+  // Defaults to all-day until the traveler picks something more specific.
+  await expect(
+    page.getByTestId('activity-card-0-time-of-day-all-day'),
+  ).toHaveAttribute('aria-pressed', 'true')
+
+  await page.getByTestId('activity-card-0-time-of-day-evening').click()
+  await expect(
+    page.getByTestId('activity-card-0-time-of-day-evening'),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await expect(
+    page.getByTestId('activity-card-0-time-of-day-all-day'),
+  ).toHaveAttribute('aria-pressed', 'false')
+
+  const activityId = await waitFor(async () => {
+    const snap = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .doc(dayId)
+      .collection('activities')
+      .where('timeOfDay', '==', 'evening')
+      .limit(1)
+      .get()
+    return snap.docs[0]?.id
+  })
+  expect(activityId).toBeTruthy()
+})

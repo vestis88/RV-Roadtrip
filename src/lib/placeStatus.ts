@@ -1,6 +1,6 @@
 import { addDoc, collection, doc, getDocs, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import type { Activity, Meal, Restaurant } from '@rv/shared'
+import type { Activity, ActivityTimeOfDay, Meal, Restaurant } from '@rv/shared'
 import { db, functions } from './firebase'
 
 export type PlaceKind = 'activity' | 'restaurant'
@@ -44,6 +44,20 @@ export async function markSkipped(
   await updateDoc(
     doc(db, 'trips', tripId, 'days', dayId, SUBCOLLECTION[kind], placeId),
     { status: 'skipped' },
+  )
+}
+
+/** Activities only — see PlaceCard's own comment on why this is Select-time,
+ * not generation-time, and why it's meaningless before the item is selected. */
+export async function setActivityTimeOfDay(
+  tripId: string,
+  dayId: string,
+  placeId: string,
+  timeOfDay: ActivityTimeOfDay,
+) {
+  await updateDoc(
+    doc(db, 'trips', tripId, 'days', dayId, 'activities', placeId),
+    { timeOfDay },
   )
 }
 

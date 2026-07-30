@@ -1,4 +1,4 @@
-import type { LatLng } from '@rv/shared'
+import type { ActivityTimeOfDay, DaySlot, LatLng, Meal } from '@rv/shared'
 
 /**
  * The overview map's route geometry: which points the whole-trip driving route
@@ -21,11 +21,25 @@ export interface RouteActivityCandidate {
   lng: number
   rating?: number
   status?: string
+  timeOfDay?: ActivityTimeOfDay
+}
+
+/** Structurally satisfied by `Restaurant` from @rv/shared. */
+export interface RouteRestaurantCandidate {
+  lat: number
+  lng: number
+  status?: string
+  meal?: Meal
 }
 
 export interface RouteDay {
   overnight: LatLng
+  /** `TripDay.drive?.slot` — absent for rest days and days with no drive at
+   * all, in which case buildDayRoutePoints treats it like an 'evening' drive
+   * (see that function's own comment). */
+  driveSlot?: DaySlot
   activities?: RouteActivityCandidate[]
+  restaurants?: RouteRestaurantCandidate[]
 }
 
 /**
@@ -92,9 +106,99 @@ function dropConsecutiveDuplicates(points: LatLng[]): LatLng[] {
   })
 }
 
+function selectedMealPoints(
+  restaurants: RouteRestaurantCandidate[],
+  meal: Meal,
+): LatLng[] {
+  return restaurants
+    .filter(
+      (r): r is RouteRestaurantCandidate & LatLng =>
+        r.meal === meal && r.status === 'selected' && isUsablePoint(r),
+    )
+    .map(toLatLng)
+}
+
+function selectedTimeOfDayPoints(
+  activities: RouteActivityCandidate[],
+  timeOfDay: ActivityTimeOfDay,
+): LatLng[] {
+  return activities
+    .filter(
+      (activity) =>
+        activity.status === 'selected' &&
+        isUsablePoint(activity) &&
+        // Absent means 'all-day' (see activitySchema's own comment) — a
+        // selection made before this feature existed, or one the traveler
+        // just didn't bother tagging, still counts as a route waypoint.
+        (activity.timeOfDay ?? 'all-day') === timeOfDay,
+    )
+    .map(toLatLng)
+}
+
 /**
- * The full ordered point sequence for the trip: per day, the overnight stop
- * followed by that day's activity anchors.
+ * One day's route waypoints, in visiting order.
+ *
+ * Two modes, same reasoning as `selectDayAnchors`: the route has to be
+ * useful before the traveler has made any decisions, and has to obey them
+ * once they have.
+ *
+ * - **Nothing selected yet** (no restaurant, no activity): falls back to
+ *   `selectDayAnchors`' single best-rated-activity placeholder, exactly as
+ *   before this feature — there's no meal/time-of-day signal to sequence by.
+ * - **Once anything is selected**: sequences breakfast → morning activity →
+ *   lunch → evening activity → dinner → night activity → overnight,
+ *   reordered around the day's drive per `driveSlot` — this is the
+ *   traveler-specified order: "Breakfast, morning activity if selected,
+ *   lunch, evening activity if selected, dinner, night activity if
+ *   selected, overnight stop (if evening drive is selected). If morning
+ *   drive is chosen, then it should be breakfast, overnight stop and then
+ *   according to above." A midday drive splits the day the same way: the
+ *   morning half (breakfast, morning activity) happens before the drive,
+ *   the rest after. A day with no drive at all (a rest day, or the trip's
+ *   first day) uses the same order as an evening drive — the overnight is
+ *   already where the traveler is, so it reads naturally as the day's last
+ *   stop rather than its first.
+ * - An activity selected but never tagged with a time of day (everything
+ *   selected before this feature existed, or simply not tagged) is treated
+ *   as `'all-day'` and grouped into the morning slot — present in the
+ *   route, just without a specific place to sort it.
+ */
+export function buildDayRoutePoints(day: RouteDay): LatLng[] {
+  const overnight = isUsablePoint(day.overnight)
+    ? [{ lat: day.overnight.lat, lng: day.overnight.lng }]
+    : []
+  const restaurants = day.restaurants ?? []
+  const activities = day.activities ?? []
+
+  const anySelected =
+    restaurants.some((r) => r.status === 'selected') ||
+    activities.some((a) => a.status === 'selected')
+  if (!anySelected) {
+    return dropConsecutiveDuplicates([...overnight, ...selectDayAnchors(activities)])
+  }
+
+  const breakfast = selectedMealPoints(restaurants, 'breakfast')
+  const lunch = selectedMealPoints(restaurants, 'lunch')
+  const dinner = selectedMealPoints(restaurants, 'dinner')
+  const morningActivity = [
+    ...selectedTimeOfDayPoints(activities, 'morning'),
+    ...selectedTimeOfDayPoints(activities, 'all-day'),
+  ]
+  const eveningActivity = selectedTimeOfDayPoints(activities, 'evening')
+  const nightActivity = selectedTimeOfDayPoints(activities, 'night')
+
+  const sequence =
+    day.driveSlot === 'morning'
+      ? [breakfast, overnight, morningActivity, lunch, eveningActivity, dinner, nightActivity]
+      : day.driveSlot === 'midday'
+        ? [breakfast, morningActivity, overnight, lunch, eveningActivity, dinner, nightActivity]
+        : [breakfast, morningActivity, lunch, eveningActivity, dinner, nightActivity, overnight]
+
+  return dropConsecutiveDuplicates(sequence.flat())
+}
+
+/**
+ * The full ordered point sequence for the trip: per day, `buildDayRoutePoints`.
  *
  * Rest days are included rather than filtered out (the straight polyline this
  * replaced skipped them): a rest day usually repeats the previous day's
@@ -102,14 +206,7 @@ function dropConsecutiveDuplicates(points: LatLng[]): LatLng[] {
  * activities worth routing through.
  */
 export function buildOverviewRoutePoints(days: RouteDay[]): LatLng[] {
-  const points: LatLng[] = []
-  for (const day of days) {
-    if (isUsablePoint(day.overnight)) {
-      points.push({ lat: day.overnight.lat, lng: day.overnight.lng })
-    }
-    points.push(...selectDayAnchors(day.activities))
-  }
-  return dropConsecutiveDuplicates(points)
+  return dropConsecutiveDuplicates(days.flatMap((day) => buildDayRoutePoints(day)))
 }
 
 /**

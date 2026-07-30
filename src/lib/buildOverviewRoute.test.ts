@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_DIRECTIONS_POINTS_PER_REQUEST,
+  buildDayRoutePoints,
   buildOverviewRoutePoints,
   chunkRouteSegments,
   selectDayAnchors,
   type RouteActivityCandidate,
   type RouteDay,
+  type RouteRestaurantCandidate,
 } from './buildOverviewRoute'
 
 function activity(
@@ -13,6 +15,14 @@ function activity(
   lng: number,
   extra: Partial<RouteActivityCandidate> = {},
 ): RouteActivityCandidate {
+  return { lat, lng, status: 'suggested', ...extra }
+}
+
+function restaurant(
+  lat: number,
+  lng: number,
+  extra: Partial<RouteRestaurantCandidate> = {},
+): RouteRestaurantCandidate {
   return { lat, lng, status: 'suggested', ...extra }
 }
 
@@ -94,21 +104,210 @@ describe('selectDayAnchors', () => {
   })
 })
 
+describe('buildDayRoutePoints', () => {
+  it('falls back to the best-rated activity when nothing is selected, ignoring unselected restaurants entirely', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        activities: [activity(50.5, 10.5, { rating: 4.5 })],
+        restaurants: [restaurant(50.1, 10.1, { meal: 'breakfast' })],
+      }),
+    ).toEqual([
+      { lat: 50, lng: 10 },
+      { lat: 50.5, lng: 10.5 },
+    ])
+  })
+
+  it('routes through a selected restaurant even with no activities at all — the reported bug', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        restaurants: [
+          restaurant(50.1, 10.1, { meal: 'breakfast', status: 'selected' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+
+  it('sequences breakfast → lunch → dinner → overnight when only meals are selected (no driveSlot)', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        restaurants: [
+          restaurant(50.3, 10.3, { meal: 'dinner', status: 'selected' }),
+          restaurant(50.1, 10.1, { meal: 'breakfast', status: 'selected' }),
+          restaurant(50.2, 10.2, { meal: 'lunch', status: 'selected' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50.2, lng: 10.2 },
+      { lat: 50.3, lng: 10.3 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+
+  it('sorts selected activities into their tagged time-of-day slot', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        activities: [
+          activity(50.3, 10.3, { status: 'selected', timeOfDay: 'night' }),
+          activity(50.1, 10.1, { status: 'selected', timeOfDay: 'morning' }),
+          activity(50.2, 10.2, { status: 'selected', timeOfDay: 'evening' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50.2, lng: 10.2 },
+      { lat: 50.3, lng: 10.3 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+
+  it('treats an untagged (or explicitly all-day) selected activity as belonging to the morning slot', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        activities: [
+          activity(50.1, 10.1, { status: 'selected' }),
+          activity(50.2, 10.2, { status: 'selected', timeOfDay: 'all-day' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50.2, lng: 10.2 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+
+  it('ignores skipped/suggested restaurants and activities once something else is selected', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        activities: [
+          activity(50.9, 10.9, { status: 'skipped', timeOfDay: 'morning' }),
+          activity(50.1, 10.1, { status: 'selected', timeOfDay: 'morning' }),
+        ],
+        restaurants: [
+          restaurant(50.9, 10.9, { meal: 'lunch', status: 'suggested' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+
+  it('puts breakfast before overnight, and everything else after, on a morning-drive day', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        driveSlot: 'morning',
+        restaurants: [
+          restaurant(49.9, 9.9, { meal: 'breakfast', status: 'selected' }),
+          restaurant(50.2, 10.2, { meal: 'lunch', status: 'selected' }),
+        ],
+        activities: [activity(50.1, 10.1, { status: 'selected', timeOfDay: 'morning' })],
+      }),
+    ).toEqual([
+      { lat: 49.9, lng: 9.9 },
+      { lat: 50, lng: 10 },
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50.2, lng: 10.2 },
+    ])
+  })
+
+  it('splits the day around the overnight on a midday-drive day', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        driveSlot: 'midday',
+        restaurants: [
+          restaurant(49.9, 9.9, { meal: 'breakfast', status: 'selected' }),
+          restaurant(50.2, 10.2, { meal: 'lunch', status: 'selected' }),
+        ],
+        activities: [
+          activity(49.95, 9.95, { status: 'selected', timeOfDay: 'morning' }),
+          activity(50.3, 10.3, { status: 'selected', timeOfDay: 'evening' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 49.9, lng: 9.9 },
+      { lat: 49.95, lng: 9.95 },
+      { lat: 50, lng: 10 },
+      { lat: 50.2, lng: 10.2 },
+      { lat: 50.3, lng: 10.3 },
+    ])
+  })
+
+  it('puts the overnight last on an explicit evening-drive day, same as no driveSlot at all', () => {
+    const built = (driveSlot: 'evening' | undefined) =>
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        driveSlot,
+        restaurants: [
+          restaurant(50.1, 10.1, { meal: 'dinner', status: 'selected' }),
+        ],
+      })
+    expect(built('evening')).toEqual([
+      { lat: 50.1, lng: 10.1 },
+      { lat: 50, lng: 10 },
+    ])
+    expect(built(undefined)).toEqual(built('evening'))
+  })
+
+  it('ignores candidates with unusable coordinates', () => {
+    expect(
+      buildDayRoutePoints({
+        overnight: { lat: 50, lng: 10 },
+        activities: [
+          activity(Number.NaN, 10.1, { status: 'selected', timeOfDay: 'morning' }),
+          activity(50.2, 10.2, { status: 'selected', timeOfDay: 'evening' }),
+        ],
+      }),
+    ).toEqual([
+      { lat: 50.2, lng: 10.2 },
+      { lat: 50, lng: 10 },
+    ])
+  })
+})
+
 describe('buildOverviewRoutePoints', () => {
-  it('runs overnight → that day’s anchors, day by day', () => {
+  it('runs overnight → that day’s anchor for a day with nothing selected yet', () => {
+    expect(
+      buildOverviewRoutePoints([day(50, 10, [activity(50.5, 10.5, { rating: 4.5 })])]),
+    ).toEqual([
+      { lat: 50, lng: 10 },
+      { lat: 50.5, lng: 10.5 },
+    ])
+  })
+
+  it('once anything is selected, the overnight moves to the end (no driveSlot ⇒ evening-drive ordering)', () => {
     expect(
       buildOverviewRoutePoints([
-        day(50, 10, [activity(50.5, 10.5, { rating: 4.5 })]),
         day(51, 11, [
           activity(51.5, 11.5, { rating: 2, status: 'selected' }),
           activity(51.9, 11.9, { rating: 4.9 }),
         ]),
       ]),
+    ).toEqual([{ lat: 51.5, lng: 11.5 }, { lat: 51, lng: 11 }])
+  })
+
+  it('runs day by day, each day picking its own ordering', () => {
+    expect(
+      buildOverviewRoutePoints([
+        day(50, 10, [activity(50.5, 10.5, { rating: 4.5 })]),
+        day(51, 11, [activity(51.5, 11.5, { rating: 2, status: 'selected' })]),
+      ]),
     ).toEqual([
       { lat: 50, lng: 10 },
       { lat: 50.5, lng: 10.5 },
-      { lat: 51, lng: 11 },
       { lat: 51.5, lng: 11.5 },
+      { lat: 51, lng: 11 },
     ])
   })
 
@@ -142,8 +341,8 @@ describe('buildOverviewRoutePoints', () => {
       ]),
     ]
     expect(buildOverviewRoutePoints(withSelection)).toEqual([
-      { lat: 50, lng: 10 },
       { lat: 50.2, lng: 10.2 },
+      { lat: 50, lng: 10 },
     ])
   })
 

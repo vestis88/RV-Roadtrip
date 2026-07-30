@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import type { ItemStatus } from '@rv/shared'
+import type { ActivityTimeOfDay, ItemStatus } from '@rv/shared'
+
+const TIME_OF_DAY_OPTIONS: { value: ActivityTimeOfDay; label: string }[] = [
+  { value: 'morning', label: 'Morning' },
+  { value: 'evening', label: 'Evening' },
+  { value: 'night', label: 'Night' },
+  { value: 'all-day', label: 'All day' },
+]
 
 interface PlaceCardProps {
   testId: string
@@ -19,6 +26,13 @@ interface PlaceCardProps {
   onToggleSelected?: () => void
   onMarkDone?: (note: string) => void
   onMarkSkipped?: () => void
+  /** Activities only (never passed for restaurants, which already have a
+   * fixed `meal`) — absent `timeOfDay` reads as 'all-day'. Only shown once
+   * selected: picking a time of day is meaningless for something not even
+   * committed to yet, and the day route treats every unselected item the
+   * same regardless. */
+  timeOfDay?: ActivityTimeOfDay
+  onSetTimeOfDay?: (timeOfDay: ActivityTimeOfDay) => void
 }
 
 export function PlaceCard({
@@ -36,6 +50,8 @@ export function PlaceCard({
   onToggleSelected,
   onMarkDone,
   onMarkSkipped,
+  timeOfDay,
+  onSetTimeOfDay,
 }: PlaceCardProps) {
   const [noteDraft, setNoteDraft] = useState('')
   const [addingNote, setAddingNote] = useState(false)
@@ -178,6 +194,33 @@ export function PlaceCard({
                     Skip
                   </button>
                 )}
+              </div>
+            )}
+            {onSetTimeOfDay && status === 'selected' && (
+              <div
+                onClick={stop}
+                className="mt-1.5 flex flex-wrap gap-1"
+                data-testid={`${testId}-time-of-day`}
+              >
+                {TIME_OF_DAY_OPTIONS.map((option) => {
+                  const active = (timeOfDay ?? 'all-day') === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      data-testid={`${testId}-time-of-day-${option.value}`}
+                      aria-pressed={active}
+                      onClick={() => onSetTimeOfDay(option.value)}
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        active
+                          ? 'bg-orange-600 text-white'
+                          : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>
