@@ -123,7 +123,7 @@ export function ReorderCorridorPanel({
               <li
                 key={stopId}
                 data-testid={`reorder-stop-${stopId}`}
-                className="flex items-center justify-between gap-2 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-700"
+                className="flex items-center justify-between gap-2 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
               >
                 <span>
                   {index + 1}. {nameById.get(stopId)}
@@ -171,7 +171,7 @@ export function ReorderCorridorPanel({
                   <li
                     key={stop.id}
                     data-testid={`addable-stop-${stop.id}`}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-neutral-300 px-3 py-1.5 text-sm text-neutral-900 dark:border-neutral-700 dark:text-white"
                   >
                     <span>{stop.name}</span>
                     <button
@@ -221,7 +221,7 @@ export function ReorderCorridorPanel({
       {step === 'review' && preview && (
         <>
           {hasAnyChange ? (
-            <div className="space-y-2 text-sm">
+            <div className="space-y-2 text-sm text-neutral-900 dark:text-white">
               {preview.changes.length > 0 && (
                 <ul data-testid="reorder-diff-list" className="space-y-1">
                   {preview.changes.map((change) => (
