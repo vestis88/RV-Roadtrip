@@ -21,11 +21,11 @@ import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
 import { googleMapsSearchUrl } from '../lib/mapLinks'
 import {
   markDone,
-  markSelected,
   markSuggested,
+  selectAndRequeue,
   skipAndRequeue,
   type PlaceKind,
-  type SkipAndRequeueResult,
+  type RequeueResult,
 } from '../lib/placeStatus'
 
 interface SelectedPlace {
@@ -56,8 +56,8 @@ interface IndexedPlace {
  * room for whatever else was generated for this slot), reversible by
  * expanding the toggle and tapping Select again rather than lost outright.
  */
-const REQUEUE_MESSAGE: Record<SkipAndRequeueResult, string | null> = {
-  skipped: null,
+const REQUEUE_MESSAGE: Record<RequeueResult, string | null> = {
+  no_action: null,
   requeued: null,
   researched: 'Found more options nearby.',
   exhausted: 'No more nearby options found.',
@@ -95,14 +95,22 @@ function PlaceCardSection({
   const skipped = entries.filter(({ place }) => place.status === 'skipped')
   const visible = showSkipped ? [...active, ...skipped] : active
 
-  async function handleSkip(placeId: string) {
+  // Both skipping and selecting can be what drains a scope's live-suggested
+  // pool to zero — several items can be selected at once (no "only one"
+  // rule anywhere here), so "all 5 selected" is exactly the same "nothing
+  // left to browse" state as "all 5 skipped" (see refillIfExhausted's own
+  // comment). Only the suggested→selected transition needs this; reverting
+  // one back to suggested (see onToggleSelected below) grows the pool, not
+  // drains it.
+  async function advance(placeId: string, action: 'select' | 'skip') {
     setRequeuing(true)
     setNotice(null)
     try {
-      const result = await skipAndRequeue(tripId, dayId, kind, placeId, meal)
+      const requeue = action === 'select' ? selectAndRequeue : skipAndRequeue
+      const result = await requeue(tripId, dayId, kind, placeId, meal)
       setNotice(REQUEUE_MESSAGE[result])
     } catch (error) {
-      console.error('skipAndRequeue failed', error)
+      console.error(`${action}AndRequeue failed`, error)
       setNotice('Could not find more options right now.')
     } finally {
       setRequeuing(false)
@@ -171,21 +179,20 @@ function PlaceCardSection({
                   lng: place.lng,
                 })
               }
-              onToggleSelected={() =>
-                (place.status === 'selected' ? markSuggested : markSelected)(
-                  tripId,
-                  dayId,
-                  kind,
-                  place.id,
-                ).catch(console.error)
-              }
+              onToggleSelected={() => {
+                if (place.status === 'selected') {
+                  markSuggested(tripId, dayId, kind, place.id).catch(console.error)
+                } else {
+                  advance(place.id, 'select').catch(console.error)
+                }
+              }}
               onMarkDone={(note) =>
                 markDone(tripId, dayId, kind, place.id, date, note).catch(
                   console.error,
                 )
               }
               onMarkSkipped={() => {
-                handleSkip(place.id).catch(console.error)
+                advance(place.id, 'skip').catch(console.error)
               }}
             />
           </div>

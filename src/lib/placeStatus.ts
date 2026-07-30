@@ -73,9 +73,10 @@ export async function markDone(
   })
 }
 
-export type SkipAndRequeueResult =
-  // Other displayed options remain — nothing needed beyond the skip itself.
-  | 'skipped'
+export type RequeueResult =
+  // Other live options remain in this scope — nothing needed beyond the
+  // status change itself.
+  | 'no_action'
   // A generation-time reserve item was waiting in the wings and got
   // promoted in place, instantly, no round-trip.
   | 'requeued'
@@ -87,13 +88,19 @@ export type SkipAndRequeueResult =
   | 'exhausted'
 
 /**
- * Dismiss-and-requeue (implemented 2026-07-30): skipping used to just leave
- * a gap — the pool of displayed options only ever shrank. Now, whenever a
- * skip would leave a scope (a day's activities, or one meal's restaurants)
- * with zero live options — every one skipped, or one selected and every
- * other skipped, the same "nothing left to actually choose from" state —
- * this promotes a hidden reserve item (see activitySchema's own comment) if
- * one exists, or calls researchMoreAlternatives for fresh ones if not.
+ * Dismiss-and-requeue (implemented 2026-07-30, generalized to selecting
+ * 2026-07-30): a scope (a day's activities, or one meal's restaurants) needs
+ * at least one live `'suggested'` option to still be worth browsing. Both
+ * skipping AND selecting drain that pool the same way — several items can be
+ * selected (there's no "only one selected" rule anywhere in this app), so
+ * "all 5 selected", "all 5 skipped", and "1 selected, the other 4 skipped"
+ * are exactly the same "nothing left to actually choose from" state, however
+ * the pool got there. Whichever action (`skipAndRequeue`/`selectAndRequeue`
+ * below) empties it triggers the same refill: promote a hidden reserve item
+ * (see activitySchema's own comment) if one exists, or call
+ * researchMoreAlternatives for fresh ones once reserve itself runs out too —
+ * which can cascade one promotion at a time across several consecutive
+ * selects/skips before an actual research call is ever needed.
  *
  * The whole subcollection is fetched and filtered in memory rather than
  * queried with Firestore `where` clauses: a day's activities/restaurants are
@@ -101,15 +108,12 @@ export type SkipAndRequeueResult =
  * status + reserve equality query would need one) is worth more here than
  * the query would save.
  */
-export async function skipAndRequeue(
+async function refillIfExhausted(
   tripId: string,
   dayId: string,
   kind: PlaceKind,
-  placeId: string,
   meal?: Meal,
-): Promise<SkipAndRequeueResult> {
-  await markSkipped(tripId, dayId, kind, placeId)
-
+): Promise<RequeueResult> {
   const collRef = collection(db, 'trips', tripId, 'days', dayId, SUBCOLLECTION[kind])
   const snap = await getDocs(collRef)
   const scoped = snap.docs.filter((d) => {
@@ -121,7 +125,7 @@ export async function skipAndRequeue(
     const data = d.data() as Activity | Restaurant
     return data.status === 'suggested' && !data.reserve
   })
-  if (liveSuggested.length > 0) return 'skipped'
+  if (liveSuggested.length > 0) return 'no_action'
 
   const reserveDoc = scoped.find((d) => (d.data() as Activity | Restaurant).reserve)
   if (reserveDoc) {
@@ -135,4 +139,30 @@ export async function skipAndRequeue(
   >(functions, 'researchMoreAlternatives')
   const result = await researchMore({ tripId, dayId, kind, meal })
   return result.data.added > 0 ? 'researched' : 'exhausted'
+}
+
+export async function skipAndRequeue(
+  tripId: string,
+  dayId: string,
+  kind: PlaceKind,
+  placeId: string,
+  meal?: Meal,
+): Promise<RequeueResult> {
+  await markSkipped(tripId, dayId, kind, placeId)
+  return refillIfExhausted(tripId, dayId, kind, meal)
+}
+
+/** Same cascade as skipAndRequeue, triggered by selecting instead — see its
+ * own doc comment (refillIfExhausted) for why both need it. Only call this
+ * for the suggested→selected transition; reverting a selection (markSuggested)
+ * grows the pool, so it never needs a refill check. */
+export async function selectAndRequeue(
+  tripId: string,
+  dayId: string,
+  kind: PlaceKind,
+  placeId: string,
+  meal?: Meal,
+): Promise<RequeueResult> {
+  await markSelected(tripId, dayId, kind, placeId)
+  return refillIfExhausted(tripId, dayId, kind, meal)
 }

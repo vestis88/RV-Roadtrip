@@ -282,3 +282,62 @@ test('skipping the day\'s only activity with no reserve left degrades to a "no m
     timeout: 10_000,
   })
 })
+
+test('selecting the day\'s only activity, with a reserve one waiting, promotes it instantly', async ({
+  page,
+}) => {
+  // Mirrors the skip-triggered reserve test above, but via Select — there's
+  // no "only one selected" rule anywhere in this app, so selecting the last
+  // remaining suggested item drains the live pool exactly like skipping it
+  // would, and must trigger the same promotion (see refillIfExhausted's own
+  // doc comment in src/lib/placeStatus.ts).
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .collection('activities')
+    .add({
+      name: 'Reserve hike',
+      category: 'hike',
+      lat: 61.11,
+      lng: 10.47,
+      blurb: 'Waiting in reserve.',
+      kidFriendly: true,
+      status: 'suggested',
+      reserve: true,
+    })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('activities-row')).not.toContainText(
+    'Reserve hike',
+  )
+
+  await page.getByTestId('activity-card-0-mark-selected').click()
+
+  await expect(page.getByTestId('activities-row')).toContainText(
+    'Reserve hike',
+    { timeout: 10_000 },
+  )
+  await expect(page.getByTestId('activities-row-requeue-notice')).toHaveCount(0)
+})
+
+test('selecting the day\'s only activity with no reserve left degrades to a "no more options" notice without Places access', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('activity-card-0-mark-selected').click()
+
+  await expect(page.getByTestId('activities-row-requeue-notice')).toBeVisible({
+    timeout: 10_000,
+  })
+})
