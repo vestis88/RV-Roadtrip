@@ -95,13 +95,15 @@ function PlaceCardSection({
   const skipped = entries.filter(({ place }) => place.status === 'skipped')
   const visible = showSkipped ? [...active, ...skipped] : active
 
-  // Both skipping and selecting can be what drains a scope's live-suggested
-  // pool to zero — several items can be selected at once (no "only one"
-  // rule anywhere here), so "all 5 selected" is exactly the same "nothing
-  // left to browse" state as "all 5 skipped" (see refillIfExhausted's own
-  // comment). Only the suggested→selected transition needs this; reverting
-  // one back to suggested (see onToggleSelected below) grows the pool, not
-  // drains it.
+  // Skip and select trigger the same underlying cascade (see
+  // skipAndRequeue/selectAndRequeue's own doc comments in placeStatus.ts)
+  // but with different thresholds: skip always tries to bring in one
+  // replacement, since skipping means "not interested, show me something
+  // else"; select only refills once the whole scope's live-suggested pool
+  // is drained, since selecting means "keeping this one" and several items
+  // can be selected at once (no "only one" rule anywhere here). Reverting a
+  // selection back to suggested (see onToggleSelected below) only grows the
+  // pool, so it never needs either check.
   async function advance(placeId: string, action: 'select' | 'skip') {
     setRequeuing(true)
     setNotice(null)

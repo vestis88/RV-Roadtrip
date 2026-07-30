@@ -264,6 +264,76 @@ test('skipping the day\'s only activity, with a reserve one waiting, promotes it
   await expect(page.getByTestId('activities-row-requeue-notice')).toHaveCount(0)
 })
 
+test('skipping one of several activities still promotes a reserve immediately, even though others remain suggested', async ({
+  page,
+}) => {
+  // Regression test: reported as "clicking skip does not bring up a fresh
+  // alternative" — skipAndRequeue used to only refill once a scope's whole
+  // live-suggested pool hit zero, so skipping one of several still-suggested
+  // activities did nothing visible. Skip now means "not interested, show me
+  // something else" every time, independent of how many other suggested
+  // items are left in the row.
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .collection('activities')
+    .add({
+      name: 'Second suggestion',
+      category: 'sight',
+      lat: 61.12,
+      lng: 10.48,
+      blurb: 'Still on offer.',
+      kidFriendly: true,
+      status: 'suggested',
+    })
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .collection('activities')
+    .add({
+      name: 'Reserve hike',
+      category: 'hike',
+      lat: 61.11,
+      lng: 10.47,
+      blurb: 'Waiting in reserve.',
+      kidFriendly: true,
+      status: 'suggested',
+      reserve: true,
+    })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+  // Firestore doesn't preserve write order, so which of the two starting
+  // activities lands at card-0 isn't predictable — assert by count instead
+  // of by name.
+  const visibleCards = page.getByTestId(/^activity-card-\d+$/)
+  await expect(visibleCards).toHaveCount(2)
+  await expect(page.getByTestId('activities-row')).not.toContainText(
+    'Reserve hike',
+  )
+
+  await page.getByTestId('activity-card-0-mark-skipped').click()
+
+  await expect(page.getByTestId('activities-row')).toContainText(
+    'Reserve hike',
+    { timeout: 10_000 },
+  )
+  // The reserve promotion replaced the skipped card 1-for-1 — still 2
+  // suggested cards visible, not 1, even though the pool wasn't drained.
+  await expect(visibleCards).toHaveCount(2)
+  await expect(page.getByTestId('activities-row-show-skipped')).toHaveText(
+    'Show 1 skipped',
+  )
+  await expect(page.getByTestId('activities-row-requeue-notice')).toHaveCount(0)
+})
+
 test('skipping the day\'s only activity with no reserve left degrades to a "no more options" notice without Places access', async ({
   page,
 }) => {

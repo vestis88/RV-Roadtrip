@@ -11,16 +11,24 @@ import {
 export type ResearchKind = 'activity' | 'restaurant'
 
 /**
- * Dismiss-and-requeue's second tier (implemented 2026-07-30): the client
- * (src/lib/placeStatus.ts's skipAndRequeue) calls this only once BOTH a
- * day's displayed items and their generation-time reserve (placesApi.ts's
- * RESERVE_ACTIVITY_COUNT/RESERVE_RESTAURANTS_PER_MEAL) are exhausted for a
- * scope — every suggestion skipped, or one selected and every other skipped.
- * Tops the pool back up with RESEARCH_BATCH_SIZE fresh, immediately-visible
- * ('suggested', not reserve) candidates via the same Places backfill
- * generation itself uses — no Claude call, matching the backfill's own
- * "another one via Places, avoiding what's already resolved" character
- * rather than a full re-curation.
+ * Dismiss-and-requeue's second tier (implemented 2026-07-30, split into a
+ * per-skip and a whole-pool caller 2026-07-30): reached via
+ * src/lib/placeStatus.ts once a scope's generation-time reserve
+ * (placesApi.ts's RESERVE_ACTIVITY_COUNT/RESERVE_RESTAURANTS_PER_MEAL) is
+ * exhausted too — either because `skipAndRequeue` wants a single immediate
+ * replacement for the one just skipped (no other reserve left to promote),
+ * or because `selectAndRequeue` found the whole scope drained (every
+ * suggestion skipped, or one selected and every other skipped).
+ *
+ * Fetches RESEARCH_BATCH_SIZE fresh candidates via the same Places backfill
+ * generation itself uses (no Claude call), but only the first `visibleCount`
+ * of them get written as immediately-visible ('suggested'); the rest are
+ * written with `reserve: true` so a run of several consecutive single-item
+ * skips can keep being served instantly out of that buffer rather than
+ * hitting Places on every one. `visibleCount` defaults to
+ * RESEARCH_BATCH_SIZE (i.e. everything found becomes visible at once) for
+ * the whole-pool caller, which wants browsing to stay open, not trickle back
+ * one at a time.
  *
  * No busy-guard needed: this only ever appends new docs to a day's
  * activities/restaurants subcollection, never touches planMeta or an
@@ -32,6 +40,7 @@ export async function runResearchMoreAlternatives(
   dayId: string,
   kind: ResearchKind,
   meal?: Meal,
+  visibleCount: number = RESEARCH_BATCH_SIZE,
 ): Promise<number> {
   const db = getFirestore()
   const dayRef = db.collection('trips').doc(tripId).collection('days').doc(dayId)
@@ -92,7 +101,13 @@ export async function runResearchMoreAlternatives(
           false,
         )
 
-  await Promise.all(found.map((item) => collRef.add(item)))
+  // Only the first visibleCount are shown now; anything past that is held
+  // back as reserve rather than dumped into the row all at once (see this
+  // function's own doc comment).
+  const toWrite = found.map((item, index) =>
+    index < visibleCount ? item : { ...item, reserve: true },
+  )
+  await Promise.all(toWrite.map((item) => collRef.add(item)))
   return found.length
 }
 
@@ -122,7 +137,28 @@ export const researchMoreAlternatives = onCall(
         'meal is required when kind is "restaurant"',
       )
     }
-    const added = await runResearchMoreAlternatives(tripId, dayId, kind, meal)
+    // The callable-functions wire serializer turns an omitted/undefined
+    // client-side field into `null`, not a missing key — so both must be
+    // treated as "not provided," not just `undefined`.
+    const rawVisibleCount = request.data?.visibleCount
+    if (
+      rawVisibleCount != null &&
+      (typeof rawVisibleCount !== 'number' ||
+        !Number.isInteger(rawVisibleCount) ||
+        rawVisibleCount < 1)
+    ) {
+      throw new HttpsError(
+        'invalid-argument',
+        'visibleCount, when provided, must be a positive integer',
+      )
+    }
+    const added = await runResearchMoreAlternatives(
+      tripId,
+      dayId,
+      kind,
+      meal,
+      rawVisibleCount ?? undefined,
+    )
     return { added }
   },
 )

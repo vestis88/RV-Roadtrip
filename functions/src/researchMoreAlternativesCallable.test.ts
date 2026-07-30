@@ -151,6 +151,76 @@ describe('runResearchMoreAlternatives — activities', () => {
       runResearchMoreAlternatives(tripId, 'nonexistent-day', 'activity'),
     ).rejects.toThrow()
   })
+
+  it('defaults to making every found item immediately visible', async () => {
+    const { tripId } = await createTripForUser('uidResearchVisDefault')
+    const dayRef = getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .doc('day1')
+    await seedDay(tripId, 'day1')
+
+    backfillActivitiesMock
+      .mockReset()
+      .mockResolvedValue([
+        activity({ name: 'One', placeId: 'v1' }),
+        activity({ name: 'Two', placeId: 'v2' }),
+        activity({ name: 'Three', placeId: 'v3' }),
+      ])
+
+    const { runResearchMoreAlternatives } = await import(
+      './researchMoreAlternativesCallable.js'
+    )
+    const added = await runResearchMoreAlternatives(tripId, 'day1', 'activity')
+
+    expect(added).toBe(3)
+    const activitiesSnap = await dayRef.collection('activities').get()
+    expect(activitiesSnap.docs.every((d) => !(d.data() as Activity).reserve)).toBe(
+      true,
+    )
+  })
+
+  it('holds back everything past visibleCount as reserve rather than making it all visible', async () => {
+    const { tripId } = await createTripForUser('uidResearchVisCapped')
+    const dayRef = getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .doc('day1')
+    await seedDay(tripId, 'day1')
+
+    backfillActivitiesMock
+      .mockReset()
+      .mockResolvedValue([
+        activity({ name: 'One', placeId: 'v1' }),
+        activity({ name: 'Two', placeId: 'v2' }),
+        activity({ name: 'Three', placeId: 'v3' }),
+      ])
+
+    const { runResearchMoreAlternatives } = await import(
+      './researchMoreAlternativesCallable.js'
+    )
+    const added = await runResearchMoreAlternatives(
+      tripId,
+      'day1',
+      'activity',
+      undefined,
+      1,
+    )
+
+    expect(added).toBe(3)
+    const activitiesSnap = await dayRef.collection('activities').get()
+    const byName = new Map(
+      activitiesSnap.docs.map((d) => [
+        (d.data() as Activity).name,
+        (d.data() as Activity).reserve ?? false,
+      ]),
+    )
+    expect(byName.get('One')).toBe(false)
+    expect(byName.get('Two')).toBe(true)
+    expect(byName.get('Three')).toBe(true)
+  })
 })
 
 describe('runResearchMoreAlternatives — restaurants', () => {
