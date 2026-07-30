@@ -67,8 +67,7 @@ export interface RescanFind {
  * Searches near `center` for stops worth adding to the corridor, within
  * `radiusKm`. Each find is geocoded (biased near `center`) and then actually
  * measured against `radiusKm` — a find that doesn't geocode is dropped
- * (nothing to check its distance against), same discipline as
- * enrichHighlights.ts's web-search pass.
+ * (nothing to check its distance against).
  */
 export async function generateRescanCandidates(input: {
   center: LatLng

@@ -3,12 +3,8 @@ import type { LatLng } from '@rv/shared'
 /**
  * The overview map's route geometry: which points the whole-trip driving route
  * threads through, and how to slice that sequence into requests the Directions
- * API will actually accept.
- *
- * Sibling to estimateHighlightsRoute.ts — same "pure, unit-testable route
- * geometry, no React or Firebase" shape, different problem: that one measures
- * detours off a fixed backbone, this one decides what the backbone *is* for a
- * trip whose days each carry a shortlist of candidate activities.
+ * API will actually accept. Pure, unit-testable route geometry — no React or
+ * Firebase.
  */
 
 /**

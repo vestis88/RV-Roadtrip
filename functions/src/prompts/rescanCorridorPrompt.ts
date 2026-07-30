@@ -2,16 +2,14 @@ import type { LatLng } from '@rv/shared'
 
 /**
  * "Rescan this area" (phase 3 of the persistent-corridor overhaul,
- * 2026-07-29): unlike generateRegionHighlights (whole-trip curation) or
- * generateEnrichedHighlights (search near an already-known corridor
- * backbone), this is a traveler-triggered, point-and-radius search — "what's
- * worth stopping for near where I'm looking right now on the map". No route
- * exists yet to filter against (the corridor may not even have a plan behind
- * it — this is explicitly usable from `idle` status onward), so the only
- * constraint is straight-line distance from the requested center, enforced
- * server-side via haversineDistanceKm after geocoding, same
- * invented-geography discipline as enrichHighlightsPrompt.ts: no distances,
- * no coordinates from the model itself.
+ * 2026-07-29): unlike generateRegionHighlights (whole-trip curation), this is
+ * a traveler-triggered, point-and-radius search — "what's worth stopping for
+ * near where I'm looking right now on the map". No route exists yet to
+ * filter against (the corridor may not even have a plan behind it — this is
+ * explicitly usable from `idle` status onward), so the only constraint is
+ * straight-line distance from the requested center, enforced server-side via
+ * haversineDistanceKm after geocoding: no distances, no coordinates from the
+ * model itself — only what's genuinely found.
  */
 const RESCAN_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families. The traveler is looking at one specific area of the map and wants to know what's worth stopping for nearby — not a redesign of their trip, just genuinely good finds close to this one point.
 

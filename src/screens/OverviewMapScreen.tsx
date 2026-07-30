@@ -340,9 +340,7 @@ export function OverviewMapScreen() {
         </p>
       )}
 
-      {(planStatus === 'pending' ||
-        planStatus === 'generating' ||
-        planStatus === 'awaiting-highlights-review') && (
+      {(planStatus === 'pending' || planStatus === 'generating') && (
         <p
           data-testid="map-generating-banner"
           className="border-b border-neutral-200 bg-white p-3 text-center text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
