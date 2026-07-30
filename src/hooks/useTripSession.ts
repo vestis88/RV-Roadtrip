@@ -4,13 +4,15 @@ import { ensureSignedIn, functions } from '../lib/firebase'
 
 export function useTripSession() {
   const [tripId, setTripId] = useState<string | null>(null)
+  const [uid, setUid] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     async function run() {
-      await ensureSignedIn()
+      const user = await ensureSignedIn()
       if (cancelled) return
+      setUid(user.uid)
 
       const params = new URLSearchParams(window.location.search)
       const joinCode = params.get('join')
@@ -25,6 +27,12 @@ export function useTripSession() {
         if (cancelled) return
         localStorage.setItem('tripId', data.tripId)
         setTripId(data.tripId)
+        // Strip ?join= once handled — left in place, a later reload (now
+        // that switching trips is possible) would silently re-join and
+        // hijack whichever trip the traveler has since switched to.
+        const url = new URL(window.location.href)
+        url.searchParams.delete('join')
+        window.history.replaceState({}, '', url)
         return
       }
 
@@ -49,5 +57,25 @@ export function useTripSession() {
     }
   }, [])
 
-  return { tripId }
+  /** Switches the active trip to one the traveler is already a member of
+   * (own trip list, or one just joined) — no backend call needed, membership
+   * already exists. */
+  function switchTrip(id: string) {
+    localStorage.setItem('tripId', id)
+    setTripId(id)
+  }
+
+  /** Creates a brand-new trip and switches to it immediately. */
+  async function startNewTrip(): Promise<string> {
+    const create = httpsCallable<void, { tripId: string; shareCode: string }>(
+      functions,
+      'createTrip',
+    )
+    const { data } = await create()
+    localStorage.setItem('tripId', data.tripId)
+    setTripId(data.tripId)
+    return data.tripId
+  }
+
+  return { tripId, uid, switchTrip, startNewTrip }
 }

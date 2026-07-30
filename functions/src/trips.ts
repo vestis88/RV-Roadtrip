@@ -17,7 +17,10 @@ function defaultTrip(): Trip {
   const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
   return {
     meta: {
-      name: 'New Trip',
+      // Blank, not a placeholder like 'New Trip' — the name field on Trip
+      // setup should read as genuinely empty and ready to type into, not as
+      // text the traveler has to notice and clear first.
+      name: '',
       shareCode: '', // overwritten by caller once a unique code is picked
       createdAt: now.toISOString(),
       version: 1,
@@ -76,6 +79,14 @@ export async function createTripForUser(uid: string) {
     tx.set(tripRef, trip)
     tx.set(tripRef.collection('members').doc(uid), { joinedAt: now })
     tx.set(db.collection('shareCodes').doc(shareCode), { tripId: tripRef.id })
+    // Reverse index for "my trips": membership itself only lives as
+    // trips/{tripId}/members/{uid}, which a client can't query across trips
+    // (no collection-group rule for it, and it'd need one per trip anyway).
+    // This mirrors it the other direction so a client can list its own
+    // trips with a single query instead of needing a trip's ID already.
+    tx.set(db.collection('users').doc(uid).collection('trips').doc(tripRef.id), {
+      joinedAt: now,
+    })
   })
 
   return { tripId: tripRef.id, shareCode }
@@ -90,12 +101,17 @@ export async function joinTripByCode(uid: string, rawShareCode: string) {
   }
   const { tripId } = codeDoc.data() as { tripId: string }
 
-  await db
-    .collection('trips')
-    .doc(tripId)
-    .collection('members')
-    .doc(uid)
-    .set({ joinedAt: new Date().toISOString() })
+  const now = new Date().toISOString()
+  const batch = db.batch()
+  batch.set(db.collection('trips').doc(tripId).collection('members').doc(uid), {
+    joinedAt: now,
+  })
+  // Same reverse index as createTripForUser — joining by code needs to land
+  // in "my trips" too, not just grant access.
+  batch.set(db.collection('users').doc(uid).collection('trips').doc(tripId), {
+    joinedAt: now,
+  })
+  await batch.commit()
 
   return { tripId }
 }

@@ -6,10 +6,12 @@ import type { Trip } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { useTrip } from '../hooks/useTrip'
 import { useTripSession } from '../hooks/useTripSession'
+import { useMyTrips } from '../hooks/useMyTrips'
 import { useTripDays } from '../hooks/useTripDays'
 import { useExecutionMode } from '../hooks/useExecutionMode'
 import { TripContext } from '../context/TripContext'
 import { ExecutionModePrompt } from '../components/ExecutionModePrompt'
+import { TripSwitcher } from '../components/TripSwitcher'
 
 function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
   const { days } = useTripDays(tripId)
@@ -46,12 +48,25 @@ function isActiveRoute(pathname: string, to: string): boolean {
 }
 
 function AppShell() {
-  const { tripId } = useTripSession()
+  const { tripId, uid, switchTrip, startNewTrip } = useTripSession()
   const { trip, loading } = useTrip(tripId)
+  const myTrips = useMyTrips(uid)
   const [nameDraft, setNameDraft] = useState('')
   const [isEditingName, setIsEditingName] = useState(false)
+  const [creatingTrip, setCreatingTrip] = useState(false)
   const location = useLocation()
   const isSetupPage = location.pathname === '/'
+
+  async function handleCreateTrip() {
+    setCreatingTrip(true)
+    try {
+      await startNewTrip()
+    } catch (error) {
+      console.error('startNewTrip failed', error)
+    } finally {
+      setCreatingTrip(false)
+    }
+  }
 
   if (trip && !isEditingName && nameDraft !== trip.meta.name) {
     setNameDraft(trip.meta.name)
@@ -147,10 +162,18 @@ function AppShell() {
                 <input
                   className="field text-center text-lg font-medium"
                   data-testid="trip-name-input"
+                  placeholder="Name your trip"
                   value={nameDraft}
                   onChange={(event) => setNameDraft(event.target.value)}
                   onFocus={() => setIsEditingName(true)}
                   onBlur={saveName}
+                />
+                <TripSwitcher
+                  trips={myTrips}
+                  currentTripId={tripId}
+                  onSwitch={switchTrip}
+                  onCreate={() => handleCreateTrip().catch(console.error)}
+                  creating={creatingTrip}
                 />
               </div>
               <nav className="mt-4 flex flex-wrap justify-center gap-1 rounded-full bg-neutral-100 p-1 dark:bg-neutral-800/60">

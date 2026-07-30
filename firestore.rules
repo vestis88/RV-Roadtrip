@@ -47,6 +47,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Reverse index for "my trips" — written by createTrip/joinTrip via the
+    // Admin SDK (bypasses these rules), same pattern as trips/{tripId}/members.
+    match /users/{uid}/trips/{tripId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
     match /planRequests/{requestId} {
       allow create: if request.auth != null;
       allow read: if request.auth != null;

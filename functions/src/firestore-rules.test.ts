@@ -39,6 +39,9 @@ async function seedTrip() {
       summary: 'Day one',
     })
     await setDoc(doc(db, 'shareCodes', 'AB12CD'), { tripId: TRIP_ID })
+    await setDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID), {
+      joinedAt: '2026-01-01T00:00:00Z',
+    })
   })
 }
 
@@ -197,6 +200,29 @@ describe('trips/{tripId}/members', () => {
     await assertFails(
       setDoc(doc(db, 'trips', TRIP_ID, 'members', OTHER_MEMBER_UID), {
         joinedAt: 'tampered',
+      }),
+    )
+  })
+})
+
+describe('users/{uid}/trips', () => {
+  it('lets a user read their own trip list', async () => {
+    const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertSucceeds(
+      getDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID)),
+    )
+  })
+
+  it("denies reading another user's trip list", async () => {
+    const db = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    await assertFails(getDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID)))
+  })
+
+  it('denies any client write (must go through createTrip/joinTrip)', async () => {
+    const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'users', MEMBER_UID, 'trips', 'someOtherTripId'), {
+        joinedAt: '2026-01-01T00:00:00Z',
       }),
     )
   })
