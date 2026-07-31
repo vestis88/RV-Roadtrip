@@ -172,10 +172,11 @@ describe('generateRealPlan checkpointing', () => {
     )
 
     const tripAfterFailure = await loadTrip(tripId)
-    const days = await generateRealPlan(tripAfterFailure, tripRef)
+    const { days, complete } = await generateRealPlan(tripAfterFailure, tripRef)
 
     expect(planTripMock).toHaveBeenCalledTimes(1) // still just once
     expect(days.map((d) => d.day.index)).toEqual([0, 1, 2])
+    expect(complete).toBe(true)
   })
 
   it('discards the checkpoint and starts clean if settings changed since the failed attempt', async () => {
@@ -230,5 +231,134 @@ describe('generateRealPlan checkpointing', () => {
     const staged = await tripRef.collection('generationStaging').get()
     // Only the fresh attempt's 1 day, not the old attempt's plus the new one.
     expect(staged.size).toBe(1)
+  })
+})
+
+// Segmented generation (2026-07-31): generateRealPlan reports `complete:
+// false` when resolveSkeletonDays returns fewer days than the skeleton asked
+// for (a real caller only does this when it hit its own deadline — see
+// resolveSkeletonDays' own deadline tests in planPipeline.test.ts — but
+// generateRealPlan only needs to react to the count, not know why it's
+// short), and runFullGeneration reacts to that by chaining a continuation
+// planRequest instead of finalizing the trip.
+describe('generateRealPlan / runFullGeneration — incomplete (deadline-cut) generation', () => {
+  it('generateRealPlan reports complete: false when resolveSkeletonDays returns short of the full skeleton', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCkptIncomplete')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    planTripMock.mockReset().mockResolvedValue({
+      days: [fixtureSkeletonDay(0), fixtureSkeletonDay(1), fixtureSkeletonDay(2)],
+    })
+    resolveSkeletonDaysMock.mockReset().mockImplementationOnce(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+        onDayGenerated?: (index: number, day: unknown) => void | Promise<void>,
+      ) => {
+        // Simulates hitting a deadline after only the first of 3 days —
+        // resolves and stages it normally, then just stops (no throw,
+        // unlike the crash-recovery tests above).
+        const day = fixtureGeneratedDay(skeletonDays[0].index, '2026-08-01')
+        await onDayGenerated?.(skeletonDays[0].index, day)
+        onDayResolved?.(1)
+        return [day]
+      },
+    )
+
+    const { generateRealPlan } = await import('./generatePlan.js')
+    const trip = await loadTrip(tripId)
+    const { days, complete } = await generateRealPlan(trip, tripRef)
+
+    expect(complete).toBe(false)
+    expect(days).toHaveLength(1)
+    // Still durably staged for a future resume, exactly like the
+    // crash-recovery case — an incomplete run must leave the checkpoint
+    // intact, not clear it.
+    const staged = await tripRef.collection('generationStaging').get()
+    expect(staged.size).toBe(1)
+  })
+
+  it('runFullGeneration chains a continuation planRequest and leaves the trip generating, rather than finalizing a partial plan', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidFullGenIncomplete')
+
+    planTripMock.mockReset().mockResolvedValue({
+      days: [fixtureSkeletonDay(0), fixtureSkeletonDay(1), fixtureSkeletonDay(2)],
+    })
+    resolveSkeletonDaysMock.mockReset().mockImplementationOnce(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+        onDayGenerated?: (index: number, day: unknown) => void | Promise<void>,
+      ) => {
+        const day = fixtureGeneratedDay(skeletonDays[0].index, '2026-08-01')
+        await onDayGenerated?.(skeletonDays[0].index, day)
+        onDayResolved?.(1)
+        return [day]
+      },
+    )
+
+    const { runFullGeneration } = await import('./generatePlan.js')
+    const result = await runFullGeneration(tripId, 'full', Date.now() + 60_000)
+
+    expect(result).toEqual({ chained: true })
+
+    const trip = await loadTrip(tripId)
+    // Still mid-generation, not finalized off an incomplete day set — and
+    // the checkpoint (needed for the continuation to resume) is intact.
+    expect(trip.planMeta.status).toBe('generating')
+    expect(trip.planMeta.checkpoint?.skeleton).toBeDefined()
+
+    const continuationSnap = await db
+      .collection('planRequests')
+      .where('tripId', '==', tripId)
+      .where('isContinuation', '==', true)
+      .get()
+    expect(continuationSnap.size).toBe(1)
+    expect(continuationSnap.docs[0].data()).toMatchObject({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+      isContinuation: true,
+    })
+  })
+
+  it('runFullGeneration finalizes normally (no continuation, status ready) when resolveSkeletonDays returns every day', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidFullGenComplete')
+
+    planTripMock.mockReset().mockResolvedValue({ days: [fixtureSkeletonDay(0)] })
+    resolveSkeletonDaysMock.mockReset().mockImplementationOnce(
+      async (
+        skeletonDays: { index: number }[],
+        _startLocation: unknown,
+        onDayResolved?: (count: number) => void,
+        onDayGenerated?: (index: number, day: unknown) => void | Promise<void>,
+      ) => {
+        const day = fixtureGeneratedDay(skeletonDays[0].index, '2026-08-01')
+        await onDayGenerated?.(skeletonDays[0].index, day)
+        onDayResolved?.(1)
+        return [day]
+      },
+    )
+
+    const { runFullGeneration } = await import('./generatePlan.js')
+    const result = await runFullGeneration(tripId, 'full', Date.now() + 60_000)
+
+    expect(result).toEqual({ chained: false })
+
+    const trip = await loadTrip(tripId)
+    expect(trip.planMeta.status).toBe('ready')
+    expect(trip.planMeta.checkpoint).toBeUndefined()
+
+    const continuationSnap = await db
+      .collection('planRequests')
+      .where('tripId', '==', tripId)
+      .where('isContinuation', '==', true)
+      .get()
+    expect(continuationSnap.size).toBe(0)
   })
 })

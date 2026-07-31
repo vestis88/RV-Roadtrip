@@ -50,4 +50,61 @@ describe('cost guards', () => {
     const tripSnap = await tripRef.get()
     expect(tripSnap.data()?.planMeta.status).toBe('generating')
   }, 15_000)
+
+  // Segmented generation (2026-07-31): a chained continuation request
+  // (isContinuation: true — see generatePlan.ts's runFullGeneration) must
+  // NOT be rejected by this same busy guard just because the trip is
+  // 'generating' — that's expected, it's the parent invocation's own claim
+  // still in effect, not a competing request.
+  it('lets a continuation request through while the trip is generating, unlike a fresh request', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCostGuardContinuation')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.update({ 'planMeta.status': 'generating' })
+
+    const requestRef = await db.collection('planRequests').add({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+      isContinuation: true,
+    })
+
+    const finalRequest = await waitFor(async () => {
+      const snap = await requestRef.get()
+      const data = snap.data()
+      return data?.status === 'error' ? data : undefined
+    })
+
+    // Got past the busy guard into the real pipeline attempt — the same
+    // credential-less failure generatePlan.test.ts's 'full' test asserts —
+    // rather than being turned away with "already in progress".
+    expect(finalRequest.error).toBeTruthy()
+    expect(finalRequest.error).not.toMatch(/already in progress/)
+  }, 15_000)
+
+  it('drops a continuation request whose trip is no longer generating, without touching the trip', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCostGuardStaleContinuation')
+    const tripRef = db.collection('trips').doc(tripId)
+    // Trip is idle (never marked generating by a parent invocation) — a
+    // stray/misfired continuation shouldn't be able to run against it.
+
+    const requestRef = await db.collection('planRequests').add({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+      isContinuation: true,
+    })
+
+    const finalRequest = await waitFor(async () => {
+      const snap = await requestRef.get()
+      const data = snap.data()
+      return data?.status === 'error' ? data : undefined
+    })
+
+    expect(finalRequest.error).toMatch(/no longer generating/)
+
+    const tripSnap = await tripRef.get()
+    expect(tripSnap.data()?.planMeta.status).toBe('idle')
+  }, 15_000)
 })

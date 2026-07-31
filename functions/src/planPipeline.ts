@@ -170,10 +170,23 @@ export async function resolveSkeletonDays(
   // A day's whole point is surviving a crash between it and the next day,
   // so staging can't itself be fire-and-forget.
   onDayGenerated?: (index: number, day: GeneratedDay) => void | Promise<void>,
+  // Segmented generation (2026-07-31): when set, resolution stops before
+  // starting any further day once past this wall-clock deadline, returning
+  // whatever's been resolved (and already staged via onDayGenerated) so
+  // far — deliberately short of `skeletonDays.length` rather than running
+  // into generatePlan's own Cloud Functions timeout with nothing durably
+  // saved for the days still in flight. The caller (generateRealPlan)
+  // compares the returned count against the full skeleton to detect this
+  // and chain a continuation planRequest — see generatePlan.ts. Omitted by
+  // every caller that doesn't need this (replanTrip.ts's remainder is
+  // short enough not to risk it), so this stays a pure no-op addition for
+  // them.
+  deadlineMs?: number,
 ): Promise<GeneratedDay[]> {
   const days: GeneratedDay[] = []
   let currentLocation = startLocation
   for (const skDay of skeletonDays) {
+    if (deadlineMs !== undefined && Date.now() > deadlineMs) break
     const { generated, nextLocation } = await resolveSkeletonDay(
       skDay,
       currentLocation,

@@ -138,3 +138,89 @@ describe('resolveSkeletonDay — activity/restaurant geocoding anchor', () => {
     })
   })
 })
+
+// Segmented generation (2026-07-31): resolveSkeletonDays' own deadline
+// support — the piece generateRealPlan/generatePlan.ts build the
+// chain-a-continuation-request behavior on top of. Kept as a focused unit
+// test here rather than only exercised indirectly through generatePlan.ts's
+// mocked-resolveSkeletonDays tests, since this is the actual code that
+// decides where the cutoff falls.
+describe('resolveSkeletonDays — deadline', () => {
+  beforeEach(() => {
+    geocodeQueryMock.mockReset().mockResolvedValue(NEW_OVERNIGHT_POINT)
+    computeRouteLegMock
+      .mockReset()
+      .mockResolvedValue({ distanceKm: 100, durationMin: 90 })
+    enrichActivitiesMock.mockReset().mockResolvedValue([])
+    enrichRestaurantsForMealMock.mockReset().mockResolvedValue([])
+  })
+
+  it('resolves nothing and touches no Places/Routes call when the deadline has already passed', async () => {
+    const { resolveSkeletonDays } = await import('./planPipeline.js')
+    const days = [driveDay('morning'), driveDay('morning'), driveDay('morning')]
+
+    const resolved = await resolveSkeletonDays(
+      days,
+      CURRENT_LOCATION,
+      undefined,
+      undefined,
+      Date.now() - 1,
+    )
+
+    expect(resolved).toHaveLength(0)
+    expect(geocodeQueryMock).not.toHaveBeenCalled()
+  })
+
+  it('resolves every day when the deadline is comfortably in the future', async () => {
+    const { resolveSkeletonDays } = await import('./planPipeline.js')
+    const days = [driveDay('morning'), driveDay('morning')]
+
+    const resolved = await resolveSkeletonDays(
+      days,
+      CURRENT_LOCATION,
+      undefined,
+      undefined,
+      Date.now() + 60_000,
+    )
+
+    expect(resolved).toHaveLength(2)
+  })
+
+  it('stops partway through once a slow day pushes past the deadline, keeping everything resolved before that', async () => {
+    let calls = 0
+    computeRouteLegMock.mockImplementation(async () => {
+      calls++
+      if (calls === 1) {
+        // Simulate the first day's own resolution taking long enough to
+        // blow past the deadline before the second day is even considered
+        // — the check has to happen before starting *each* day, not just
+        // once at the top of the loop.
+        await new Promise((resolve) => setTimeout(resolve, 80))
+      }
+      return { distanceKm: 100, durationMin: 90 }
+    })
+    const deadline = Date.now() + 50
+    const days = [driveDay('morning'), driveDay('morning'), driveDay('morning')]
+
+    const { resolveSkeletonDays } = await import('./planPipeline.js')
+    const resolved = await resolveSkeletonDays(
+      days,
+      CURRENT_LOCATION,
+      undefined,
+      undefined,
+      deadline,
+    )
+
+    expect(resolved.length).toBeGreaterThanOrEqual(1)
+    expect(resolved.length).toBeLessThan(3)
+  })
+
+  it('never checks the deadline when none is supplied — every existing caller (replanTrip.ts) is unaffected', async () => {
+    const { resolveSkeletonDays } = await import('./planPipeline.js')
+    const days = [driveDay('morning'), driveDay('morning')]
+
+    const resolved = await resolveSkeletonDays(days, CURRENT_LOCATION)
+
+    expect(resolved).toHaveLength(2)
+  })
+})

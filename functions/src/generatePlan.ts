@@ -70,8 +70,37 @@ interface PlanRequestData {
     newStopOrder: string[]
     acceptEndDateChange?: boolean
   }
+  // Segmented generation (2026-07-31, see GENERATION_TIME_BUDGET_MS below):
+  // set only on a request this same trigger wrote for itself after running
+  // out of time budget mid-generation ('full'/'fromExploreCandidates' only).
+  // The trip is already correctly marked 'generating' by the invocation
+  // that chained this one, so it skips re-claiming it via the busy guard —
+  // it only confirms the trip is still actually 'generating' before
+  // proceeding, rather than either re-claiming (which would spuriously
+  // reject a genuine concurrent new request against the same trip) or
+  // blindly trusting a stale/misfired continuation.
+  isContinuation?: boolean
   status: string
 }
+
+// Segmented generation (2026-07-31): generatePlan's own Cloud Functions
+// timeout (540s below — the hard ceiling for an event-driven trigger, not a
+// value chosen for safety margin) can't grow to fit an arbitrarily long
+// trip's worth of sequential Places/Routes lookups (resolveSkeletonDays is
+// deliberately sequential across days — see its own doc comment). Rather
+// than let a very long trip's generation get killed mid-flight with
+// whatever's in flight lost, resolveSkeletonDays bails out once an
+// invocation nears this budget and the days resolved so far are already
+// durably staged (planCheckpoint.ts); the ~60s left below the hard ceiling
+// covers this invocation's own final bookkeeping writes and the
+// continuation planRequest it chains for itself. Only covers the
+// day-resolution phase, not the upstream Claude skeleton call
+// (planTrip/generateSkeletonFromHighlights) — that phase produces the whole
+// skeleton in one shot with no partial-checkpoint support yet, so an
+// extremely long trip could in principle still exceed budget before
+// day-resolution even starts. Flagged as a known residual gap, not solved
+// here — see master_plan.md.
+const GENERATION_TIME_BUDGET_MS = 480_000
 
 /**
  * Runs the real planning pipeline for a fresh trip: Claude proposes the
@@ -92,12 +121,19 @@ interface PlanRequestData {
  * mid-explore-commit must never be resumed by a plain 'full' retry (or vice
  * versa) at the same settings — they'd produce different skeletons from the
  * same hash otherwise.
+ *
+ * `deadlineMs`, when supplied, is threaded through to resolveSkeletonDays so
+ * it can stop early rather than risk this invocation's own Cloud Functions
+ * timeout — see GENERATION_TIME_BUDGET_MS. The returned `complete` flag is
+ * how the caller tells a genuinely finished plan apart from one that ran out
+ * of time budget partway through the day-resolution phase.
  */
 export async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
   highlights?: RegionHighlightsResponse,
-): Promise<GeneratedDay[]> {
+  deadlineMs?: number,
+): Promise<{ days: GeneratedDay[]; complete: boolean }> {
   const settingsHash = computeSettingsHash(trip) + (highlights ? ':explore' : '')
   const checkpoint = await loadCheckpoint(tripRef, trip, settingsHash)
 
@@ -160,9 +196,11 @@ export async function generateRealPlan(
         )
     },
     (index, day) => stageGeneratedDay(tripRef, index, day),
+    deadlineMs,
   )
 
-  return [...resumedDays, ...newlyResolved]
+  const days = [...resumedDays, ...newlyResolved]
+  return { days, complete: days.length === skeleton.days.length }
 }
 
 /**
@@ -239,6 +277,121 @@ export async function writeGeneratedDays(
   await commitInChunks(db, writes)
 }
 
+/**
+ * Runs a fresh ('full') or explore-commit ('fromExploreCandidates')
+ * generation through to a `ready` trip, or — if `invocationDeadline` is hit
+ * partway through day-resolution — chains a continuation planRequest and
+ * leaves the trip `generating` for that next invocation to pick up (see
+ * generateRealPlan's `complete` flag and isContinuation's own doc comment).
+ * Extracted out of the trigger closure below the same way writeGeneratedDays
+ * is (see its own doc comment) — the Functions emulator runs the compiled
+ * bundle in its own process, so a test can't reach code that only runs
+ * inside the onDocumentCreated closure by mocking it. Throws on any failure,
+ * matching runReplan/runInsertRestDay/runReconcileCorridor's shape; the
+ * trigger below is the only place that turns a throw into `planMeta.error`.
+ */
+export async function runFullGeneration(
+  tripId: string,
+  kind: PlanRequestData['kind'],
+  invocationDeadline: number,
+): Promise<{ chained: boolean }> {
+  const db = getFirestore()
+  const tripRef = db.collection('trips').doc(tripId)
+
+  // Clear any progress left over from a previous run so the UI doesn't
+  // briefly show a stale percentage before this run reaches the point
+  // where it reports its own.
+  await tripRef.update({
+    'planMeta.status': 'generating',
+    'planMeta.progressLabel': FieldValue.delete(),
+    'planMeta.progressCurrent': FieldValue.delete(),
+    'planMeta.progressTotal': FieldValue.delete(),
+  })
+
+  const tripSnap = await tripRef.get()
+  const trip = tripSnap.data() as Trip
+
+  let highlights: RegionHighlightsResponse | undefined
+  if (kind === 'fromExploreCandidates') {
+    const candidatesSnap = await tripRef
+      .collection('corridorStops')
+      .where('status', 'in', ['candidate', 'locked'])
+      .get()
+    highlights = buildRegionHighlightsFromCandidates(
+      candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
+    )
+    if (highlights.regions.length === 0) {
+      throw new Error(
+        'No candidate stops to build a plan from — explore a few first.',
+      )
+    }
+  }
+
+  const { days, complete } = await generateRealPlan(
+    trip,
+    tripRef,
+    highlights,
+    invocationDeadline,
+  )
+
+  if (!complete) {
+    // Everything resolved so far is already durably staged
+    // (planCheckpoint.ts) — hand the rest off to a fresh invocation with a
+    // full new time budget rather than risk this one's own Cloud Functions
+    // timeout finishing it off with nothing to show. isContinuation lets
+    // that invocation skip the busy-guard claim (this trip is already
+    // correctly marked 'generating' by this invocation) while still
+    // confirming, when it runs, that the trip wasn't deleted or reset out
+    // from under it in the meantime.
+    await db.collection('planRequests').add({
+      tripId,
+      kind,
+      status: 'pending',
+      isContinuation: true,
+    })
+    return { chained: true }
+  }
+
+  // Structural check only: no day may exceed the traveler's own
+  // maxDriveHoursPerDay by more than the tolerance, and rest days stay
+  // put. Unlike a replan (which only re-paces the remainder), a fresh
+  // generation has no prior plan to preserve — if it fails this, there's
+  // nothing to salvage, so this is a hard failure rather than a retry.
+  const violation = validatePacing(
+    days.map((d) => d.day),
+    trip.settings.maxDriveHoursPerDay,
+  )
+  if (violation) {
+    throw new Error(`Pacing validation failed: ${violation.reason}`)
+  }
+
+  await writeGeneratedDays(tripRef, days)
+  // Only now that the replacement is fully committed is the checkpoint
+  // (skeleton + staged days) no longer needed for a future retry.
+  await clearCheckpoint(tripRef)
+
+  const driveDays = days.filter((d) => d.day.drive)
+  const totalKm = driveDays.reduce(
+    (sum, d) => sum + (d.day.drive?.distanceKm ?? 0),
+    0,
+  )
+  const avgDriveMinutesPerDay = driveDays.length
+    ? driveDays.reduce((sum, d) => sum + (d.day.drive?.durationMin ?? 0), 0) /
+      driveDays.length
+    : 0
+
+  await tripRef.update({
+    'planMeta.status': 'ready',
+    'planMeta.totalKm': totalKm,
+    'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
+    'planMeta.generatedAt': new Date().toISOString(),
+    'planMeta.progressLabel': FieldValue.delete(),
+    'planMeta.progressCurrent': FieldValue.delete(),
+    'planMeta.progressTotal': FieldValue.delete(),
+  })
+  return { chained: false }
+}
+
 export const generatePlan = onDocumentCreated(
   {
     document: 'planRequests/{requestId}',
@@ -255,15 +408,24 @@ export const generatePlan = onDocumentCreated(
     const request = snap.data() as PlanRequestData
     const db = getFirestore()
     const tripRef = db.collection('trips').doc(request.tripId)
+    // Measured from as close to actual invocation start as possible — see
+    // GENERATION_TIME_BUDGET_MS.
+    const invocationDeadline = Date.now() + GENERATION_TIME_BUDGET_MS
 
     // Cost guard: only one plan request may be active per trip at a time.
     // Rapid double-clicks on "Generate" (or a replan racing a full generate)
     // create multiple planRequest docs, but this transaction ensures only
     // the first to claim the trip's planMeta actually runs — the rest are
-    // rejected immediately rather than piling up duplicate work.
+    // rejected immediately rather than piling up duplicate work. A chained
+    // continuation (see isContinuation's own doc comment) skips claiming —
+    // the invocation that chained it already holds the claim — and instead
+    // just confirms the trip is still genuinely mid-generation.
     const claimed = await db.runTransaction(async (tx) => {
       const tripSnap = await tx.get(tripRef)
       const currentStatus = tripSnap.data()?.planMeta?.status
+      if (request.isContinuation) {
+        return currentStatus === 'generating'
+      }
       const isBusy = currentStatus === 'pending' || currentStatus === 'generating'
       if (isBusy) return false
       tx.update(tripRef, { 'planMeta.status': 'pending' })
@@ -273,7 +435,9 @@ export const generatePlan = onDocumentCreated(
     if (!claimed) {
       await snap.ref.update({
         status: 'error',
-        error: 'Another plan request is already in progress for this trip.',
+        error: request.isContinuation
+          ? 'Chained continuation found the trip no longer generating — dropped.'
+          : 'Another plan request is already in progress for this trip.',
       })
       return
     }
@@ -381,76 +545,7 @@ export const generatePlan = onDocumentCreated(
     }
 
     try {
-      // Clear any progress left over from a previous run so the UI doesn't
-      // briefly show a stale percentage before this run reaches the point
-      // where it reports its own.
-      await tripRef.update({
-        'planMeta.status': 'generating',
-        'planMeta.progressLabel': FieldValue.delete(),
-        'planMeta.progressCurrent': FieldValue.delete(),
-        'planMeta.progressTotal': FieldValue.delete(),
-      })
-
-      const tripSnap = await tripRef.get()
-      const trip = tripSnap.data() as Trip
-
-      let highlights: RegionHighlightsResponse | undefined
-      if (request.kind === 'fromExploreCandidates') {
-        const candidatesSnap = await tripRef
-          .collection('corridorStops')
-          .where('status', 'in', ['candidate', 'locked'])
-          .get()
-        highlights = buildRegionHighlightsFromCandidates(
-          candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
-        )
-        if (highlights.regions.length === 0) {
-          throw new Error(
-            'No candidate stops to build a plan from — explore a few first.',
-          )
-        }
-      }
-
-      const days = await generateRealPlan(trip, tripRef, highlights)
-
-      // Structural check only: no day may exceed the traveler's own
-      // maxDriveHoursPerDay by more than the tolerance, and rest days stay
-      // put. Unlike a replan (which only re-paces the remainder), a fresh
-      // generation has no prior plan to preserve — if it fails this, there's
-      // nothing to salvage, so this is a hard failure rather than a retry.
-      const violation = validatePacing(
-        days.map((d) => d.day),
-        trip.settings.maxDriveHoursPerDay,
-      )
-      if (violation) {
-        throw new Error(`Pacing validation failed: ${violation.reason}`)
-      }
-
-      await writeGeneratedDays(tripRef, days)
-      // Only now that the replacement is fully committed is the checkpoint
-      // (skeleton + staged days) no longer needed for a future retry.
-      await clearCheckpoint(tripRef)
-
-      const driveDays = days.filter((d) => d.day.drive)
-      const totalKm = driveDays.reduce(
-        (sum, d) => sum + (d.day.drive?.distanceKm ?? 0),
-        0,
-      )
-      const avgDriveMinutesPerDay = driveDays.length
-        ? driveDays.reduce(
-            (sum, d) => sum + (d.day.drive?.durationMin ?? 0),
-            0,
-          ) / driveDays.length
-        : 0
-
-      await tripRef.update({
-        'planMeta.status': 'ready',
-        'planMeta.totalKm': totalKm,
-        'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
-        'planMeta.generatedAt': new Date().toISOString(),
-        'planMeta.progressLabel': FieldValue.delete(),
-        'planMeta.progressCurrent': FieldValue.delete(),
-        'planMeta.progressTotal': FieldValue.delete(),
-      })
+      await runFullGeneration(request.tripId, request.kind, invocationDeadline)
       await snap.ref.update({ status: 'done' })
     } catch (error) {
       console.error('generatePlan failed', error)
