@@ -1,5 +1,21 @@
 @import 'tailwindcss';
 
+/* Neither `html` nor `body` had a background-color at all — every component
+ * is dark-mode-aware, but the raw document background outside the component
+ * tree defaulted to the browser's own white. Invisible normally (AppShell's
+ * `.surface` main element fills the viewport), but a real white strip shows
+ * "on top" wherever that gap is exposed — most commonly a mobile overscroll
+ * bounce past the fixed h-svh app container. Matches `.surface` below so the
+ * document background is never visually distinguishable from the app's own.
+ * `@layer base` so it sits under Preflight in the cascade, same as Tailwind's
+ * own base styles, rather than as an unlayered (always-wins) rule. */
+@layer base {
+  html,
+  body {
+    @apply bg-neutral-100 dark:bg-neutral-950;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Design system
  * ---------------------------------------------------------------------------
