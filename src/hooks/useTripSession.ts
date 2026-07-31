@@ -83,29 +83,37 @@ export function useTripSession() {
   }
 
   /**
-   * Creates a brand-new trip and switches to it immediately. `inheritSettings`
-   * (typically the previous trip's own settings) carries every travel-setup
-   * field over except `startPoint`/`endPoint`, which stay the fresh trip's own
-   * defaults — a new trip almost always means a new route, but the vehicle,
-   * travelers, interests, and pacing preferences are usually the same
-   * household planning it. A plain client-side patch after creation rather
-   * than a new callable parameter — `createTrip` stays the same one-step
-   * "make me a blank trip" primitive `joinTrip`'s reverse-index write and
-   * every existing test already exercise; only the caller changes.
+   * Creates a brand-new trip and switches to it immediately. `inherit`
+   * (typically the previous trip's own settings/notes) carries every
+   * travel-setup field over except `startPoint`/`endPoint`, which stay the
+   * fresh trip's own defaults — a new trip almost always means a new route,
+   * but the vehicle, travelers, interests, pacing preferences, and any
+   * free-text notes are usually the same household planning it. A plain
+   * client-side patch after creation rather than a new callable parameter —
+   * `createTrip` stays the same one-step "make me a blank trip" primitive
+   * `joinTrip`'s reverse-index write and every existing test already
+   * exercise; only the caller changes.
    */
-  async function startNewTrip(inheritSettings?: TripSettings): Promise<string> {
+  async function startNewTrip(inherit?: {
+    settings: TripSettings
+    notesFreeText: string
+  }): Promise<string> {
     const create = httpsCallable<void, { tripId: string; shareCode: string }>(
       functions,
       'createTrip',
     )
     const { data } = await create()
-    if (inheritSettings) {
-      const carriedOverKeys = Object.keys(inheritSettings).filter(
+    if (inherit) {
+      const carriedOverKeys = Object.keys(inherit.settings).filter(
         (key) => key !== 'startPoint' && key !== 'endPoint',
       ) as Array<keyof TripSettings>
-      const updates = Object.fromEntries(
-        carriedOverKeys.map((key) => [`settings.${key}`, inheritSettings[key]]),
+      const updates: Record<string, unknown> = Object.fromEntries(
+        carriedOverKeys.map((key) => [`settings.${key}`, inherit.settings[key]]),
       )
+      if (inherit.notesFreeText) {
+        updates['notes.freeText'] = inherit.notesFreeText
+        updates['notes.updatedAt'] = new Date().toISOString()
+      }
       await updateDoc(doc(db, 'trips', data.tripId), updates)
     }
     localStorage.setItem('tripId', data.tripId)

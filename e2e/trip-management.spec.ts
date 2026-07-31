@@ -125,7 +125,7 @@ test('joining a trip by share code adds it to the trip switcher without losing t
   expect(page.url()).not.toContain('join=')
 })
 
-test('a new trip inherits the previous trip\'s settings, except start/finish points', async ({
+test('a new trip inherits the previous trip\'s settings and notes, except start/finish points', async ({
   page,
 }) => {
   await page.goto('/')
@@ -142,6 +142,7 @@ test('a new trip inherits the previous trip\'s settings, except start/finish poi
       'settings.maxDriveHoursPerDay': 6,
       'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
       'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+      'notes.freeText': 'Traveling with a dog, prefer quiet campsites.',
     })
 
   await page.getByTestId('trip-switcher-toggle').click()
@@ -156,6 +157,9 @@ test('a new trip inherits the previous trip\'s settings, except start/finish poi
   expect(settings.interests).toEqual(['hiking', 'museums'])
   expect(settings.restDayFrequency).toBe(5)
   expect(settings.maxDriveHoursPerDay).toBe(6)
+  expect(secondTripSnap.data()?.notes.freeText).toBe(
+    'Traveling with a dog, prefer quiet campsites.',
+  )
   // Origin/destination reset to the fresh trip's own blank defaults rather
   // than carrying over the previous trip's route.
   expect(settings.startPoint.name).toBe('')

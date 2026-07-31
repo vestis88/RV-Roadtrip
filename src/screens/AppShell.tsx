@@ -61,7 +61,9 @@ function AppShell() {
   async function handleCreateTrip() {
     setCreatingTrip(true)
     try {
-      await startNewTrip(trip?.settings)
+      await startNewTrip(
+        trip ? { settings: trip.settings, notesFreeText: trip.notes.freeText } : undefined,
+      )
     } catch (error) {
       console.error('startNewTrip failed', error)
     } finally {
