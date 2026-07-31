@@ -1,4 +1,12 @@
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import { expect, test } from './fixtures.js'
+import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+const PROJECT_ID = 'demo-rv-trip-planner'
+if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID })
+const adminDb = getFirestore()
 
 async function setRange(locator: import('@playwright/test').Locator, value: string) {
   await locator.evaluate((el: HTMLInputElement, v: string) => {
@@ -28,7 +36,7 @@ async function getPlaceInputValue(locator: import('@playwright/test').Locator) {
   return locator.evaluate((el: HTMLInputElement) => el.value)
 }
 
-test('settings form fills, persists across reload, and flips plan status to stale', async ({
+test('settings form fills and persists across reload, without falsely marking an idle trip stale', async ({
   page,
 }) => {
   await page.goto('/')
@@ -59,12 +67,15 @@ test('settings form fills, persists across reload, and flips plan status to stal
   await setRange(page.getByTestId('rest-day-frequency-input'), '5')
   await setRange(page.getByTestId('max-drive-hours-input'), '6')
 
-  await expect(page.getByTestId('plan-status')).toHaveText('stale')
+  // A trip that's never had a plan generated has nothing settings changes
+  // could invalidate — status must stay 'idle', not jump to 'stale' as if
+  // a real plan existed and just went out of date (see the shared
+  // updateTripSettings.ts fix this test guards).
+  await expect(page.getByTestId('plan-status')).toHaveText('idle')
 
-  // Every field commits its own Firestore write independently; give the
-  // last one (max-drive-hours) time to actually reach the emulator before
-  // reloading, since 'plan-status' already flipped to stale on the very
-  // first edit and so doesn't prove later writes have landed.
+  // Every field commits its own Firestore write independently; wait for the
+  // last one (max-drive-hours) to actually reach the emulator before
+  // reloading — nothing here flips a visible status to confirm that anymore.
   await page.waitForTimeout(500)
 
   await page.reload()
@@ -104,5 +115,26 @@ test('settings form fills, persists across reload, and flips plan status to stal
   )
   await expect(page.getByTestId('rest-day-frequency-input')).toHaveValue('5')
   await expect(page.getByTestId('max-drive-hours-input')).toHaveValue('6')
+  await expect(page.getByTestId('plan-status')).toHaveText('idle')
+})
+
+test('editing settings on a trip with a ready plan marks it stale', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({ 'planMeta.status': 'ready' })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  await setRange(page.getByTestId('max-drive-hours-input'), '6')
+
   await expect(page.getByTestId('plan-status')).toHaveText('stale')
 })

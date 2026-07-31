@@ -136,7 +136,7 @@ export function PlaceCard({
               <div onClick={stop} className="mt-1.5 flex flex-col gap-1.5">
                 <textarea
                   data-testid={`${testId}-note-input`}
-                  className="field field-sm text-xs"
+                  className="field field-sm"
                   placeholder="Optional note…"
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}

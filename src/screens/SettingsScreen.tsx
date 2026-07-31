@@ -26,8 +26,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
-    updateTripSettings(tripId, partial).catch((error: unknown) =>
-      console.error('Failed to save settings', error),
+    updateTripSettings(tripId, partial, trip.planMeta.status).catch(
+      (error: unknown) => console.error('Failed to save settings', error),
     )
   }
 

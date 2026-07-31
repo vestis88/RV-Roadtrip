@@ -98,8 +98,15 @@
     @apply w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 transition outline-none focus:border-neutral-500 focus:ring-2 focus:ring-neutral-900/10 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white dark:focus:ring-white/10;
   }
 
+  /* text-base (16px), not text-sm (14px): iOS Safari auto-zooms the whole
+   * page in on focusing any input/select/textarea whose computed font-size
+   * is under 16px, then never zooms back out — reported as tapping a
+   * traveler name/age field "zooming in unnaturally," but the same
+   * threshold applies to every .field-sm input across the app (join code,
+   * corridor-stop name, etc.), not just that one. 16px is the documented
+   * minimum that avoids triggering it. */
   .field-sm {
-    @apply px-2.5 py-1.5 text-sm;
+    @apply px-2.5 py-1.5 text-base;
   }
 
   .field-label {
