@@ -33,6 +33,7 @@ import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ReorderCorridorPanel } from '../components/ReorderCorridorPanel'
 import { DirectionsRoute } from '../components/DirectionsRoute'
+import { ExploreMapScreen } from './ExploreMapScreen'
 
 interface SelectedPlace {
   id: string
@@ -155,6 +156,16 @@ export function OverviewMapScreen() {
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
+  // Explore mode (2026-07-30) replaces the old plain "No plan yet" banner.
+  // Safe as an early return here specifically because every hook in this
+  // component (useState/useTripDays/useCorridorStops/useDayPlaces/the
+  // routePoints useMemo above) has already run by this line — none follow
+  // it, so this doesn't violate rules of hooks. It just means routePoints
+  // gets computed over empty days/places and discarded while idle.
+  if (planStatus === 'idle') {
+    return <ExploreMapScreen tripId={tripId} trip={trip} />
+  }
+
   return (
     <div className="flex h-full w-full flex-col">
       {hasPlan && (
@@ -209,15 +220,6 @@ export function OverviewMapScreen() {
           addableStops={addableCorridorStops}
           onClose={() => setReorderOpen(false)}
         />
-      )}
-
-      {planStatus === 'idle' && (
-        <p
-          data-testid="map-idle-banner"
-          className="border-b border-neutral-200 bg-white p-3 text-center text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
-        >
-          No plan yet — head to Trip setup to generate one.
-        </p>
       )}
 
       {(planStatus === 'pending' || planStatus === 'generating') && (

@@ -69,13 +69,14 @@ test('request changes flow submits a replan with locked days preserved', async (
   await expect(page.getByTestId('change-request-text')).toHaveCount(0)
 })
 
-test('map tab shows an idle banner and no header stats before a plan exists', async ({
+test('map tab shows explore mode and no header stats before a plan exists', async ({
   page,
 }) => {
   await getTripId(page)
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-idle-banner').waitFor()
+  await page.getByTestId('explore-map-screen').waitFor()
+  await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
 
   await expect(page.getByTestId('map-header')).toHaveCount(0)
   await expect(page.getByTestId('request-changes-button')).toHaveCount(0)

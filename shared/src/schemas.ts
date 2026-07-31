@@ -95,6 +95,13 @@ export const planMetaSchema = z.object({
       skeleton: z.unknown(),
     })
     .optional(),
+  // Explore mode's own busy guard (2026-07-30) — deliberately separate from
+  // `status` above: running the cheap highlights-only curation must not
+  // flip the trip out of 'idle' (that's what keeps the Map tab showing the
+  // explore screen instead of a "generating" banner), but two devices on a
+  // shared trip clicking "Find great stops" at the same moment still
+  // shouldn't both pay for the call. Absent/'idle' outside a run.
+  exploreStatus: z.enum(['idle', 'generating']).optional(),
 })
 
 export const tripSchema = z.object({
@@ -183,10 +190,33 @@ export const tripDaySchema = z.object({
 // autocomplete alone doesn't resolve one), and `linkedDayIds` may be empty
 // (a stop with no day yet is exactly what "not yet reconciled into the
 // plan" means — that reconciliation is phase 4's job, not this schema's).
+//
+// Explore mode (2026-07-30) adds a fifth source and a fifth status:
+// 'candidate', a suggestion from the cheap, repeatable highlights-only
+// curation (or a rescan run before any plan exists) that a traveler hasn't
+// weighed in on yet — distinct from 'proposed', which specifically means "a
+// rescan finding on an already-generated trip." A candidate carries
+// `priority` (Claude's own must-see/worth-a-detour/nice-if-convenient
+// call), `region` (its source region label, for grouping in the explore
+// list — absent for a rescan find, which has no region context), and `rank`
+// (position within its priority tier, swapped pairwise by the up/down vote
+// buttons — tiers are compared independently, not against each other).
+// Committing explore mode reads every 'candidate' and 'locked' stop back
+// into a highlights payload for the real generation to seed from (see
+// buildRegionHighlightsFromCandidates in functions/src/exploreCandidates.ts)
+// — 'locked' already means "the traveler wants this in the route" whether
+// it came from explore mode or a manual pin, so both count.
 export const corridorStopStatusSchema = z.enum([
   'proposed',
   'committed',
   'locked',
+  'candidate',
+])
+
+export const corridorStopPrioritySchema = z.enum([
+  'must-see',
+  'worth-a-detour',
+  'nice-if-convenient',
 ])
 
 export const corridorStopSchema = z.object({
@@ -197,6 +227,11 @@ export const corridorStopSchema = z.object({
   why: z.string().optional(),
   status: corridorStopStatusSchema,
   linkedDayIds: z.array(z.string()),
+  // Explore-mode-only fields (see the doc comment above) — undefined for
+  // every other status.
+  priority: corridorStopPrioritySchema.optional(),
+  region: z.string().optional(),
+  rank: z.number().optional(),
 })
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per
@@ -406,6 +441,7 @@ export type OvernightStop = z.infer<typeof overnightStopSchema>
 export type DriveLeg = z.infer<typeof driveLegSchema>
 export type TripDay = z.infer<typeof tripDaySchema>
 export type CorridorStopStatus = z.infer<typeof corridorStopStatusSchema>
+export type CorridorStopPriority = z.infer<typeof corridorStopPrioritySchema>
 export type CorridorStop = z.infer<typeof corridorStopSchema>
 export type ReconcileDayChange = z.infer<typeof reconcileDayChangeSchema>
 export type ActivityCategory = z.infer<typeof activityCategorySchema>

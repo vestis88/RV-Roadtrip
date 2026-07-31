@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react'
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
+import { useState } from 'react'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
+import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
-import { db } from '../lib/firebase'
 import { PRESET_INTERESTS } from '../lib/interests'
+import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { updateTripSettings } from '../lib/updateTripSettings'
 
 interface SettingsScreenProps {
@@ -13,10 +13,16 @@ interface SettingsScreenProps {
   trip: Trip
 }
 
+const GENERATE_LABEL: Record<'idle' | 'stale' | 'error', string> = {
+  idle: 'Generate plan',
+  stale: 'Re-plan trip',
+  error: 'Retry',
+}
+
 export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
   const [submitting, setSubmitting] = useState(false)
-  const submittingRef = useRef(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
@@ -43,26 +49,12 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     commit({ travelers: settings.travelers.filter((_, i) => i !== index) })
   }
 
-  async function generatePlan(event: React.MouseEvent<HTMLButtonElement>) {
-    // Debounce guard: rapid clicks can fire faster than React re-renders a
-    // `disabled` prop, and faster than the Firestore round-trip that flips
-    // trip.planMeta.status away from idle/stale (which is what normally
-    // hides this button) — so disable the actual DOM node synchronously,
-    // in the same tick as the click, rather than waiting on a render.
-    const button = event.currentTarget
-    if (submittingRef.current || button.disabled) return
-    submittingRef.current = true
-    button.disabled = true
+  async function confirmGeneratePlan() {
     setSubmitting(true)
     try {
-      await addDoc(collection(db, 'planRequests'), {
-        tripId,
-        kind: 'full',
-        status: 'pending',
-        createdAt: serverTimestamp(),
-      })
+      await submitPlanRequest(tripId, 'full')
+      setConfirmOpen(false)
     } finally {
-      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -235,37 +227,17 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
 
       <div className="card p-4">
         <div className="flex flex-wrap items-center gap-3">
-          {trip.planMeta.status === 'idle' && (
+          {(trip.planMeta.status === 'idle' ||
+            trip.planMeta.status === 'stale' ||
+            trip.planMeta.status === 'error') && (
             <button
               type="button"
               data-testid="generate-plan-button"
-              onClick={generatePlan}
+              onClick={() => setConfirmOpen(true)}
               disabled={submitting}
               className="btn btn-primary"
             >
-              Generate plan
-            </button>
-          )}
-          {trip.planMeta.status === 'stale' && (
-            <button
-              type="button"
-              data-testid="generate-plan-button"
-              onClick={generatePlan}
-              disabled={submitting}
-              className="btn btn-primary"
-            >
-              Re-plan trip
-            </button>
-          )}
-          {trip.planMeta.status === 'error' && (
-            <button
-              type="button"
-              data-testid="generate-plan-button"
-              onClick={generatePlan}
-              disabled={submitting}
-              className="btn btn-primary"
-            >
-              Retry
+              {GENERATE_LABEL[trip.planMeta.status]}
             </button>
           )}
           <span className="chip chip-neutral" data-testid="plan-status">
@@ -295,6 +267,25 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           </p>
         )}
       </div>
+
+      {confirmOpen && (
+        <ConfirmGenerateDialog
+          title={
+            trip.planMeta.status === 'idle'
+              ? 'Generate the full day-by-day plan?'
+              : 'Regenerate the full day-by-day plan?'
+          }
+          description={
+            trip.planMeta.status === 'idle'
+              ? "This fills in every day's route, activities, and restaurants — the expensive step. If you'd rather find the stops worth building around first without paying for full detail, head to the Map tab and explore before generating."
+              : 'This replaces every day from scratch — a full regeneration, not an incremental update to just what changed.'
+          }
+          confirmLabel={GENERATE_LABEL[trip.planMeta.status as 'idle' | 'stale' | 'error']}
+          submitting={submitting}
+          onConfirm={() => void confirmGeneratePlan()}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
 
       <p
         className="text-xs text-neutral-400 dark:text-neutral-500"

@@ -31,7 +31,8 @@ test('hammering the Generate button creates exactly one plan request', async ({
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
 
-  await page.getByTestId('generate-plan-button').waitFor()
+  await page.getByTestId('generate-plan-button').click()
+  await page.getByTestId('confirm-generate-dialog').waitFor()
   // Simulate a real rapid multi-click: dispatch several native clicks back
   // to back within a single browser tick. Driving Playwright's own
   // locator.click() concurrently doesn't model this faithfully — its
@@ -40,7 +41,7 @@ test('hammering the Generate button creates exactly one plan request', async ({
   // against.
   await evaluateWithRetry(page, () => {
     const button = document.querySelector<HTMLButtonElement>(
-      '[data-testid="generate-plan-button"]',
+      '[data-testid="confirm-generate-confirm"]',
     )
     for (let i = 0; i < 5; i++) button?.click()
   })

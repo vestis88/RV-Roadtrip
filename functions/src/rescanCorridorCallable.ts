@@ -10,13 +10,23 @@ import {
 
 /**
  * "Rescan this area" (phase 3 of the persistent-corridor overhaul): searches
- * near `center` and writes each surviving find as a new `proposed`
- * corridorStops doc, unlinked to any day — reviewing/locking/discarding a
- * proposed stop is a plain client-side Firestore write (see
- * src/lib/corridorStopActions.ts), same as markSelected. This never touches
- * `committed`/`locked` stops or the days collection, so it needs none of
- * generatePlan.ts/replanTrip.ts's busy-guard machinery — concurrent rescans
- * are merely redundant, not corrupting.
+ * near `center` and writes each surviving find as a new corridorStops doc,
+ * unlinked to any day — reviewing/locking/discarding a proposed stop is a
+ * plain client-side Firestore write (see src/lib/corridorStopActions.ts),
+ * same as markSelected. This never touches `committed`/`locked` stops or the
+ * days collection, so it needs none of generatePlan.ts/replanTrip.ts's
+ * busy-guard machinery — concurrent rescans are merely redundant, not
+ * corrupting.
+ *
+ * Explore mode (2026-07-30): a rescan run before any plan exists
+ * (`planMeta.status === 'idle'`) writes `candidate` instead of `proposed` —
+ * same review-then-decide meaning, but grouped with the rest of explore
+ * mode's finds rather than the post-generation corridor-editing surface a
+ * `proposed` stop implies. Appended to the end of the `worth-a-detour` tier
+ * (a rescan find has no region-level priority reasoning behind it the way a
+ * curated candidate does, so it isn't assumed must-see) — ranked after
+ * whatever's already there so it doesn't jump ahead of curated candidates
+ * the traveler hasn't reacted to yet.
  */
 export async function runRescanCorridor(
   tripId: string,
@@ -30,6 +40,7 @@ export async function runRescanCorridor(
     throw new HttpsError('not-found', 'Trip not found')
   }
   const trip = tripSnap.data() as Trip
+  const isExploring = trip.planMeta.status === 'idle'
 
   const finds = await generateRescanCandidates({
     center,
@@ -38,8 +49,18 @@ export async function runRescanCorridor(
     tripId,
   })
 
+  let nextRank = 0
+  if (isExploring && finds.length > 0) {
+    const existingTierSnap = await tripRef
+      .collection('corridorStops')
+      .where('status', '==', 'candidate')
+      .where('priority', '==', 'worth-a-detour')
+      .get()
+    nextRank = existingTierSnap.size
+  }
+
   await Promise.all(
-    finds.map((find) =>
+    finds.map((find, i) =>
       tripRef.collection('corridorStops').add(
         corridorStopSchema.parse({
           name: find.name,
@@ -47,8 +68,11 @@ export async function runRescanCorridor(
           lng: find.lng,
           country: find.country,
           why: find.why,
-          status: 'proposed',
+          status: isExploring ? 'candidate' : 'proposed',
           linkedDayIds: [],
+          ...(isExploring
+            ? { priority: 'worth-a-detour' as const, rank: nextRank + i }
+            : {}),
         }),
       ),
     ),

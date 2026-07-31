@@ -8,6 +8,7 @@ import {
   activitySchema,
   restaurantSchema,
   tripDaySchema,
+  type CorridorStop,
   type NamedPoint,
   type Trip,
   type TripDay,
@@ -19,7 +20,14 @@ import { runReconcileCorridor } from './corridorReconciliation.js'
 import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
-import { claudeApiKey, planTrip } from './prompts/planTrip.js'
+import {
+  claudeApiKey,
+  generateSkeletonFromHighlights,
+  planTrip,
+  type PlanTripProgress,
+} from './prompts/planTrip.js'
+import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
+import { buildRegionHighlightsFromCandidates } from './exploreCandidates.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
   describePlanTripProgress,
@@ -36,7 +44,16 @@ import {
 
 interface PlanRequestData {
   tripId: string
-  kind: 'full' | 'replan' | 'insertRestDay' | 'reconcileCorridor'
+  kind:
+    | 'full'
+    | 'replan'
+    | 'insertRestDay'
+    | 'reconcileCorridor'
+    // Explore mode's commit step (2026-07-30): seeds the real generation
+    // from the traveler's already-curated `candidate`/`locked` corridor
+    // stops instead of running the (Claude-costed) highlights phase again —
+    // see generateRealPlan's `highlights` param below.
+    | 'fromExploreCandidates'
   replanContext?: ReplanContext
   // "Add a rest day" (implemented 2026-07-28): a purely mechanical reschedule
   // — no Claude/Places call — routed through this trigger anyway so it shares
@@ -65,12 +82,23 @@ interface PlanRequestData {
  * attempt at these exact settings exists, the skeleton and any already-
  * resolved days are reused instead of redone — a retry only has to finish
  * whatever was left, not start over.
+ *
+ * `highlights`, when supplied (explore mode's commit step — see the
+ * 'fromExploreCandidates' branch below), skips planTrip's own highlights
+ * phase entirely and calls generateSkeletonFromHighlights directly with the
+ * traveler's already-curated candidates — the one Claude call this whole
+ * pipeline can actually avoid re-paying for. Folded into the checkpoint
+ * hash (not just `computeSettingsHash(trip)` alone): a checkpoint saved
+ * mid-explore-commit must never be resumed by a plain 'full' retry (or vice
+ * versa) at the same settings — they'd produce different skeletons from the
+ * same hash otherwise.
  */
 export async function generateRealPlan(
   trip: Trip,
   tripRef: DocumentReference,
+  highlights?: RegionHighlightsResponse,
 ): Promise<GeneratedDay[]> {
-  const settingsHash = computeSettingsHash(trip)
+  const settingsHash = computeSettingsHash(trip) + (highlights ? ':explore' : '')
   const checkpoint = await loadCheckpoint(tripRef, trip, settingsHash)
 
   let skeleton
@@ -85,18 +113,27 @@ export async function generateRealPlan(
       ? { name: lastOvernight.name, lat: lastOvernight.lat, lng: lastOvernight.lng }
       : trip.settings.startPoint
   } else {
-    skeleton = await planTrip({
-      settings: trip.settings,
-      notesFreeText: trip.notes.freeText,
-      tripId: tripRef.id,
-      onProgress: (progress) => {
-        tripRef
-          .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
-          .catch((error: unknown) =>
-            console.error('Failed to report planTrip progress', error),
-          )
-      },
-    })
+    const onProgress = (progress: PlanTripProgress) => {
+      tripRef
+        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+        .catch((error: unknown) =>
+          console.error('Failed to report planTrip progress', error),
+        )
+    }
+    skeleton = highlights
+      ? await generateSkeletonFromHighlights({
+          settings: trip.settings,
+          notesFreeText: trip.notes.freeText,
+          highlights,
+          tripId: tripRef.id,
+          onProgress,
+        })
+      : await planTrip({
+          settings: trip.settings,
+          notesFreeText: trip.notes.freeText,
+          tripId: tripRef.id,
+          onProgress,
+        })
     await saveSkeletonCheckpoint(tripRef, settingsHash, skeleton)
     resumedDays = []
     startLocation = trip.settings.startPoint
@@ -357,7 +394,23 @@ export const generatePlan = onDocumentCreated(
       const tripSnap = await tripRef.get()
       const trip = tripSnap.data() as Trip
 
-      const days = await generateRealPlan(trip, tripRef)
+      let highlights: RegionHighlightsResponse | undefined
+      if (request.kind === 'fromExploreCandidates') {
+        const candidatesSnap = await tripRef
+          .collection('corridorStops')
+          .where('status', 'in', ['candidate', 'locked'])
+          .get()
+        highlights = buildRegionHighlightsFromCandidates(
+          candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
+        )
+        if (highlights.regions.length === 0) {
+          throw new Error(
+            'No candidate stops to build a plan from — explore a few first.',
+          )
+        }
+      }
+
+      const days = await generateRealPlan(trip, tripRef, highlights)
 
       // Structural check only: no day may exceed the traveler's own
       // maxDriveHoursPerDay by more than the tolerance, and rest days stay
