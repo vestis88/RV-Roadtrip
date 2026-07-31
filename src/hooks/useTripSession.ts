@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import { ensureSignedIn, functions } from '../lib/firebase'
+import type { TripSettings } from '@rv/shared'
+import { db, ensureSignedIn, functions } from '../lib/firebase'
 
 export function useTripSession() {
   const [tripId, setTripId] = useState<string | null>(null)
@@ -38,6 +40,21 @@ export function useTripSession() {
 
       if (storedTripId) {
         setTripId(storedTripId)
+        // Self-heal: a trip created before the users/{uid}/trips reverse
+        // index existed (or any other write path that landed membership
+        // without it) is otherwise permanently invisible in "My trips" —
+        // reported as an old trip vanishing from the switcher while still
+        // being the active trip. Only ever fills in a MISSING doc, never
+        // overwrites an existing one's real joinedAt.
+        try {
+          const reverseIndexRef = doc(db, 'users', user.uid, 'trips', storedTripId)
+          const reverseIndexSnap = await getDoc(reverseIndexRef)
+          if (!reverseIndexSnap.exists()) {
+            await setDoc(reverseIndexRef, { joinedAt: new Date().toISOString() })
+          }
+        } catch (error) {
+          console.error('Failed to backfill trip reverse index', error)
+        }
         return
       }
 
@@ -65,13 +82,32 @@ export function useTripSession() {
     setTripId(id)
   }
 
-  /** Creates a brand-new trip and switches to it immediately. */
-  async function startNewTrip(): Promise<string> {
+  /**
+   * Creates a brand-new trip and switches to it immediately. `inheritSettings`
+   * (typically the previous trip's own settings) carries every travel-setup
+   * field over except `startPoint`/`endPoint`, which stay the fresh trip's own
+   * defaults — a new trip almost always means a new route, but the vehicle,
+   * travelers, interests, and pacing preferences are usually the same
+   * household planning it. A plain client-side patch after creation rather
+   * than a new callable parameter — `createTrip` stays the same one-step
+   * "make me a blank trip" primitive `joinTrip`'s reverse-index write and
+   * every existing test already exercise; only the caller changes.
+   */
+  async function startNewTrip(inheritSettings?: TripSettings): Promise<string> {
     const create = httpsCallable<void, { tripId: string; shareCode: string }>(
       functions,
       'createTrip',
     )
     const { data } = await create()
+    if (inheritSettings) {
+      const carriedOverKeys = Object.keys(inheritSettings).filter(
+        (key) => key !== 'startPoint' && key !== 'endPoint',
+      ) as Array<keyof TripSettings>
+      const updates = Object.fromEntries(
+        carriedOverKeys.map((key) => [`settings.${key}`, inheritSettings[key]]),
+      )
+      await updateDoc(doc(db, 'trips', data.tripId), updates)
+    }
     localStorage.setItem('tripId', data.tripId)
     setTripId(data.tripId)
     return data.tripId

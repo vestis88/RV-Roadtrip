@@ -218,10 +218,28 @@ describe('users/{uid}/trips', () => {
     await assertFails(getDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID)))
   })
 
-  it('denies any client write (must go through createTrip/joinTrip)', async () => {
+  it('denies writing a reverse-index entry for a trip the caller is not a member of', async () => {
     const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
     await assertFails(
       setDoc(doc(db, 'users', MEMBER_UID, 'trips', 'someOtherTripId'), {
+        joinedAt: '2026-01-01T00:00:00Z',
+      }),
+    )
+  })
+
+  it("denies writing into another user's trip list even for a trip the caller belongs to", async () => {
+    const db = testEnv.authenticatedContext(OTHER_MEMBER_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID), {
+        joinedAt: '2026-01-01T00:00:00Z',
+      }),
+    )
+  })
+
+  it('lets a member self-heal a missing reverse-index entry for their own trip (useTripSession.ts backfill)', async () => {
+    const db = testEnv.authenticatedContext(OTHER_MEMBER_UID).firestore()
+    await assertSucceeds(
+      setDoc(doc(db, 'users', OTHER_MEMBER_UID, 'trips', TRIP_ID), {
         joinedAt: '2026-01-01T00:00:00Z',
       }),
     )

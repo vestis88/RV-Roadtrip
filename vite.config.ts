@@ -22,8 +22,14 @@ export default defineConfig({
         short_name: 'RV Trip',
         description:
           'Plan and execute a European RV road trip with the family.',
-        theme_color: '#0f764d',
-        background_color: '#0f764d',
+        // Matches the app's actual monochrome dark palette (neutral-950,
+        // src/index.css) — this used to be a leftover green (#0f764d) from
+        // before the 2026-07-27 palette redesign, never updated. Governs
+        // the install-time splash screen background and OS-level PWA
+        // chrome, so a mismatch here reads as a flash of the wrong color on
+        // launch even once the in-app CSS is fully correct.
+        theme_color: '#0a0a0a',
+        background_color: '#0a0a0a',
         display: 'standalone',
         start_url: '/',
         icons: [

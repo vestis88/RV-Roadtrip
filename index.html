@@ -5,7 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#171717" />
+    <!-- #0a0a0a matches Tailwind's neutral-950 — the dark-mode shade
+         html/body and .surface actually render (src/index.css), not the
+         neutral-900 (#171717) this used to say. In a plain (non-installed)
+         Safari tab, iOS's real status bar (clock/battery) still follows the
+         phone's own system Appearance setting, not this tag — only once
+         added to the home screen does apple-mobile-web-app-status-bar-style
+         below take over that area. -->
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>RV Road Trip Planner</title>
   </head>
   <body>

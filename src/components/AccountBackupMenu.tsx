@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
-import { onAuthStateChanged, type User } from 'firebase/auth'
+import { onAuthStateChanged, type AuthError, type User } from 'firebase/auth'
 import { auth } from '../lib/firebase'
-import { linkGoogleAccount } from '../lib/accountBackup'
+import {
+  completePendingGoogleLinkRedirect,
+  linkGoogleAccount,
+  type LinkGoogleResult,
+} from '../lib/accountBackup'
 
 function googleEmail(user: User | null): string | null {
   return (
@@ -9,12 +13,49 @@ function googleEmail(user: User | null): string | null {
   )
 }
 
+/** The one error code here worth a distinct message: it means the Google
+ * sign-in provider itself isn't turned on for this Firebase project (an
+ * admin/console setting, not something a retry ever fixes) — see
+ * master_plan.md's account-linking entry for the one-time console step. */
+function describeLinkError(error: unknown): string {
+  const code = (error as AuthError | undefined)?.code
+  if (code === 'auth/operation-not-allowed') {
+    return "Google sign-in isn't enabled for this app yet. Try again later, or let the trip owner know."
+  }
+  return 'Could not link Google account. Please try again.'
+}
+
 export function AccountBackupMenu() {
   const [user, setUser] = useState<User | null>(auth.currentUser)
   const [linking, setLinking] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
+  function handleResult(result: LinkGoogleResult) {
+    if (result.status === 'merged') {
+      // The uid this whole app is keyed on (useTripSession's uid,
+      // useMyTrips, every localStorage read) just changed underneath us —
+      // a reload is the simplest way to land every hook consistently on
+      // the new identity, same tradeoff already made for a deployed
+      // service-worker update (see main.tsx).
+      window.location.reload()
+    }
+  }
+
   useEffect(() => onAuthStateChanged(auth, setUser), [])
+
+  // Finishes a link that fell back to a full-page redirect (mobile Safari,
+  // especially a standalone/home-screen PWA, frequently can't complete an
+  // OAuth popup) — a no-op on every load that isn't that return trip.
+  useEffect(() => {
+    completePendingGoogleLinkRedirect()
+      .then((result) => {
+        if (result) handleResult(result)
+      })
+      .catch((error: unknown) => {
+        console.error('Google account link (redirect) failed', error)
+        setErrorMessage(describeLinkError(error))
+      })
+  }, [])
 
   const linkedEmail = googleEmail(user)
 
@@ -23,19 +64,13 @@ export function AccountBackupMenu() {
     setErrorMessage('')
     try {
       const result = await linkGoogleAccount()
-      if (result.status === 'merged') {
-        // The uid this whole app is keyed on (useTripSession's uid,
-        // useMyTrips, every localStorage read) just changed underneath us
-        // — a reload is the simplest way to land every hook consistently
-        // on the new identity, same tradeoff already made for a deployed
-        // service-worker update (see main.tsx).
-        window.location.reload()
-        return
-      }
+      handleResult(result)
+      // 'redirecting' navigates the page away before this line would ever
+      // run; 'linked'/'cancelled' just need the button re-enabled.
       setLinking(false)
     } catch (error) {
       console.error('Google account link failed', error)
-      setErrorMessage('Could not link Google account. Please try again.')
+      setErrorMessage(describeLinkError(error))
       setLinking(false)
     }
   }

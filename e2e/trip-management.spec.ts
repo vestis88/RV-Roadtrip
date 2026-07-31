@@ -124,3 +124,107 @@ test('joining a trip by share code adds it to the trip switcher without losing t
   // The ?join= param doesn't linger to re-hijack a later reload.
   expect(page.url()).not.toContain('join=')
 })
+
+test('a new trip inherits the previous trip\'s settings, except start/finish points', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!firstTripId) throw new Error('tripId missing from localStorage')
+
+  await adminDb
+    .collection('trips')
+    .doc(firstTripId)
+    .update({
+      'settings.interests': ['hiking', 'museums'],
+      'settings.restDayFrequency': 5,
+      'settings.maxDriveHoursPerDay': 6,
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
+
+  await page.getByTestId('trip-switcher-toggle').click()
+  await page.getByTestId('new-trip-button').click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .not.toBe(firstTripId)
+  const secondTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+
+  const secondTripSnap = await adminDb.collection('trips').doc(secondTripId!).get()
+  const settings = secondTripSnap.data()?.settings
+  expect(settings.interests).toEqual(['hiking', 'museums'])
+  expect(settings.restDayFrequency).toBe(5)
+  expect(settings.maxDriveHoursPerDay).toBe(6)
+  // Origin/destination reset to the fresh trip's own blank defaults rather
+  // than carrying over the previous trip's route.
+  expect(settings.startPoint.name).toBe('')
+  expect(settings.endPoint.name).toBe('')
+})
+
+test('deleting a trip removes it from the switcher; deleting the active trip switches away', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+
+  await page.getByTestId('trip-switcher-toggle').click()
+  await page.getByTestId('new-trip-button').click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .not.toBe(firstTripId)
+  const secondTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+
+  await page.getByTestId('trip-switcher-toggle').click()
+  await expect(page.getByTestId('trip-switcher')).toContainText('My trips (2)')
+
+  // Delete the non-active first trip — the switcher should just drop it.
+  await page.getByTestId(`trip-delete-${firstTripId}`).click()
+  await page.getByTestId(`trip-delete-confirm-${firstTripId}`).click()
+  await expect(page.getByTestId('trip-switcher')).toContainText('My trips (1)')
+  await expect(
+    page.getByTestId(`trip-switcher-item-${firstTripId}`),
+  ).toHaveCount(0)
+  await expect(
+    (await adminDb.collection('trips').doc(firstTripId!).get()).exists,
+  ).toBe(false)
+
+  // Delete the now-active (second) trip — must land somewhere real, not a
+  // trip that no longer exists.
+  await page.getByTestId(`trip-delete-${secondTripId}`).click()
+  await page.getByTestId(`trip-delete-confirm-${secondTripId}`).click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .not.toBe(secondTripId)
+  await page.getByTestId('trip-name-input').waitFor()
+})
+
+test('a trip created before the reverse index existed still shows up in "My trips"', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  // Simulate a trip whose reverse-index write never happened (an old trip
+  // predating that feature): delete the index doc but leave everything
+  // else — membership, the active trip itself — untouched.
+  const membersSnap = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('members')
+    .get()
+  const memberUid = membersSnap.docs[0]?.id
+  if (!memberUid) throw new Error('no member doc found on the seeded trip')
+  await adminDb.collection('users').doc(memberUid).collection('trips').doc(tripId).delete()
+
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await page.getByTestId('trip-switcher-toggle').click()
+  await expect(page.getByTestId('trip-switcher')).toContainText('My trips (1)', {
+    timeout: 10_000,
+  })
+  await expect(page.getByTestId(`trip-switcher-item-${tripId}`)).toBeVisible()
+})

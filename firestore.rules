@@ -47,11 +47,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Reverse index for "my trips" — written by createTrip/joinTrip via the
-    // Admin SDK (bypasses these rules), same pattern as trips/{tripId}/members.
+    // Reverse index for "my trips" — normally written by createTrip/joinTrip/
+    // deleteTrip via the Admin SDK (bypasses these rules), same pattern as
+    // trips/{tripId}/members. Client-side self-write is allowed too, but
+    // only for a trip the caller is already a genuine member of (isMember,
+    // an Admin-SDK-controlled fact) and only their own uid's path — this
+    // isn't a new capability, it's a backfill for trips created before this
+    // reverse index existed (or any other write that landed membership
+    // without it), which useTripSession.ts performs client-side the first
+    // time it notices one missing.
     match /users/{uid}/trips/{tripId} {
       allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
+      allow write: if request.auth != null && request.auth.uid == uid && isMember(tripId);
     }
 
     match /planRequests/{requestId} {

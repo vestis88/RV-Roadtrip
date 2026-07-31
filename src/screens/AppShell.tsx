@@ -12,6 +12,7 @@ import { useExecutionMode } from '../hooks/useExecutionMode'
 import { TripContext } from '../context/TripContext'
 import { ExecutionModePrompt } from '../components/ExecutionModePrompt'
 import { TripSwitcher } from '../components/TripSwitcher'
+import { deleteTrip as deleteTripCallable } from '../lib/deleteTrip'
 
 function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
   const { days } = useTripDays(tripId)
@@ -60,11 +61,27 @@ function AppShell() {
   async function handleCreateTrip() {
     setCreatingTrip(true)
     try {
-      await startNewTrip()
+      await startNewTrip(trip?.settings)
     } catch (error) {
       console.error('startNewTrip failed', error)
     } finally {
       setCreatingTrip(false)
+    }
+  }
+
+  async function handleDeleteTrip(idToDelete: string) {
+    await deleteTripCallable(idToDelete)
+    if (idToDelete !== tripId) return
+    // Deleted the active trip — land somewhere real rather than an
+    // AppShell stuck loading a trip that no longer exists. Prefer a
+    // remaining trip over minting a fresh one, using the switcher's own
+    // already-fetched list (its own onSnapshot will drop the deleted trip
+    // shortly after, but that race shouldn't decide what happens next).
+    const remaining = myTrips.filter((t) => t.id !== idToDelete)
+    if (remaining.length > 0) {
+      switchTrip(remaining[0].id)
+    } else {
+      await startNewTrip()
     }
   }
 
@@ -83,9 +100,20 @@ function AppShell() {
   // Re-scrolling the actually-focused element once the visual viewport
   // settles after the keyboard animation fixes it for any field, not just
   // that one.
+  //
+  // Only once per newly-focused element (lastScrolledRef), not on every
+  // resize: PlaceAutocompleteElement expands into its own full-screen
+  // mobile suggestion overlay once the traveler starts typing, which fires
+  // a further wave of visualViewport resizes on its own. Re-running this on
+  // every one of those fought the overlay for scroll position — reported as
+  // the screen "going black" (Google's own overlay, momentarily off-screen
+  // mid fight) requiring a manual scroll up to recover. The field/keyboard
+  // case is still exactly one resize per focus, so this doesn't lose the
+  // original fix — it just stops repeating it against the same element.
   useEffect(() => {
     const viewport = window.visualViewport
     if (!viewport) return
+    let lastScrolled: Element | null = null
     function scrollFocusedFieldIntoView() {
       // The Places autocomplete fields (PlaceAutocompleteInput) render
       // Google's PlaceAutocompleteElement web component, whose actual
@@ -96,7 +124,8 @@ function AppShell() {
       while (active?.shadowRoot?.activeElement) {
         active = active.shadowRoot.activeElement
       }
-      if (active instanceof HTMLElement) {
+      if (active instanceof HTMLElement && active !== lastScrolled) {
+        lastScrolled = active
         active.scrollIntoView({ block: 'center', behavior: 'smooth' })
       }
     }
@@ -173,6 +202,7 @@ function AppShell() {
                   currentTripId={tripId}
                   onSwitch={switchTrip}
                   onCreate={() => handleCreateTrip().catch(console.error)}
+                  onDelete={handleDeleteTrip}
                   creating={creatingTrip}
                 />
               </div>
