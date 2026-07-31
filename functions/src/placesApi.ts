@@ -208,6 +208,55 @@ async function resolveOne(
 }
 
 /**
+ * Same per-item resolution as resolveOne (text search first, nearby-search
+ * fallback second, first not-yet-excluded quality match wins), but resolves
+ * a whole batch of items at once. The text search — always run for every
+ * item — fires for the whole batch in parallel instead of one round trip
+ * per item; only the (typically rare) nearby-search fallback stays
+ * sequential, since which items still need it, and which ids are already
+ * taken, both depend on how earlier items in the batch resolved. Picking is
+ * still done strictly in `items` order so the resulting excludeIds
+ * mutations — and thus which item "wins" a contested place — match
+ * resolveOne's own one-at-a-time behavior exactly, just with the network
+ * calls overlapped.
+ */
+async function resolveBatch(
+  items: { query: string; fallbackType: string | undefined }[],
+  near: LatLng,
+  excludeIds: Set<string>,
+  apiKey: string,
+): Promise<(PlaceCandidate | null)[]> {
+  const textResultsByIndex = await Promise.all(
+    items.map((item) => textSearch(item.query, near, apiKey)),
+  )
+
+  const picks: (PlaceCandidate | null)[] = new Array(items.length).fill(null)
+  for (let i = 0; i < items.length; i++) {
+    const match = textResultsByIndex[i].find(
+      (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
+    )
+    if (match) {
+      excludeIds.add(match.id)
+      picks[i] = match
+    }
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    if (picks[i]) continue
+    const nearbyResults = await nearbySearch(items[i].fallbackType, near, apiKey)
+    const match = nearbyResults.find(
+      (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
+    )
+    if (match) {
+      excludeIds.add(match.id)
+      picks[i] = match
+    }
+  }
+
+  return picks
+}
+
+/**
  * Resolves a free-text place query (e.g. "Lillehammer Camping, Lillehammer,
  * NO") to coordinates, biased near a reference point. Unlike resolveOne,
  * this applies no quality bar — a town/campsite name isn't a "tourist
@@ -309,14 +358,18 @@ export async function enrichActivities(
   const excludeIds = new Set<string>()
   const resolved: Activity[] = []
 
-  for (const item of proposed) {
-    const match = await resolveOne(
-      `${item.name}, ${item.town}`,
-      ACTIVITY_PLACE_TYPE[item.category],
-      near,
-      excludeIds,
-      apiKey,
-    )
+  const matches = await resolveBatch(
+    proposed.map((item) => ({
+      query: `${item.name}, ${item.town}`,
+      fallbackType: ACTIVITY_PLACE_TYPE[item.category],
+    })),
+    near,
+    excludeIds,
+    apiKey,
+  )
+  for (let i = 0; i < proposed.length; i++) {
+    const match = matches[i]
+    const item = proposed[i]
     if (match) {
       resolved.push({
         name: match.name,
@@ -432,14 +485,18 @@ export async function enrichRestaurantsForMeal(
 
   const resolved: Restaurant[] = []
 
-  for (const item of proposed) {
-    const match = await resolveOne(
-      `${item.name}, ${item.town}`,
-      MEAL_PLACE_TYPE[meal],
-      near,
-      excludeIds,
-      apiKey,
-    )
+  const matches = await resolveBatch(
+    proposed.map((item) => ({
+      query: `${item.name}, ${item.town}`,
+      fallbackType: MEAL_PLACE_TYPE[meal],
+    })),
+    near,
+    excludeIds,
+    apiKey,
+  )
+  for (let i = 0; i < proposed.length; i++) {
+    const match = matches[i]
+    const item = proposed[i]
     if (match) {
       resolved.push({
         name: match.name,
