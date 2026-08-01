@@ -29,6 +29,7 @@ import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
+import { DirectionsRoute } from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { hasRoute } from '../lib/validateRoute'
 
@@ -79,6 +80,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   })
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // Distinguishes "never searched" from "searched and genuinely found
+  // nothing" for the empty-state message below — both look identical
+  // otherwise (zero candidates), but a short/local trip legitimately
+  // producing no highlights (see planTripPrompt.ts's own doc comment: "It
+  // is fine — expected, even — for a short or local trip to have... no
+  // regions with a genuine highlight") reads as broken without this,
+  // especially right after the button visibly ran.
+  const [searchedEmpty, setSearchedEmpty] = useState(false)
+  const [routeError, setRouteError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -113,6 +123,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
 
   async function runFindStops() {
     setGenError(null)
+    setSearchedEmpty(false)
     // See src/lib/validateRoute.ts's own doc comment: a blank start/finish
     // point still looks like a real (0, 0) coordinate downstream, so this
     // must be caught here rather than relying on the Claude call itself to
@@ -123,7 +134,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
     setGenerating(true)
     try {
-      await generateExploreHighlights(tripId)
+      const { candidateCount } = await generateExploreHighlights(tripId)
+      if (candidateCount === 0) setSearchedEmpty(true)
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
       setGenError('Could not find stops right now — please try again.')
@@ -195,6 +207,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         />
       )}
 
+      {routeError && (
+        <p
+          data-testid="explore-route-error-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-center text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          Showing a straight line instead of the real route — the driving
+          directions request failed ({routeError}).
+        </p>
+      )}
+
       <div className="relative" style={{ height: '45vh', minHeight: '260px' }} data-testid="explore-map-canvas">
         {apiKey ? (
           <GoogleMap
@@ -210,6 +232,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               setCenter(event.detail.center)
             }}
           >
+            <DirectionsRoute points={backbone} onError={setRouteError} />
             <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
             <AdvancedMarker
               position={{ lat: trip.settings.startPoint.lat, lng: trip.settings.startPoint.lng }}
@@ -253,9 +276,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="explore-candidate-list">
         {candidates.length === 0 ? (
-          <p className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-            No stops yet — tap "Find great stops" to get suggestions for your
-            route, or drop a pin / rescan an area on the map above.
+          <p
+            className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400"
+            data-testid="explore-empty-state"
+          >
+            {searchedEmpty
+              ? 'Nothing stood out along this route — for a short or local trip, that can be the honest answer. Try "Rescan this area," describe what you\'re looking for with "Add stop," or drop a pin yourself.'
+              : 'No stops yet — tap "Find great stops" to get suggestions for your route, or drop a pin / rescan an area on the map above.'}
           </p>
         ) : (
           <div className="space-y-4">
