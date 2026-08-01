@@ -190,6 +190,79 @@ test('voting reorders within a priority tier, and lock/reject change status', as
     .toBe(false)
 })
 
+// Regression: "the promote/demote does not seem to work. Everything should
+// be possible to promote/demote" — a vote used to only swap rank inside one
+// tier, so the top and bottom stop of every tier had both buttons disabled
+// and nothing could ever change priority.
+test('promoting past the top of a tier moves the stop into the tier above', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+  await seedCandidate(tripId, {
+    name: 'Lillehammer',
+    priority: 'worth-a-detour',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const lillehammerId = (
+    await stops.where('name', '==', 'Lillehammer').limit(1).get()
+  ).docs[0].id
+
+  // Sole occupant of worth-a-detour: previously this button was disabled.
+  const up = page.getByTestId(`explore-candidate-up-${lillehammerId}`)
+  await expect(up).toBeEnabled()
+  await up.click()
+
+  await expect
+    .poll(async () => (await stops.doc(lillehammerId).get()).data()?.priority)
+    .toBe('must-see')
+
+  // Now must-see, it defines the route — so it reports as on-route rather
+  // than carrying a detour estimate.
+  await expect(
+    page.getByTestId(`explore-candidate-onroute-${lillehammerId}`),
+  ).toBeVisible()
+
+  // ...and demoting puts it back.
+  await page.getByTestId(`explore-candidate-down-${lillehammerId}`).click()
+  await expect
+    .poll(async () => (await stops.doc(lillehammerId).get()).data()?.priority)
+    .toBe('worth-a-detour')
+})
+
+test('the top of the first tier and the bottom of the last are the only immovable positions', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+  await seedCandidate(tripId, {
+    name: 'Lillehammer',
+    priority: 'nice-if-convenient',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  const lillehammerId = (
+    await stops.where('name', '==', 'Lillehammer').limit(1).get()
+  ).docs[0].id
+
+  await expect(page.getByTestId(`explore-candidate-up-${ottaId}`)).toBeDisabled()
+  await expect(page.getByTestId(`explore-candidate-down-${ottaId}`)).toBeEnabled()
+  await expect(
+    page.getByTestId(`explore-candidate-down-${lillehammerId}`),
+  ).toBeDisabled()
+  await expect(page.getByTestId(`explore-candidate-up-${lillehammerId}`)).toBeEnabled()
+})
+
 test('generate-full-plan requires confirmation, and only fires a planRequest on confirm', async ({
   page,
 }) => {

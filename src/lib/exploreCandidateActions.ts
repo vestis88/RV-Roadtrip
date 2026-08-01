@@ -1,37 +1,81 @@
-import { doc, writeBatch } from 'firebase/firestore'
+import { doc, updateDoc, writeBatch } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { CorridorStopPriority } from '@rv/shared'
 import { db, functions } from './firebase'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 
+/** Highest-priority tier first — the order the explore list renders in. */
+export const TIER_ORDER: CorridorStopPriority[] = [
+  'must-see',
+  'worth-a-detour',
+  'nice-if-convenient',
+]
+
 /**
- * Up/down voting (bringing back the old highlights-review panel's
- * re-ranked-priority-tiers behavior, 2026-07-30): tiers are ranked
- * independently, so a vote only ever swaps `rank` with the immediate
- * neighbor sharing the same `priority` — moving 'A' up past a
- * higher-priority tier isn't "voting", that's what locking/promoting a
- * stop into consideration is for. A plain client Firestore write, same as
- * every other corridor-stop action (src/lib/corridorStopActions.ts) —
- * firestore.rules already allows any member to write corridorStops.
+ * Promote/demote a candidate (2026-08-01: extended to cross tiers).
+ *
+ * The three tiers behave as ONE flat ordered list rather than three sealed
+ * ones: a vote moves the stop exactly one position, and if that position is
+ * across a tier boundary the stop changes `priority` to match where it
+ * landed. Originally a vote could only swap `rank` within its own tier,
+ * which left the top and bottom stop of every tier with both buttons dead —
+ * reported as "the promote/demote does not seem to work", since the tiers
+ * Claude produces are often small enough that many stops sit on a boundary,
+ * and there was no way at all to move a stop between tiers.
+ *
+ * Crossing keeps the stop adjacent to where it came from: promoting enters
+ * the tier above at its BOTTOM edge, demoting enters the tier below at its
+ * TOP edge. Rank is placed just past that edge (max+1 / min-1) rather than
+ * renumbering the destination tier — only ordering matters, so one write
+ * beats rewriting every sibling, and gaps/negatives sort fine.
+ *
+ * A plain client Firestore write, same as every other corridor-stop action
+ * (src/lib/corridorStopActions.ts) — firestore.rules already allows any
+ * member to write corridorStops.
  */
 export async function voteExploreCandidate(
   tripId: string,
-  candidatesInTier: CorridorStopWithId[],
+  grouped: Record<CorridorStopPriority, CorridorStopWithId[]>,
   stopId: string,
   direction: 'up' | 'down',
 ): Promise<void> {
-  const sorted = [...candidatesInTier].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0))
-  const index = sorted.findIndex((c) => c.id === stopId)
-  if (index === -1) return
-  const swapWithIndex = direction === 'up' ? index - 1 : index + 1
-  if (swapWithIndex < 0 || swapWithIndex >= sorted.length) return
+  const tierIndex = TIER_ORDER.findIndex((tier) =>
+    grouped[tier].some((candidate) => candidate.id === stopId),
+  )
+  if (tierIndex === -1) return
 
-  const a = sorted[index]
-  const b = sorted[swapWithIndex]
-  const batch = writeBatch(db)
-  batch.update(doc(db, 'trips', tripId, 'corridorStops', a.id), { rank: b.rank ?? 0 })
-  batch.update(doc(db, 'trips', tripId, 'corridorStops', b.id), { rank: a.rank ?? 0 })
-  await batch.commit()
+  // groupCandidatesByPriority already rank-sorts each tier.
+  const inTier = grouped[TIER_ORDER[tierIndex]]
+  const index = inTier.findIndex((candidate) => candidate.id === stopId)
+  const swapWithIndex = direction === 'up' ? index - 1 : index + 1
+
+  if (swapWithIndex >= 0 && swapWithIndex < inTier.length) {
+    const a = inTier[index]
+    const b = inTier[swapWithIndex]
+    const batch = writeBatch(db)
+    batch.update(doc(db, 'trips', tripId, 'corridorStops', a.id), { rank: b.rank ?? 0 })
+    batch.update(doc(db, 'trips', tripId, 'corridorStops', b.id), { rank: a.rank ?? 0 })
+    await batch.commit()
+    return
+  }
+
+  const targetIndex = direction === 'up' ? tierIndex - 1 : tierIndex + 1
+  // Already at the very top of 'must-see' or the very bottom of
+  // 'nice-if-convenient' — nowhere left to go (the button is disabled there).
+  if (targetIndex < 0 || targetIndex >= TIER_ORDER.length) return
+
+  const targetTier = TIER_ORDER[targetIndex]
+  const targetRanks = grouped[targetTier].map((candidate) => candidate.rank ?? 0)
+  const rank = targetRanks.length
+    ? direction === 'up'
+      ? Math.max(...targetRanks) + 1
+      : Math.min(...targetRanks) - 1
+    : 0
+
+  await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
+    priority: targetTier,
+    rank,
+  })
 }
 
 export function groupCandidatesByPriority(

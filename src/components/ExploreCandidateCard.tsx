@@ -4,9 +4,13 @@ import { isoCountryFlag } from '../lib/countryFlag'
 interface ExploreCandidateCardProps {
   stop: CorridorStopWithId
   detourKm: number | null
+  /** This stop is itself part of the route backbone, so it has no detour. */
+  onRoute: boolean
   highlighted: boolean
   canVoteUp: boolean
   canVoteDown: boolean
+  /** Lets the list scroll this card into view when its map pin is tapped. */
+  innerRef?: (element: HTMLDivElement | null) => void
   onSelect: () => void
   onVoteUp: () => void
   onVoteDown: () => void
@@ -16,17 +20,20 @@ interface ExploreCandidateCardProps {
 
 /**
  * One row in explore mode's candidate list (below the map — see
- * ExploreMapScreen). Up/down votes reorder within this stop's own priority
- * tier only (see voteExploreCandidate's own doc comment); "Keep this"
- * promotes straight to `locked` — the same status a manually pinned stop
- * gets, since both mean "the traveler wants this in the eventual route."
+ * ExploreMapScreen). Up/down votes move the stop one position through the
+ * flattened tier list, changing its priority when it crosses a boundary
+ * (see voteExploreCandidate's own doc comment); "Keep this" promotes
+ * straight to `locked` — the same status a manually pinned stop gets, since
+ * both mean "the traveler wants this in the eventual route."
  */
 export function ExploreCandidateCard({
   stop,
   detourKm,
+  onRoute,
   highlighted,
   canVoteUp,
   canVoteDown,
+  innerRef,
   onSelect,
   onVoteUp,
   onVoteDown,
@@ -35,6 +42,7 @@ export function ExploreCandidateCard({
 }: ExploreCandidateCardProps) {
   return (
     <div
+      ref={innerRef}
       data-testid={`explore-candidate-${stop.id}`}
       onClick={onSelect}
       className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
@@ -79,13 +87,25 @@ export function ExploreCandidateCard({
           <p className="font-semibold text-neutral-900 dark:text-white">
             {stop.name} {stop.country && isoCountryFlag(stop.country)}
           </p>
-          {detourKm !== null && (
+          {onRoute ? (
+            // A stop the route is already built through has no detour to
+            // report — "≈+0 km" reads like a suspiciously good deal rather
+            // than "this one IS the route".
             <span
-              data-testid={`explore-candidate-detour-${stop.id}`}
-              className="chip chip-neutral px-2 py-0.5 text-xs"
+              data-testid={`explore-candidate-onroute-${stop.id}`}
+              className="chip chip-accent px-2 py-0.5 text-xs"
             >
-              ≈+{Math.round(detourKm)} km
+              On route
             </span>
+          ) : (
+            detourKm !== null && (
+              <span
+                data-testid={`explore-candidate-detour-${stop.id}`}
+                className="chip chip-neutral px-2 py-0.5 text-xs"
+              >
+                ≈+{Math.round(detourKm)} km
+              </span>
+            )
           )}
           {stop.status === 'locked' && (
             <span className="chip chip-accent px-2 py-0.5 text-xs">Keeping</span>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AdvancedMarker,
   Map as GoogleMap,
@@ -18,6 +18,7 @@ import {
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
+  TIER_ORDER,
   generateExploreHighlights,
   groupCandidatesByPriority,
   voteExploreCandidate,
@@ -38,11 +39,6 @@ const TIER_LABEL: Record<CorridorStopPriority, string> = {
   'worth-a-detour': 'Worth a detour',
   'nice-if-convenient': 'Nice if convenient',
 }
-const TIER_ORDER: CorridorStopPriority[] = [
-  'must-see',
-  'worth-a-detour',
-  'nice-if-convenient',
-]
 
 /** Pans the map to whichever candidate was last selected, from either the
  * map itself or the list below it. */
@@ -107,19 +103,31 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // screen fresh with no memory of it.
   const searchedEmpty = candidates.length === 0 && !!trip.planMeta.exploreLastRunAt
   const grouped = useMemo(() => groupCandidatesByPriority(candidates), [candidates])
-  const lockedStops = candidates.filter((c) => c.status === 'locked')
 
-  // Detour math (restored 2026-07-30 — see master_plan.md): the backbone
-  // grows as candidates get locked in, so later detour estimates account
-  // for stops already committed to, not just the raw start->end line.
+  // What the route is actually built through: everything explicitly kept
+  // (`locked`) plus everything ranked must-see. Promoting a stop to must-see
+  // therefore redraws the route through it immediately, and every other
+  // candidate's detour is re-measured against that new shape — which is the
+  // point of the tiers: a "worth a detour" stop that's 5km off a route
+  // bending through the must-sees is a very different proposition from one
+  // 200km off the bare start→end line. buildRouteBackbone sorts these along
+  // the corridor itself, so promotion order never matters.
+  const routeStops = useMemo(
+    () => candidates.filter((c) => c.status === 'locked' || c.priority === 'must-see'),
+    [candidates],
+  )
+  const routeStopIds = useMemo(
+    () => new Set(routeStops.map((s) => s.id)),
+    [routeStops],
+  )
   const backbone = useMemo(
     () =>
       buildRouteBackbone(
         trip.settings.startPoint,
-        lockedStops.map((s) => ({ lat: s.lat, lng: s.lng })),
+        routeStops.map((s) => ({ lat: s.lat, lng: s.lng })),
         trip.settings.endPoint,
       ),
-    [trip.settings.startPoint, trip.settings.endPoint, lockedStops],
+    [trip.settings.startPoint, trip.settings.endPoint, routeStops],
   )
   const detourByStopId = useMemo(() => {
     const map = new Map<string, number>()
@@ -128,6 +136,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
     return map
   }, [candidates, backbone])
+
+  // Tapping a map pin selects the stop, but its card can be anywhere in the
+  // scrollable list below the fold — without this the highlight ring lands
+  // off-screen and the tap looks like it did nothing.
+  const cardRefs = useRef(new Map<string, HTMLDivElement>())
+  useEffect(() => {
+    if (!selectedId) return
+    cardRefs.current
+      .get(selectedId)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedId])
 
   const selected = candidates.find((c) => c.id === selectedId) ?? null
 
@@ -152,8 +171,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
   }
 
-  async function vote(tier: CorridorStopPriority, stopId: string, direction: 'up' | 'down') {
-    await voteExploreCandidate(tripId, grouped[tier], stopId, direction)
+  async function vote(stopId: string, direction: 'up' | 'down') {
+    await voteExploreCandidate(tripId, grouped, stopId, direction)
   }
 
   async function commit() {
@@ -305,12 +324,25 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                       key={stop.id}
                       stop={stop}
                       detourKm={detourByStopId.get(stop.id) ?? null}
+                      onRoute={routeStopIds.has(stop.id)}
                       highlighted={selectedId === stop.id}
-                      canVoteUp={i > 0}
-                      canVoteDown={i < grouped[tier].length - 1}
+                      innerRef={(element) => {
+                        if (element) cardRefs.current.set(stop.id, element)
+                        else cardRefs.current.delete(stop.id)
+                      }}
+                      // A vote crosses tiers rather than stopping at a tier
+                      // edge, so the only truly immovable positions are the
+                      // very top and very bottom of the whole list.
+                      canVoteUp={!(tier === TIER_ORDER[0] && i === 0)}
+                      canVoteDown={
+                        !(
+                          tier === TIER_ORDER[TIER_ORDER.length - 1] &&
+                          i === grouped[tier].length - 1
+                        )
+                      }
                       onSelect={() => setSelectedId(stop.id)}
-                      onVoteUp={() => void vote(tier, stop.id, 'up')}
-                      onVoteDown={() => void vote(tier, stop.id, 'down')}
+                      onVoteUp={() => void vote(stop.id, 'up')}
+                      onVoteDown={() => void vote(stop.id, 'down')}
                       onLock={() => setCorridorStopStatus(tripId, stop.id, 'locked')}
                       onReject={() => {
                         deleteCorridorStop(tripId, stop.id)
