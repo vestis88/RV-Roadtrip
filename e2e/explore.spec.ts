@@ -46,6 +46,17 @@ test('explore mode shows an empty state and a working "find great stops" degrada
   page,
 }) => {
   const tripId = await getTripId(page)
+  // A route is required before this spends a Claude call — see the
+  // dedicated guard test below. Seeded directly rather than through the
+  // Places autocomplete so this test stays focused on the degradation path.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
+
   await page.getByTestId('nav-map').click()
   await page.getByTestId('explore-map-screen').waitFor()
 
@@ -54,10 +65,25 @@ test('explore mode shows an empty state and a working "find great stops" degrada
   // No CLAUDE_API_KEY in this sandbox — same credential-less degradation
   // every other Claude-touching e2e test in this suite exercises.
   await page.getByTestId('explore-find-stops-button').click()
-  await expect(page.getByTestId('explore-find-stops-error')).toBeVisible({
-    timeout: 10_000,
-  })
+  await expect(page.getByTestId('explore-find-stops-error')).toContainText(
+    'Could not find stops',
+    { timeout: 10_000 },
+  )
   expect(tripId).toBeTruthy()
+})
+
+test('"Find great stops" requires a start and finish point first', async ({ page }) => {
+  await getTripId(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  // A brand-new trip starts with both points blank — reported as this
+  // button silently returning 0 stops with no explanation, since (0, 0)
+  // still looks like a real coordinate downstream.
+  await page.getByTestId('explore-find-stops-button').click()
+  await expect(page.getByTestId('explore-find-stops-error')).toContainText(
+    'start and finish point',
+  )
 })
 
 test('voting reorders within a priority tier, and lock/reject change status', async ({

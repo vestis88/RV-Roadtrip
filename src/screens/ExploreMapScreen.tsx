@@ -30,6 +30,7 @@ import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
+import { hasRoute } from '../lib/validateRoute'
 
 const TIER_LABEL: Record<CorridorStopPriority, string> = {
   'must-see': 'Must-see',
@@ -111,8 +112,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const selected = candidates.find((c) => c.id === selectedId) ?? null
 
   async function runFindStops() {
-    setGenerating(true)
     setGenError(null)
+    // See src/lib/validateRoute.ts's own doc comment: a blank start/finish
+    // point still looks like a real (0, 0) coordinate downstream, so this
+    // must be caught here rather than relying on the Claude call itself to
+    // notice — it previously just returned zero stops with no explanation.
+    if (!hasRoute(trip.settings)) {
+      setGenError('Set a start and finish point in Trip Setup first.')
+      return
+    }
+    setGenerating(true)
     try {
       await generateExploreHighlights(tripId)
     } catch (error) {

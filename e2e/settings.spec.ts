@@ -153,6 +153,11 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
     'Generate full plan',
   )
 
+  // A route is required before either button will spend a Claude call —
+  // see the dedicated test below for that guard itself.
+  await setPlaceInput(page.getByTestId('start-point-input'), 'Oslo, Norway')
+  await setPlaceInput(page.getByTestId('end-point-input'), 'Bergen, Norway')
+
   // No CLAUDE_API_KEY in this sandbox — same credential-less degradation
   // explore.spec.ts's own "find great stops" test exercises, confirming
   // this button drives the same generateExploreHighlights callable rather
@@ -163,4 +168,36 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
   })
   // A failed attempt must not navigate away.
   await expect(page.getByTestId('trip-name-input')).toBeVisible()
+})
+
+test('"Generate overview" and "Generate full plan" both require a start and finish point first', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  // A brand-new trip starts with both points blank — reported as
+  // "Generate overview" silently returning 0 stops with no explanation,
+  // since (0, 0) still looks like a real coordinate downstream.
+
+  await page.getByTestId('generate-overview-button').click()
+  await expect(page.getByTestId('route-required-error')).toContainText(
+    'start and finish point',
+  )
+  // No network call was made at all — no credential-less error appears.
+  await expect(page.getByTestId('generate-overview-error')).toHaveCount(0)
+
+  await page.getByTestId('generate-plan-button').click()
+  await expect(page.getByTestId('route-required-error')).toContainText(
+    'start and finish point',
+  )
+  await expect(page.getByTestId('confirm-generate-dialog')).toHaveCount(0)
+
+  // Filling in just one point still isn't enough.
+  await setPlaceInput(page.getByTestId('start-point-input'), 'Oslo, Norway')
+  await page.getByTestId('generate-overview-button').click()
+  await expect(page.getByTestId('route-required-error')).toBeVisible()
+
+  await setPlaceInput(page.getByTestId('end-point-input'), 'Bergen, Norway')
+  await page.getByTestId('generate-plan-button').click()
+  await expect(page.getByTestId('confirm-generate-dialog')).toBeVisible()
 })

@@ -9,6 +9,7 @@ import { PRESET_INTERESTS } from '../lib/interests'
 import { generateExploreHighlights } from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { updateTripSettings } from '../lib/updateTripSettings'
+import { hasRoute } from '../lib/validateRoute'
 
 interface SettingsScreenProps {
   tripId: string
@@ -28,6 +29,9 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [overviewSubmitting, setOverviewSubmitting] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
+  // Shared between "Generate overview" and "Generate full plan" — see
+  // hasRoute's own doc comment for why this check exists.
+  const [routeError, setRouteError] = useState<string | null>(null)
 
   // Switching trips (TripSwitcher) doesn't remount this component — it's
   // the same SettingsScreen instance re-rendered with new tripId/trip
@@ -81,6 +85,18 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     }
   }
 
+  // Same missing-destination guard as generateOverview's own doc comment —
+  // applies here too since `idle` (a first-ever generation) can hit the
+  // exact same blank-endpoint case.
+  function openGenerateConfirm() {
+    setRouteError(null)
+    if (!hasRoute(settings)) {
+      setRouteError('Set a start and finish point above first.')
+      return
+    }
+    setConfirmOpen(true)
+  }
+
   // "Generate overview" (2026-07-31): a direct entry point into explore
   // mode from Trip Setup itself, alongside "Generate full plan" — the cheap,
   // repeatable curation pass (generateExploreHighlights, same callable the
@@ -89,8 +105,20 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // the Map tab once it lands so the traveler immediately sees the result,
   // rather than triggering it and leaving them wondering where it went.
   async function generateOverview() {
-    setOverviewSubmitting(true)
     setOverviewError(null)
+    setRouteError(null)
+    // Checked client-side, before spending a Claude call: a start/finish
+    // point defaults to blank ({name: '', lat: 0, lng: 0}), and (0, 0) is a
+    // real-looking coordinate, not an obviously-missing one — asking Claude
+    // to plan a corridor toward it produced a silent, confusing "0 stops
+    // found" with no explanation (reported with a screenshot after "New
+    // trip" carried over other settings but the traveler hadn't set a
+    // destination yet).
+    if (!hasRoute(settings)) {
+      setRouteError('Set a start and finish point above first.')
+      return
+    }
+    setOverviewSubmitting(true)
     try {
       await generateExploreHighlights(tripId)
       navigate('/map')
@@ -287,7 +315,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             <button
               type="button"
               data-testid="generate-plan-button"
-              onClick={() => setConfirmOpen(true)}
+              onClick={openGenerateConfirm}
               disabled={submitting}
               className="btn btn-primary"
             >
@@ -326,6 +354,14 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="generate-overview-error"
           >
             {overviewError}
+          </p>
+        )}
+        {routeError && (
+          <p
+            className="mt-2 text-sm text-red-600 dark:text-red-400"
+            data-testid="route-required-error"
+          >
+            {routeError}
           </p>
         )}
       </div>
