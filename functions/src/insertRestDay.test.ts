@@ -342,7 +342,12 @@ describe('insertRestDay', () => {
       { day: driveDay(1, '2026-07-11', 'Otta') },
     ])
     // A plan operation is already in flight for this trip.
-    await tripRef.update({ 'planMeta.status': 'generating' })
+    await tripRef.update({
+      'planMeta.status': 'generating',
+      // A genuinely running generation heartbeats this (planLock.ts); without
+      // it the claim would be treated as abandoned and reclaimed.
+      'planMeta.statusUpdatedAt': new Date().toISOString(),
+    })
 
     const requestRef = await db.collection('planRequests').add({
       tripId,

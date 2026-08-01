@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computeMultiLegTotals, computeRouteLeg } from './routesApi.js'
+import { computeRouteLeg } from './routesApi.js'
 
 const OSLO = { name: 'Oslo', lat: 59.9139, lng: 10.7522 }
 const ROME = { name: 'Rome', lat: 41.9028, lng: 12.4964 }
@@ -41,10 +41,3 @@ describe('computeRouteLeg', () => {
   })
 })
 
-describe('computeMultiLegTotals', () => {
-  it('yields a plausible Oslo -> Rome total distance (~2,700 km, ±10%)', async () => {
-    const { totalKm } = await computeMultiLegTotals([OSLO, ROME])
-    expect(totalKm).toBeGreaterThan(2700 * 0.9)
-    expect(totalKm).toBeLessThan(2700 * 1.1)
-  })
-})

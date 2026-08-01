@@ -15,6 +15,7 @@ import {
 } from '@rv/shared'
 import { validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
+import { isPlanLockStale, planAliveFields } from './planLock.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
 import { runReconcileCorridor } from './corridorReconciliation.js'
 import { runInsertRestDay } from './insertRestDay.js'
@@ -151,7 +152,10 @@ export async function generateRealPlan(
   } else {
     const onProgress = (progress: PlanTripProgress) => {
       tripRef
-        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+        .update({
+          'planMeta.progressLabel': describePlanTripProgress(progress),
+          ...planAliveFields(),
+        })
         .catch((error: unknown) =>
           console.error('Failed to report planTrip progress', error),
         )
@@ -181,6 +185,7 @@ export async function generateRealPlan(
   await tripRef.update({
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': resumedDays.length,
+    ...planAliveFields(),
     'planMeta.progressTotal': skeleton.days.length,
   })
 
@@ -190,7 +195,10 @@ export async function generateRealPlan(
     startLocation,
     (count) => {
       tripRef
-        .update({ 'planMeta.progressCurrent': resumedDays.length + count })
+        .update({
+          'planMeta.progressCurrent': resumedDays.length + count,
+          ...planAliveFields(),
+        })
         .catch((error: unknown) =>
           console.error('Failed to report day-resolution progress', error),
         )
@@ -303,6 +311,7 @@ export async function runFullGeneration(
   // where it reports its own.
   await tripRef.update({
     'planMeta.status': 'generating',
+    ...planAliveFields(),
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': FieldValue.delete(),
     'planMeta.progressTotal': FieldValue.delete(),
@@ -422,13 +431,18 @@ export const generatePlan = onDocumentCreated(
     // just confirms the trip is still genuinely mid-generation.
     const claimed = await db.runTransaction(async (tx) => {
       const tripSnap = await tx.get(tripRef)
-      const currentStatus = tripSnap.data()?.planMeta?.status
+      const meta = tripSnap.data()?.planMeta
+      const currentStatus = meta?.status
       if (request.isContinuation) {
         return currentStatus === 'generating'
       }
       const isBusy = currentStatus === 'pending' || currentStatus === 'generating'
-      if (isBusy) return false
-      tx.update(tripRef, { 'planMeta.status': 'pending' })
+      // A busy claim that hasn't been touched in STALE_PLAN_LOCK_MS belongs
+      // to a run that died without ever reaching its own error handler —
+      // reclaimed rather than leaving the trip permanently ungeneratable.
+      // See planLock.ts.
+      if (isBusy && !isPlanLockStale(meta?.statusUpdatedAt)) return false
+      tx.update(tripRef, { 'planMeta.status': 'pending', ...planAliveFields() })
       return true
     })
 
@@ -456,6 +470,7 @@ export const generatePlan = onDocumentCreated(
       try {
         await tripRef.update({
           'planMeta.status': 'generating',
+          ...planAliveFields(),
           'planMeta.progressLabel': FieldValue.delete(),
           'planMeta.progressCurrent': FieldValue.delete(),
           'planMeta.progressTotal': FieldValue.delete(),
@@ -491,6 +506,7 @@ export const generatePlan = onDocumentCreated(
       try {
         await tripRef.update({
           'planMeta.status': 'generating',
+          ...planAliveFields(),
           'planMeta.progressLabel': FieldValue.delete(),
           'planMeta.progressCurrent': FieldValue.delete(),
           'planMeta.progressTotal': FieldValue.delete(),

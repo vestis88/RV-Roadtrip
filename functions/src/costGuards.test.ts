@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createTripForUser } from './trips.js'
+import { STALE_PLAN_LOCK_MS } from './planLock.js'
 
 const PROJECT_ID = 'demo-rv-trip-planner'
 
@@ -30,7 +31,12 @@ describe('cost guards', () => {
     const tripRef = db.collection('trips').doc(tripId)
 
     // Simulate a plan request that's already mid-flight.
-    await tripRef.update({ 'planMeta.status': 'generating' })
+    await tripRef.update({
+      'planMeta.status': 'generating',
+      // A genuinely running generation heartbeats this (planLock.ts); without
+      // it the claim would be treated as abandoned and reclaimed.
+      'planMeta.statusUpdatedAt': new Date().toISOString(),
+    })
 
     const requestRef = await db.collection('planRequests').add({
       tripId,
@@ -51,6 +57,40 @@ describe('cost guards', () => {
     expect(tripSnap.data()?.planMeta.status).toBe('generating')
   }, 15_000)
 
+  // The other half of that guard: without an expiry, a run killed by its own
+  // timeout (or a crash/deploy) left `planMeta.status` stuck at 'generating'
+  // forever and every later generate/replan/insertRestDay/reconcile on that
+  // trip was refused — unrecoverable without a manual Firestore edit. See
+  // planLock.ts.
+  it('reclaims a claim abandoned by a run that died without clearing it', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCostGuardStale')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    await tripRef.update({
+      'planMeta.status': 'generating',
+      'planMeta.statusUpdatedAt': new Date(
+        Date.now() - (STALE_PLAN_LOCK_MS + 60_000),
+      ).toISOString(),
+    })
+
+    const requestRef = await db.collection('planRequests').add({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+    })
+
+    // It gets past the guard and runs for real — reaching 'error' here only
+    // because this sandbox has no Claude credentials, which is still proof
+    // the claim was taken rather than refused up front.
+    const finalRequest = await waitFor(async () => {
+      const snap = await requestRef.get()
+      const data = snap.data()
+      return data?.status === 'error' || data?.status === 'done' ? data : undefined
+    })
+    expect(finalRequest.error ?? '').not.toMatch(/already in progress/)
+  }, 20_000)
+
   // Segmented generation (2026-07-31): a chained continuation request
   // (isContinuation: true — see generatePlan.ts's runFullGeneration) must
   // NOT be rejected by this same busy guard just because the trip is
@@ -60,7 +100,12 @@ describe('cost guards', () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidCostGuardContinuation')
     const tripRef = db.collection('trips').doc(tripId)
-    await tripRef.update({ 'planMeta.status': 'generating' })
+    await tripRef.update({
+      'planMeta.status': 'generating',
+      // A genuinely running generation heartbeats this (planLock.ts); without
+      // it the claim would be treated as abandoned and reclaimed.
+      'planMeta.statusUpdatedAt': new Date().toISOString(),
+    })
 
     const requestRef = await db.collection('planRequests').add({
       tripId,

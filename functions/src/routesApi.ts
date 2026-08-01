@@ -105,25 +105,3 @@ export async function computeRouteLeg(
   }
 }
 
-export interface MultiLegTotals {
-  legs: RouteLeg[]
-  totalKm: number
-  avgDriveMinutesPerDay: number
-}
-
-/** Computes each leg between consecutive points and summarizes the totals. */
-export async function computeMultiLegTotals(
-  points: LatLng[],
-): Promise<MultiLegTotals> {
-  const legs: RouteLeg[] = []
-  for (let i = 0; i < points.length - 1; i++) {
-    legs.push(await computeRouteLeg(points[i], points[i + 1]))
-  }
-
-  const totalKm = legs.reduce((sum, leg) => sum + leg.distanceKm, 0)
-  const avgDriveMinutesPerDay = legs.length
-    ? legs.reduce((sum, leg) => sum + leg.durationMin, 0) / legs.length
-    : 0
-
-  return { legs, totalKm, avgDriveMinutesPerDay }
-}

@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Trip } from '@rv/shared'
+import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 /**
  * Deletes a trip entirely: every day/activity/restaurant/corridorStop/
@@ -28,14 +29,19 @@ export async function deleteTripForUser(uid: string, tripId: string): Promise<vo
   const trip = tripSnap.data() as Trip
   const membersSnap = await tripRef.collection('members').get()
 
-  const batch = db.batch()
-  for (const member of membersSnap.docs) {
-    batch.delete(db.collection('users').doc(member.id).collection('trips').doc(tripId))
-  }
+  // One delete per member plus the share code — chunked for the same reason
+  // every other per-item write list here is (see firestoreBatch.ts).
+  const writes: PendingWrite[] = membersSnap.docs.map((member) => ({
+    op: 'delete',
+    ref: db.collection('users').doc(member.id).collection('trips').doc(tripId),
+  }))
   if (trip.meta.shareCode) {
-    batch.delete(db.collection('shareCodes').doc(trip.meta.shareCode))
+    writes.push({
+      op: 'delete',
+      ref: db.collection('shareCodes').doc(trip.meta.shareCode),
+    })
   }
-  await batch.commit()
+  await commitInChunks(db, writes)
 
   // Everything under trips/{tripId} (days + their activities/restaurants,
   // corridorStops, countries, log, members, generationStaging) in one

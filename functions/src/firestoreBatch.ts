@@ -2,6 +2,7 @@ import type {
   DocumentData,
   DocumentReference,
   Firestore,
+  SetOptions,
 } from 'firebase-admin/firestore'
 
 /**
@@ -16,7 +17,15 @@ import type {
 const MAX_OPS_PER_BATCH = 400
 
 export type PendingWrite =
-  | { op: 'set'; ref: DocumentReference; data: DocumentData }
+  // `options` carries Firestore's own SetOptions (notably { merge: true })
+  // through unchanged, so a merge-set doesn't have to bypass this machinery
+  // — and thereby its 500-op chunking — just to keep its semantics.
+  | {
+      op: 'set'
+      ref: DocumentReference
+      data: DocumentData
+      options?: SetOptions
+    }
   | { op: 'delete'; ref: DocumentReference }
 
 /**
@@ -33,7 +42,10 @@ export async function commitInChunks(
   for (let i = 0; i < writes.length; i += MAX_OPS_PER_BATCH) {
     const batch = db.batch()
     for (const write of writes.slice(i, i + MAX_OPS_PER_BATCH)) {
-      if (write.op === 'set') batch.set(write.ref, write.data)
+      if (write.op === 'set') {
+        if (write.options) batch.set(write.ref, write.data, write.options)
+        else batch.set(write.ref, write.data)
+      }
       else batch.delete(write.ref)
     }
     await batch.commit()

@@ -1,6 +1,7 @@
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
+import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 /**
  * Carries every trip membership from an abandoned identity (oldUid) across
@@ -46,23 +47,28 @@ export async function mergeTripsForUid(
   }
 
   const now = new Date().toISOString()
-  const batch = db.batch()
+  // Two writes per trip, so a heavily-shared account merging enough trips
+  // could exceed Firestore's 500-op batch cap — chunked like every other
+  // per-item write list in this codebase (see firestoreBatch.ts).
+  const writes: PendingWrite[] = []
   const mergedTripIds: string[] = []
   for (const tripDoc of oldTripsSnap.docs) {
     const tripId = tripDoc.id
     mergedTripIds.push(tripId)
-    batch.set(
-      db.collection('trips').doc(tripId).collection('members').doc(newUid),
-      { joinedAt: now },
-      { merge: true },
-    )
-    batch.set(
-      db.collection('users').doc(newUid).collection('trips').doc(tripId),
-      { joinedAt: now },
-      { merge: true },
-    )
+    writes.push({
+      op: 'set',
+      ref: db.collection('trips').doc(tripId).collection('members').doc(newUid),
+      data: { joinedAt: now },
+      options: { merge: true },
+    })
+    writes.push({
+      op: 'set',
+      ref: db.collection('users').doc(newUid).collection('trips').doc(tripId),
+      data: { joinedAt: now },
+      options: { merge: true },
+    })
   }
-  await batch.commit()
+  await commitInChunks(db, writes)
 
   return { mergedTripIds }
 }

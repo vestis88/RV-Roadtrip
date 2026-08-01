@@ -14,6 +14,7 @@ import { validatePacing } from './pacingValidator.js'
 import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
 import { planTrip } from './prompts/planTrip.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
+import { planAliveFields } from './planLock.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 export interface ReplanContext {
@@ -56,6 +57,7 @@ export async function runReplan(
 
   await tripRef.update({
     'planMeta.status': 'generating',
+    ...planAliveFields(),
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': FieldValue.delete(),
     'planMeta.progressTotal': FieldValue.delete(),
@@ -118,7 +120,10 @@ export async function runReplan(
     tripId,
     onProgress: (progress) => {
       tripRef
-        .update({ 'planMeta.progressLabel': describePlanTripProgress(progress) })
+        .update({
+          'planMeta.progressLabel': describePlanTripProgress(progress),
+          ...planAliveFields(),
+        })
         .catch((error: unknown) =>
           console.error('Failed to report replan progress', error),
         )
@@ -131,6 +136,7 @@ export async function runReplan(
   await tripRef.update({
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': 0,
+    ...planAliveFields(),
     'planMeta.progressTotal': skeleton.days.length,
   })
 
@@ -148,7 +154,7 @@ export async function runReplan(
     currentLocationPoint,
     (count) => {
       tripRef
-        .update({ 'planMeta.progressCurrent': count })
+        .update({ 'planMeta.progressCurrent': count, ...planAliveFields() })
         .catch((error: unknown) =>
           console.error('Failed to report replan day-resolution progress', error),
         )

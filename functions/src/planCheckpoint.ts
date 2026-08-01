@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore'
 import { activitySchema, restaurantSchema, tripDaySchema, type Trip } from '@rv/shared'
 import { planTripSkeletonSchema, type PlanTripSkeleton } from './prompts/planTripSchema.js'
+import { commitInChunks } from './firestoreBatch.js'
 import type { GeneratedDay } from './planPipeline.js'
 
 const STAGING_COLLECTION = 'generationStaging'
@@ -94,10 +95,35 @@ export async function stageGeneratedDay(
   }
 }
 
+/**
+ * Drops the checkpoint once the real days are durably committed.
+ *
+ * Chunked via commitInChunks like every other multi-doc write in this
+ * codebase (see firestoreBatch.ts): one staged doc per day plus the trip
+ * update, which a long enough trip could push past Firestore's 500-op
+ * batch cap — the exact cap that machinery exists for.
+ *
+ * Never throws. This runs *after* writeGeneratedDays has already committed
+ * the real, correct plan, so a failure here means "cleanup of a
+ * now-redundant cache failed", not "generation failed" — but it used to
+ * propagate into generatePlan's outer catch, which marked a perfectly good
+ * generation as `status: 'error'` and showed the traveler a failure for a
+ * trip that had in fact generated fine. Logged and swallowed instead; the
+ * leftover staging docs are inert (a later run overwrites them, and
+ * loadCheckpoint validates the settings hash before reusing anything).
+ */
 export async function clearCheckpoint(tripRef: DocumentReference): Promise<void> {
-  const staleSnap = await tripRef.collection(STAGING_COLLECTION).get()
-  const batch = tripRef.firestore.batch()
-  staleSnap.docs.forEach((doc) => batch.delete(doc.ref))
-  batch.update(tripRef, { 'planMeta.checkpoint': FieldValue.delete() })
-  await batch.commit()
+  try {
+    const staleSnap = await tripRef.collection(STAGING_COLLECTION).get()
+    await commitInChunks(
+      tripRef.firestore,
+      staleSnap.docs.map((doc) => ({ op: 'delete', ref: doc.ref })),
+    )
+    // Separate from the chunked deletes rather than widening PendingWrite
+    // with an 'update' op for this one call site — it's a single operation
+    // with no batching concern of its own.
+    await tripRef.update({ 'planMeta.checkpoint': FieldValue.delete() })
+  } catch (error) {
+    console.error('Failed to clear plan checkpoint — generation itself succeeded', error)
+  }
 }

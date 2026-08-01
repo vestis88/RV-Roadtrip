@@ -117,6 +117,11 @@ export const planMetaSchema = z.object({
   // mounts fresh with no memory of the search that just ran — the exact
   // primary entry point this distinction exists for.
   exploreLastRunAt: isoDateTime.optional(),
+  // Heartbeat for the `status` busy guard — refreshed whenever a running
+  // generation writes progress, so a claim left behind by a killed
+  // container can be reclaimed instead of wedging the trip forever. See
+  // functions/src/planLock.ts.
+  statusUpdatedAt: isoDateTime.optional(),
 })
 
 export const tripSchema = z.object({

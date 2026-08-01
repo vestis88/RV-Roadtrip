@@ -628,7 +628,12 @@ describe('reconcileCorridor via the planRequests trigger', () => {
     const { tripId, tripRef, stopIds } = await seedThreeStopTrip(
       'uidReconcileCostGuard',
     )
-    await tripRef.update({ 'planMeta.status': 'generating' })
+    await tripRef.update({
+      'planMeta.status': 'generating',
+      // A genuinely running generation heartbeats this (planLock.ts); without
+      // it the claim would be treated as abandoned and reclaimed.
+      'planMeta.statusUpdatedAt': new Date().toISOString(),
+    })
 
     const requestRef = await db.collection('planRequests').add({
       tripId,
