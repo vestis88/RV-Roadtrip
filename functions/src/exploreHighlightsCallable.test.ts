@@ -78,6 +78,65 @@ describe('generateExploreHighlightsForTrip', () => {
     expect(snap.data()?.planMeta?.exploreLastRunAt).toBeTruthy()
   })
 
+  // The safety net behind the missing-secret bug above: if Claude proposes
+  // real towns and NONE survive to a write, every geocode failed — a
+  // systemic fault (bad key, quota, outage), not the per-candidate
+  // best-effort degradation the drop exists for. Silently returning 0 is
+  // the worst outcome: the traveler sees "nothing found" on a route full
+  // of real stops, and the Claude call is already paid for.
+  it('errors instead of reporting an empty success when every candidate fails to geocode', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenAllDropped')
+    // Candidates with no lat/lng — exactly what geocodeHighlights returns
+    // when geocodeQuery throws for each one.
+    generateRegionHighlightsMock.mockReset().mockResolvedValue({
+      regions: [
+        {
+          region: 'Öresund',
+          country: 'SE',
+          reasoning: 'r',
+          candidateStops: [
+            { town: 'Helsingborg', country: 'SE', why: 'w', priority: 'must-see' as const },
+            { town: 'Malmö', country: 'SE', why: 'w', priority: 'must-see' as const },
+          ],
+        },
+      ],
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toThrow(
+      'could not locate any of them',
+    )
+
+    const snap = await db.collection('trips').doc(tripId).get()
+    // Neither half-applied nor recorded as a genuine "searched, found nothing".
+    expect(snap.data()?.planMeta?.exploreLastRunAt).toBeUndefined()
+    expect(snap.data()?.planMeta?.exploreStatus).toBe('idle')
+    const stops = await db
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .get()
+    expect(stops.empty).toBe(true)
+  })
+
+  // The honest-empty case must still be allowed through — Claude proposing
+  // nothing at all is a valid answer for a short/local trip, and must not
+  // be conflated with the total-geocode-failure case above.
+  it('does not error when Claude itself proposed nothing', async () => {
+    const { tripId } = await createTripForUser('uidExploreGenHonestEmpty')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue({ regions: [] })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).resolves.toEqual({
+      candidateCount: 0,
+    })
+  })
+
   it('does not set planMeta.exploreLastRunAt when the run fails', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidExploreGenFailNoMark')
@@ -179,6 +238,24 @@ describe('generateExploreHighlightsForTrip', () => {
 })
 
 describe('generateExploreHighlights callable', () => {
+  // Regression, reported as "Generate overview yields nothing on a route
+  // that obviously has things to see": this callable reaches Places only
+  // transitively (generateRegionHighlights -> geocodeHighlights ->
+  // geocodeQuery), so the missing secret wasn't visible from its own
+  // imports. A Functions v2 secret is unreadable unless the function
+  // declares it, so geocodeQuery threw for every candidate, each was
+  // caught by the per-candidate best-effort handler and left without
+  // coordinates, and buildExploreCandidateWrites then dropped all of them
+  // — a "successful" run writing zero stops after full Claude spend.
+  it('declares every secret its call chain needs, including the transitive Places one', async () => {
+    const { generateExploreHighlights } = await import('./exploreHighlightsCallable.js')
+    const declared = (
+      generateExploreHighlights.__endpoint.secretEnvironmentVariables ?? []
+    ).map((s: { key: string }) => s.key)
+    expect(declared).toContain('CLAUDE_API_KEY')
+    expect(declared).toContain('GOOGLE_PLACES_API_KEY')
+  })
+
   it('rejects a signed-in caller who is not a member of the trip', async () => {
     const { tripId } = await createTripForUser('uidExploreCallableOwner')
     generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)

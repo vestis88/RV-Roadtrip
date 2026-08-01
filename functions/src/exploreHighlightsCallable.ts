@@ -4,6 +4,7 @@ import type { Trip } from '@rv/shared'
 import { requireTripMember } from './authz.js'
 import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
+import { googlePlacesApiKey } from './placesApi.js'
 import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
 
 // If the function's container is killed by its own onCall timeout (or
@@ -79,9 +80,30 @@ export async function generateExploreHighlightsForTrip(
       highlights,
       existingCandidatesSnap.docs.map((doc) => doc.ref),
     )
+    const candidateCount = writes.filter((w) => w.op === 'set').length
+    // Claude proposing real towns but NONE of them surviving to a write
+    // means every geocode failed — a systemic problem (missing/invalid
+    // Places key, quota exhaustion, an outage), not the per-candidate
+    // best-effort degradation buildExploreCandidateWrites' drop is meant
+    // for. Reported as an error rather than an empty success: the traveler
+    // sees "nothing found" for a route full of real stops, and the Claude
+    // call is already paid for, so silently returning 0 is the worst
+    // possible outcome. Deliberately checked before the write and before
+    // exploreLastRunAt, so a broken run neither half-applies nor gets
+    // recorded as a genuine "searched and found nothing".
+    const proposedCount = highlights.regions.reduce(
+      (total, region) => total + region.candidateStops.length,
+      0,
+    )
+    if (proposedCount > 0 && candidateCount === 0) {
+      throw new HttpsError(
+        'internal',
+        `Found ${proposedCount} stops but could not locate any of them on the map — please try again.`,
+      )
+    }
+
     await commitInChunks(db, writes)
 
-    const candidateCount = writes.filter((w) => w.op === 'set').length
     // A completed run only — not attempted-but-failed — so the frontend
     // can tell "never searched" apart from "searched and genuinely found
     // nothing" regardless of which screen fired the call. See
@@ -95,7 +117,15 @@ export async function generateExploreHighlightsForTrip(
 
 export const generateExploreHighlights = onCall(
   {
-    secrets: [claudeApiKey],
+    // GOOGLE_PLACES_API_KEY is needed even though nothing here calls Places
+    // directly: generateRegionHighlights geocodes every candidate town
+    // (geocodeHighlights -> geocodeQuery) before returning. A Functions v2
+    // secret is only readable by a function that declares it, so omitting it
+    // made geocodeQuery throw for EVERY candidate — each one caught by
+    // geocodeHighlights' per-candidate best-effort handler, left without
+    // coordinates, and then silently dropped by buildExploreCandidateWrites.
+    // The run "succeeded" with zero stops after paying full Claude cost.
+    secrets: [claudeApiKey, googlePlacesApiKey],
     // Default 60s is too tight for a large multi-country trip: the
     // highlights call itself can retry once (MAX_ATTEMPTS in planTrip.ts),
     // and every candidate town is then geocoded before this returns. Well
