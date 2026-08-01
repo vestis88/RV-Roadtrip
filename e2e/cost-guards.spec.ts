@@ -31,6 +31,19 @@ test('hammering the Generate button creates exactly one plan request', async ({
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
 
+  // A route is required before "Generate" opens its confirm dialog at all
+  // (see validateRoute.ts) — seeded directly since this test is about the
+  // rapid-click guard, not route entry.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+
   await page.getByTestId('generate-plan-button').click()
   await page.getByTestId('confirm-generate-dialog').waitFor()
   // Simulate a real rapid multi-click: dispatch several native clicks back
