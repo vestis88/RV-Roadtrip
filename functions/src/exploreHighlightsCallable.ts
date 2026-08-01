@@ -82,6 +82,11 @@ export async function generateExploreHighlightsForTrip(
     await commitInChunks(db, writes)
 
     const candidateCount = writes.filter((w) => w.op === 'set').length
+    // A completed run only — not attempted-but-failed — so the frontend
+    // can tell "never searched" apart from "searched and genuinely found
+    // nothing" regardless of which screen fired the call. See
+    // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
+    await tripRef.update({ 'planMeta.exploreLastRunAt': new Date().toISOString() })
     return { candidateCount }
   } finally {
     await tripRef.update({ 'planMeta.exploreStatus': 'idle' })

@@ -80,14 +80,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   })
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
-  // Distinguishes "never searched" from "searched and genuinely found
-  // nothing" for the empty-state message below — both look identical
-  // otherwise (zero candidates), but a short/local trip legitimately
-  // producing no highlights (see planTripPrompt.ts's own doc comment: "It
-  // is fine — expected, even — for a short or local trip to have... no
-  // regions with a genuine highlight") reads as broken without this,
-  // especially right after the button visibly ran.
-  const [searchedEmpty, setSearchedEmpty] = useState(false)
   const [routeError, setRouteError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -103,6 +95,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const candidates = corridorStops.filter(
     (stop) => stop.status === 'candidate' || stop.status === 'locked',
   )
+  // Distinguishes "never searched" from "searched and genuinely found
+  // nothing" for the empty-state message below — both look identical
+  // otherwise (zero candidates), but a short/local trip legitimately
+  // producing no highlights (see planTripPrompt.ts's own doc comment: "It
+  // is fine — expected, even — for a short or local trip to have... no
+  // regions with a genuine highlight") reads as broken without this.
+  // Derived from trip.planMeta.exploreLastRunAt rather than local state —
+  // the search that just ran might have been fired from SettingsScreen's
+  // "Generate overview", which navigates here on success, mounting this
+  // screen fresh with no memory of it.
+  const searchedEmpty = candidates.length === 0 && !!trip.planMeta.exploreLastRunAt
   const grouped = useMemo(() => groupCandidatesByPriority(candidates), [candidates])
   const lockedStops = candidates.filter((c) => c.status === 'locked')
 
@@ -130,7 +133,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
 
   async function runFindStops() {
     setGenError(null)
-    setSearchedEmpty(false)
     // See src/lib/validateRoute.ts's own doc comment: a blank start/finish
     // point still looks like a real (0, 0) coordinate downstream, so this
     // must be caught here rather than relying on the Claude call itself to
@@ -141,8 +143,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
     setGenerating(true)
     try {
-      const { candidateCount } = await generateExploreHighlights(tripId)
-      if (candidateCount === 0) setSearchedEmpty(true)
+      await generateExploreHighlights(tripId)
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
       setGenError('Could not find stops right now — please try again.')

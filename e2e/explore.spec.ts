@@ -72,6 +72,37 @@ test('explore mode shows an empty state and a working "find great stops" degrada
   expect(tripId).toBeTruthy()
 })
 
+// Regression: "Generate overview" (Trip Setup) navigates to /map on
+// success, mounting this screen fresh — a genuinely empty result (a
+// short/local trip legitimately having nothing to flag) must not read as
+// "you haven't searched yet" just because this screen never fired the
+// call itself. planMeta.exploreLastRunAt (set server-side by a completed
+// run, regardless of which screen triggered it) is what this message
+// branches on instead of local component state.
+test('a completed search that found nothing shows a different message than never having searched', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+      'planMeta.exploreLastRunAt': new Date().toISOString(),
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  await expect(page.getByTestId('explore-empty-state')).toContainText(
+    'Nothing stood out along this route',
+  )
+  await expect(page.getByTestId('explore-empty-state')).not.toContainText(
+    'No stops yet',
+  )
+})
+
 test('"Find great stops" requires a start and finish point first', async ({ page }) => {
   await getTripId(page)
   await page.getByTestId('nav-map').click()

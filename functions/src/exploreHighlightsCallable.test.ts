@@ -58,6 +58,40 @@ describe('generateExploreHighlightsForTrip', () => {
     })
   })
 
+  // Regression: "Generate overview" (Trip Setup) navigates to /map on
+  // success, mounting ExploreMapScreen fresh with no memory of the search
+  // that just ran — so a genuinely empty result (a short/local trip
+  // legitimately having nothing to flag) looked identical to "never
+  // searched," even right after the button visibly completed.
+  it('sets planMeta.exploreLastRunAt on a completed run, even with zero candidates', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenEmpty')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue({ regions: [] })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    const result = await generateExploreHighlightsForTrip(tripId)
+
+    expect(result.candidateCount).toBe(0)
+    const snap = await db.collection('trips').doc(tripId).get()
+    expect(snap.data()?.planMeta?.exploreLastRunAt).toBeTruthy()
+  })
+
+  it('does not set planMeta.exploreLastRunAt when the run fails', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenFailNoMark')
+    generateRegionHighlightsMock.mockReset().mockRejectedValue(new Error('boom'))
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toThrow('boom')
+
+    const snap = await db.collection('trips').doc(tripId).get()
+    expect(snap.data()?.planMeta?.exploreLastRunAt).toBeUndefined()
+  })
+
   it('clears planMeta.exploreStatus back to idle even after a failure', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidExploreGenFail')

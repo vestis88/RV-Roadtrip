@@ -109,6 +109,14 @@ export const planMetaSchema = z.object({
   // failing with "Already finding great stops" for that trip. See
   // exploreHighlightsCallable.ts's STALE_EXPLORE_LOCK_MS.
   exploreStatusUpdatedAt: isoDateTime.optional(),
+  // Set once a run of generateExploreHighlights actually completes (not on
+  // a failed attempt) — lets the Map screen tell "never searched yet" apart
+  // from "searched and genuinely found nothing" regardless of which screen
+  // fired the call. Local component state can't do this: "Generate
+  // overview" (Trip Setup) navigates to /map on success, so ExploreMapScreen
+  // mounts fresh with no memory of the search that just ran — the exact
+  // primary entry point this distinction exists for.
+  exploreLastRunAt: isoDateTime.optional(),
 })
 
 export const tripSchema = z.object({
