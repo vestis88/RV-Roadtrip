@@ -25,6 +25,8 @@ The "why" for each candidate town is what the traveler actually reads when decid
 
 Do NOT worry about the trip's exact dates, total length, or drive-time limits — that scheduling problem is solved in a later step, by selecting from what you produce here. List more candidates than a typical trip could actually fit; being generous here gives the scheduling step real choices instead of one path.
 
+It is fine — expected, even — for a short or local trip to have few or no regions with a genuine highlight worth a special detour. Do NOT invent a padded or generic candidate just to have something to list: an empty "regions" array, or a region with an empty "candidateStops" array, is a valid and honest answer when there's truly nothing to flag.
+
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences:
 {
   "regions": [

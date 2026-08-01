@@ -87,11 +87,20 @@ export const regionHighlightSchema = z.object({
   region: z.string(),
   country: z.string().length(2),
   reasoning: z.string(),
-  candidateStops: z.array(regionHighlightCandidateSchema).min(1),
+  // No .min(1): a genuinely trivial corridor (e.g. a short, local one-day
+  // trip) can legitimately have nothing worth a special detour in a given
+  // region — see HIGHLIGHTS_SYSTEM_PROMPT's own note on this. Forcing a
+  // minimum used to mean the ONLY way to satisfy the schema on such a trip
+  // was to retry into the same degenerate response and eventually fail the
+  // whole call outright ("find great stops" reported as just not working).
+  candidateStops: z.array(regionHighlightCandidateSchema),
 })
 
 export const regionHighlightsResponseSchema = z.object({
-  regions: z.array(regionHighlightSchema).min(1),
+  // No .min(1) — see candidateStops' own comment just above; the same
+  // failure mode applied at the whole-response level for a trip trivial
+  // enough that no region has anything worth flagging at all.
+  regions: z.array(regionHighlightSchema),
 })
 
 export type RegionHighlightCandidate = z.infer<

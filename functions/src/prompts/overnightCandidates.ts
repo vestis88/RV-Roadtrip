@@ -66,17 +66,25 @@ export async function generateClaudeOvernightCandidates(input: {
 
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 2000,
-      thinking: { type: 'disabled' },
-      system,
-      messages,
-      // Uncapped web_search bills every search result back in as input
-      // tokens on top of the per-search fee — a single overnight-stop
-      // lookup never legitimately needs more than a couple of searches.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-    })
+    let response: Anthropic.Message
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 2000,
+        thinking: { type: 'disabled' },
+        system,
+        messages,
+        // Uncapped web_search bills every search result back in as input
+        // tokens on top of the per-search fee — a single overnight-stop
+        // lookup never legitimately needs more than a couple of searches.
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+      })
+    } catch (error) {
+      // A transient API-level failure, not malformed JSON — see
+      // planTrip.ts's callWithRetry for why this needs its own retry too.
+      lastError = error
+      continue
+    }
     logClaudeUsage({ callType: 'overnight', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 

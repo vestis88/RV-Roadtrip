@@ -44,23 +44,31 @@ export async function generateCountryGuide(input: {
 
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      // See planTrip.ts's callWithRetry: Sonnet 5 runs adaptive thinking by
-      // default when this is omitted, which can exhaust max_tokens before
-      // any JSON is emitted. This is schema-constrained extraction, not
-      // open-ended reasoning, so thinking is disabled.
-      thinking: { type: 'disabled' },
-      system,
-      messages,
-      // Uncapped web_search bills every search result back in as input
-      // tokens on top of the per-search fee. 8 gives headroom for the
-      // prompt's 6 topics (roadFees/speedLimits often need more than one
-      // search each — vignette price plus a per-length ferry/bridge rate,
-      // for instance) without being open-ended.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8 }],
-    })
+    let response: Anthropic.Message
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 4000,
+        // See planTrip.ts's callWithRetry: Sonnet 5 runs adaptive thinking by
+        // default when this is omitted, which can exhaust max_tokens before
+        // any JSON is emitted. This is schema-constrained extraction, not
+        // open-ended reasoning, so thinking is disabled.
+        thinking: { type: 'disabled' },
+        system,
+        messages,
+        // Uncapped web_search bills every search result back in as input
+        // tokens on top of the per-search fee. 8 gives headroom for the
+        // prompt's 6 topics (roadFees/speedLimits often need more than one
+        // search each — vignette price plus a per-length ferry/bridge rate,
+        // for instance) without being open-ended.
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 8 }],
+      })
+    } catch (error) {
+      // A transient API-level failure, not malformed JSON — see
+      // planTrip.ts's callWithRetry for why this needs its own retry too.
+      lastError = error
+      continue
+    }
     logClaudeUsage({ callType: 'countryGuide', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 

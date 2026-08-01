@@ -138,3 +138,29 @@ test('editing settings on a trip with a ready plan marks it stale', async ({
 
   await expect(page.getByTestId('plan-status')).toHaveText('stale')
 })
+
+test('Trip Setup offers both "Generate overview" and "Generate full plan" for an idle trip', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('plan-status')).toHaveText('idle')
+
+  await expect(page.getByTestId('generate-overview-button')).toHaveText(
+    'Generate overview',
+  )
+  await expect(page.getByTestId('generate-plan-button')).toHaveText(
+    'Generate full plan',
+  )
+
+  // No CLAUDE_API_KEY in this sandbox — same credential-less degradation
+  // explore.spec.ts's own "find great stops" test exercises, confirming
+  // this button drives the same generateExploreHighlights callable rather
+  // than silently doing nothing.
+  await page.getByTestId('generate-overview-button').click()
+  await expect(page.getByTestId('generate-overview-error')).toBeVisible({
+    timeout: 10_000,
+  })
+  // A failed attempt must not navigate away.
+  await expect(page.getByTestId('trip-name-input')).toBeVisible()
+})

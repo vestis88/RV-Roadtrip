@@ -80,4 +80,25 @@ describe('generateCountryGuide retry behavior', () => {
       )
     }
   })
+
+  // Regression: previously only a malformed-JSON response was retried — a
+  // transient API-level failure (rate limit, brief overload, network blip)
+  // propagated immediately with no retry at all.
+  it('retries once on a transient API-level failure and succeeds on the second attempt', async () => {
+    createMock.mockReset()
+    createMock
+      .mockRejectedValueOnce(new Error('529 overloaded_error'))
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: RECORDED_RESPONSE }],
+      })
+
+    const { generateCountryGuide } = await import('./countryGuide.js')
+    const guide = await generateCountryGuide({
+      countryCode: 'NO',
+      vehicle: { type: 'RV', weightKg: 3500, registeredAs: 'car' },
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(guide.name).toBe('Norway')
+  })
 })

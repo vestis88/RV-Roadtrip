@@ -91,6 +91,18 @@ function AppShell() {
     setNameDraft(trip.meta.name)
   }
 
+  // The browser tab title never reflected which trip was actually open —
+  // switching trips, or a shared trip getting renamed by another traveler,
+  // left it stuck on the static index.html default forever. Reruns on
+  // every trip.meta.name change, not just once on load, so switching trips
+  // (or the active trip being renamed) keeps it current rather than going
+  // stale after the first paint.
+  useEffect(() => {
+    document.title = trip?.meta.name
+      ? `${trip.meta.name} · RV Road Trip Planner`
+      : 'RV Road Trip Planner'
+  }, [trip?.meta.name])
+
   // iOS Safari resizes the *visual* viewport for the on-screen keyboard
   // without resizing the layout viewport, so its native "scroll the focused
   // field into view" behavior — which targets the layout/document scroll —

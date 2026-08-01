@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
 import { PRESET_INTERESTS } from '../lib/interests'
+import { generateExploreHighlights } from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { updateTripSettings } from '../lib/updateTripSettings'
 
@@ -14,15 +16,35 @@ interface SettingsScreenProps {
 }
 
 const GENERATE_LABEL: Record<'idle' | 'stale' | 'error', string> = {
-  idle: 'Generate plan',
+  idle: 'Generate full plan',
   stale: 'Re-plan trip',
   error: 'Retry',
 }
 
 export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
+  const navigate = useNavigate()
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
   const [submitting, setSubmitting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [overviewSubmitting, setOverviewSubmitting] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
+
+  // Switching trips (TripSwitcher) doesn't remount this component — it's
+  // the same SettingsScreen instance re-rendered with new tripId/trip
+  // props, and `useState(trip.settings)` above only reads its initial
+  // value once, on first mount. Without this resync, every subsequent
+  // trip switch kept showing whichever trip's settings this component
+  // happened to mount with — reported as switching trips "erasing" travel
+  // dates and destinations (really: displaying a *different* trip's dates,
+  // possibly blank ones, instead of the one just switched to). Same
+  // render-time resync pattern NotesScreen.tsx already uses for its own
+  // local text state, keyed on tripId here since TripSettings has no
+  // per-edit watermark the way notes.updatedAt gives NotesScreen.
+  const [syncedTripId, setSyncedTripId] = useState(tripId)
+  if (tripId !== syncedTripId) {
+    setSyncedTripId(tripId)
+    setSettings(trip.settings)
+  }
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
@@ -56,6 +78,27 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
       setConfirmOpen(false)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // "Generate overview" (2026-07-31): a direct entry point into explore
+  // mode from Trip Setup itself, alongside "Generate full plan" — the cheap,
+  // repeatable curation pass (generateExploreHighlights, same callable the
+  // Map tab's own "Find great stops" button already uses) needs no
+  // confirmation the way the expensive full generation does. Navigates to
+  // the Map tab once it lands so the traveler immediately sees the result,
+  // rather than triggering it and leaving them wondering where it went.
+  async function generateOverview() {
+    setOverviewSubmitting(true)
+    setOverviewError(null)
+    try {
+      await generateExploreHighlights(tripId)
+      navigate('/map')
+    } catch (error) {
+      console.error('generateExploreHighlights failed', error)
+      setOverviewError('Could not find stops right now — please try again.')
+    } finally {
+      setOverviewSubmitting(false)
     }
   }
 
@@ -227,6 +270,17 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
 
       <div className="card p-4">
         <div className="flex flex-wrap items-center gap-3">
+          {trip.planMeta.status === 'idle' && (
+            <button
+              type="button"
+              data-testid="generate-overview-button"
+              onClick={() => void generateOverview()}
+              disabled={overviewSubmitting || submitting}
+              className="btn btn-secondary"
+            >
+              {overviewSubmitting ? 'Finding great stops…' : 'Generate overview'}
+            </button>
+          )}
           {(trip.planMeta.status === 'idle' ||
             trip.planMeta.status === 'stale' ||
             trip.planMeta.status === 'error') && (
@@ -266,6 +320,14 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             {trip.planMeta.error}
           </p>
         )}
+        {overviewError && (
+          <p
+            className="mt-2 text-sm text-red-600 dark:text-red-400"
+            data-testid="generate-overview-error"
+          >
+            {overviewError}
+          </p>
+        )}
       </div>
 
       {confirmOpen && (
@@ -277,7 +339,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           }
           description={
             trip.planMeta.status === 'idle'
-              ? "This fills in every day's route, activities, and restaurants — the expensive step. If you'd rather find the stops worth building around first without paying for full detail, head to the Map tab and explore before generating."
+              ? "This fills in every day's route, activities, and restaurants — the expensive step. If you'd rather find the stops worth building around first without paying for full detail, use \"Generate overview\" instead."
               : 'This replaces every day from scratch — a full regeneration, not an incremental update to just what changed.'
           }
           confirmLabel={GENERATE_LABEL[trip.planMeta.status as 'idle' | 'stale' | 'error']}

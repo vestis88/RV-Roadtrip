@@ -122,21 +122,33 @@ async function callWithRetry<T>(
 
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: maxTokens,
-      // Sonnet 5 runs adaptive thinking by default when `thinking` is
-      // omitted, and thinking tokens count against max_tokens — on a call
-      // where the model decides to think at length, it can exhaust the
-      // whole budget before emitting any of the JSON text these prompts
-      // require, ending in stop_reason=max_tokens with zero output. These
-      // are schema-constrained extraction/planning calls, not open-ended
-      // reasoning tasks, so thinking is turned off to keep max_tokens
-      // entirely available for the actual response.
-      thinking: { type: 'disabled' },
-      system,
-      messages,
-    })
+    let response: Anthropic.Message
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: maxTokens,
+        // Sonnet 5 runs adaptive thinking by default when `thinking` is
+        // omitted, and thinking tokens count against max_tokens — on a call
+        // where the model decides to think at length, it can exhaust the
+        // whole budget before emitting any of the JSON text these prompts
+        // require, ending in stop_reason=max_tokens with zero output. These
+        // are schema-constrained extraction/planning calls, not open-ended
+        // reasoning tasks, so thinking is turned off to keep max_tokens
+        // entirely available for the actual response.
+        thinking: { type: 'disabled' },
+        system,
+        messages,
+      })
+    } catch (error) {
+      // A transient API-level failure (rate limit, brief overload, network
+      // blip) — MAX_ATTEMPTS existing at all implies this call is meant to
+      // be resilient to exactly this, not just to Claude returning
+      // malformed JSON. Retries the identical request unchanged (nothing
+      // was pushed onto `messages`), same as a schema-failure retry just
+      // without the corrective follow-up message.
+      lastError = error
+      continue
+    }
     logClaudeUsage({ ...usageContext, attempt, response })
     const text = textFromResponse(response)
 

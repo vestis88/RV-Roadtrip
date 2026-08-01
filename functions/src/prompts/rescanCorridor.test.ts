@@ -167,4 +167,31 @@ describe('generateRescanCandidates', () => {
     await expect(runRescan()).rejects.toBeDefined()
     expect(createMock).toHaveBeenCalledTimes(2)
   })
+
+  // Regression: the retry loop previously only caught a malformed-JSON
+  // response — a transient API-level failure (rate limit, brief overload,
+  // network blip) from the client.messages.create call itself propagated
+  // immediately with no retry at all, defeating the whole point of
+  // MAX_ATTEMPTS. Reported as "rescan doesn't work" on what was very
+  // plausibly just an ordinary transient hiccup.
+  it('retries once on a transient API-level failure and succeeds on the second attempt', async () => {
+    createMock
+      .mockReset()
+      .mockRejectedValueOnce(new Error('529 overloaded_error'))
+      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+
+    const finds = await runRescan()
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(finds[0].name).toBe('Nearby')
+  })
+
+  it('throws the transient-failure error when every attempt fails at the API level', async () => {
+    createMock.mockReset().mockRejectedValue(new Error('529 overloaded_error'))
+    geocodeQueryMock.mockReset()
+
+    await expect(runRescan()).rejects.toThrow('529 overloaded_error')
+    expect(createMock).toHaveBeenCalledTimes(2)
+  })
 })

@@ -92,4 +92,28 @@ describe('generateClaudeOvernightCandidates', () => {
     expect(createMock).toHaveBeenCalledTimes(2)
     expect(candidates[0].type).toBe('stellplatz')
   })
+
+  // Regression: previously only a malformed-JSON response was retried — a
+  // transient API-level failure (rate limit, brief overload, network blip)
+  // propagated immediately with no retry at all.
+  it('retries once on a transient API-level failure and succeeds on the second attempt', async () => {
+    createMock.mockReset()
+    createMock
+      .mockRejectedValueOnce(new Error('529 overloaded_error'))
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: RECORDED_RESPONSE }],
+      })
+
+    const { generateClaudeOvernightCandidates } = await import(
+      './overnightCandidates.js'
+    )
+    const candidates = await generateClaudeOvernightCandidates({
+      kind: 'stellplatz',
+      near: { lat: 61.1, lng: 10.5 },
+      country: 'NO',
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(candidates[0].type).toBe('stellplatz')
+  })
 })

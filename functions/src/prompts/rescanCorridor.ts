@@ -83,17 +83,29 @@ export async function generateRescanCandidates(input: {
   let found: z.infer<typeof rescanResponseSchema> | undefined
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      thinking: { type: 'disabled' },
-      system,
-      messages,
-      // Uncapped web_search bills every search result back in as input
-      // tokens on top of the per-search fee — a rescan of one small area
-      // never legitimately needs more than a couple of searches.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-    })
+    let response: Anthropic.Message
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 4000,
+        thinking: { type: 'disabled' },
+        system,
+        messages,
+        // Uncapped web_search bills every search result back in as input
+        // tokens on top of the per-search fee — a rescan of one small area
+        // never legitimately needs more than a couple of searches.
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+      })
+    } catch (error) {
+      // A transient API-level failure (rate limit, brief overload, network
+      // blip), not Claude returning malformed JSON — MAX_ATTEMPTS existing
+      // at all implies resilience to exactly this. Previously this threw
+      // immediately on attempt 0 with no retry at all, surfacing as a
+      // generic "Could not rescan this area right now" on the very first
+      // transient blip. Retries the identical request unchanged.
+      lastError = error
+      continue
+    }
     logClaudeUsage({ callType: 'rescan', tripId: input.tripId, attempt, response })
     const text = textFromResponse(response)
 

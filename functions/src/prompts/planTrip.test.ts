@@ -174,8 +174,22 @@ describe('parseRegionHighlights', () => {
     expect(highlights.regions[0].candidateStops[0].priority).toBe('must-see')
   })
 
+  // A trivial/short/local trip can genuinely have nothing worth flagging —
+  // an empty regions array (or a region with an empty candidateStops array)
+  // is a valid, honest response, not a schema violation. Previously
+  // required min(1) at both levels, which meant the only way for Claude to
+  // satisfy the schema on such a trip was to retry into the same empty
+  // response and eventually fail outright — reported as "find great stops"
+  // simply not working for a one-day trip.
+  it('accepts an empty regions array, and a region with an empty candidateStops array', () => {
+    expect(parseRegionHighlights('{"regions": []}').regions).toEqual([])
+    const withEmptyRegion = parseRegionHighlights(
+      '{"regions": [{"region": "x", "country": "NO", "reasoning": "y", "candidateStops": []}]}',
+    )
+    expect(withEmptyRegion.regions[0].candidateStops).toEqual([])
+  })
+
   it('throws on a response that violates the schema', () => {
-    expect(() => parseRegionHighlights('{"regions": []}')).toThrow()
     expect(() =>
       parseRegionHighlights('{"regions": [{"region": "x"}]}'),
     ).toThrow()
@@ -373,6 +387,25 @@ describe('planTrip', () => {
     createMock
       .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse('not valid json'))
+      .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
+      .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
+
+    const { planTrip } = await import('./planTrip.js')
+    const result = await planTrip({ settings: {} as never, notesFreeText: '' })
+
+    expect(createMock).toHaveBeenCalledTimes(4)
+    expect(result.days).toHaveLength(2)
+  })
+
+  // Regression: callWithRetry's loop previously only caught a malformed-JSON
+  // response — a transient API-level failure (rate limit, brief overload,
+  // network blip) from client.messages.create itself propagated immediately
+  // with no retry at all, defeating the whole point of MAX_ATTEMPTS.
+  it('retries a call once on a transient API-level failure and succeeds on the second attempt', async () => {
+    createMock.mockReset()
+    createMock
+      .mockRejectedValueOnce(new Error('529 overloaded_error'))
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
       .mockResolvedValueOnce(textResponse(RECORDED_OUTLINE))
       .mockResolvedValueOnce(textResponse(RECORDED_CHUNK_DETAIL))
 

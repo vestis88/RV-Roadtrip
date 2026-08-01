@@ -232,3 +232,79 @@ test('a trip created before the reverse index existed still shows up in "My trip
   })
   await expect(page.getByTestId(`trip-switcher-item-${tripId}`)).toBeVisible()
 })
+
+test('switching back to a previously-viewed trip shows its own settings again, not the other trip\'s stale ones', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!firstTripId) throw new Error('tripId missing from localStorage')
+
+  await adminDb
+    .collection('trips')
+    .doc(firstTripId)
+    .update({
+      'settings.startDate': '2026-07-10',
+      'settings.endDate': '2026-08-02',
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('start-date-input')).toHaveValue('2026-07-10')
+  const startPointValue = () =>
+    page
+      .getByTestId('start-point-input')
+      .evaluate((el: HTMLInputElement) => el.value)
+  expect(await startPointValue()).toBe('Oslo, Norway')
+
+  // Switch to a brand-new trip — it inherits the first trip's dates (see
+  // "a new trip inherits the previous trip's settings" above) but never its
+  // start/finish points, which always reset — the reliable signal here,
+  // since the first trip's own dates alone wouldn't distinguish "correctly
+  // inherited" from "stale/never resynced". SettingsScreen mounted fresh
+  // for this trip once already, so this step alone isn't where the bug
+  // showed up.
+  await page.getByTestId('trip-switcher-toggle').click()
+  await page.getByTestId('new-trip-button').click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .not.toBe(firstTripId)
+  await expect.poll(startPointValue).toBe('')
+
+  // Switch BACK to the first trip — now cached in the client-side trip
+  // store from the earlier visit, so this doesn't remount SettingsScreen.
+  // Without a resync, its local form state stayed pinned to whatever it
+  // last mounted with (the second trip's blank start point), showing the
+  // first trip's real destination as if it'd been erased.
+  await page.getByTestId('trip-switcher-toggle').click()
+  await page.getByTestId(`trip-switcher-item-${firstTripId}`).click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .toBe(firstTripId)
+  await expect.poll(startPointValue).toBe('Oslo, Norway')
+  await expect(page.getByTestId('end-date-input')).toHaveValue('2026-08-02')
+})
+
+test('the browser tab title tracks the active trip\'s name, including across a trip switch', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page).toHaveTitle('RV Road Trip Planner')
+
+  await page.getByTestId('trip-name-input').fill('Norway Loop')
+  await page.keyboard.press('Tab')
+  await expect(page).toHaveTitle('Norway Loop · RV Road Trip Planner')
+
+  const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  await page.getByTestId('trip-switcher-toggle').click()
+  await page.getByTestId('new-trip-button').click()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .not.toBe(firstTripId)
+  // Fresh trip, no name yet — falls back to the plain app title rather
+  // than staying stuck on the previous trip's name.
+  await expect(page).toHaveTitle('RV Road Trip Planner')
+})
