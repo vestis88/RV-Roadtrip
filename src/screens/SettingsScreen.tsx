@@ -32,6 +32,16 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // Shared between "Generate overview" and "Generate full plan" — see
   // hasRoute's own doc comment for why this check exists.
   const [routeError, setRouteError] = useState<string | null>(null)
+  // `overviewSubmitting` alone only tracks *this* call, made from *this*
+  // mount of the component — navigating away and back (e.g. tapping the
+  // Map tab mid-generation, out of curiosity or impatience) remounts
+  // SettingsScreen with that state reset to false, making an actually
+  // still-running generation look like it silently stopped or got
+  // "disabled." `trip.planMeta.exploreStatus` is the real, server-side
+  // truth (the same field ExploreMapScreen's own busy state should — and
+  // now does — read too), so it survives navigation and stays accurate
+  // regardless of which screen fired the call.
+  const exploring = overviewSubmitting || trip.planMeta.exploreStatus === 'generating'
 
   // Switching trips (TripSwitcher) doesn't remount this component — it's
   // the same SettingsScreen instance re-rendered with new tripId/trip
@@ -303,10 +313,10 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
               type="button"
               data-testid="generate-overview-button"
               onClick={() => void generateOverview()}
-              disabled={overviewSubmitting || submitting}
+              disabled={exploring || submitting}
               className="btn btn-secondary"
             >
-              {overviewSubmitting ? 'Finding great stops…' : 'Generate overview'}
+              {exploring ? 'Finding great stops…' : 'Generate overview'}
             </button>
           )}
           {(trip.planMeta.status === 'idle' ||

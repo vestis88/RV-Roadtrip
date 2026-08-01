@@ -92,6 +92,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
+  // Same reasoning as SettingsScreen.tsx's own `exploring`: a generation
+  // fired from Trip Setup and still running server-side must show as
+  // "still working" here too, on a screen that never made that call
+  // itself — otherwise "Find great stops" looks clickable, and clicking it
+  // just throws the busy-guard's generic error instead of reflecting the
+  // real in-progress state.
+  const exploring = generating || trip.planMeta.exploreStatus === 'generating'
 
   const candidates = corridorStops.filter(
     (stop) => stop.status === 'candidate' || stop.status === 'locked',
@@ -171,10 +178,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           type="button"
           data-testid="explore-find-stops-button"
           className="btn btn-primary"
-          disabled={generating}
+          disabled={exploring}
           onClick={() => void runFindStops()}
         >
-          {generating
+          {exploring
             ? 'Finding great stops…'
             : candidates.length > 0
               ? 'Find more stops'

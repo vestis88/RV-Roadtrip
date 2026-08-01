@@ -201,3 +201,48 @@ test('"Generate overview" and "Generate full plan" both require a start and fini
   await page.getByTestId('generate-plan-button').click()
   await expect(page.getByTestId('confirm-generate-dialog')).toBeVisible()
 })
+
+// Regression: "Switching from trip setup to map seems to disable the
+// overview generation" — a generation still running server-side
+// (planMeta.exploreStatus: 'generating') must keep showing as in-progress
+// no matter which screen shows it, since the traveler can freely tab
+// between Trip Setup and Map mid-generation. Previously each screen only
+// tracked its own local "am I submitting" state, which reset to false on
+// remount (e.g. navigating away and back) — making a real, still-running
+// generation look like it had silently stopped.
+test('a generation already running server-side shows as in-progress on both Trip Setup and Map, even on a fresh mount', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  // Simulates a generation kicked off elsewhere (or from a previous mount
+  // of this same screen) that's still in flight — not something this test
+  // itself triggers via a click.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({ 'planMeta.exploreStatus': 'generating' })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+
+  await expect(page.getByTestId('generate-overview-button')).toHaveText(
+    'Finding great stops…',
+  )
+  await expect(page.getByTestId('generate-overview-button')).toBeDisabled()
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+  await expect(page.getByTestId('explore-find-stops-button')).toHaveText(
+    'Finding great stops…',
+  )
+  await expect(page.getByTestId('explore-find-stops-button')).toBeDisabled()
+
+  await page.getByTestId('nav-setup').click()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('generate-overview-button')).toHaveText(
+    'Finding great stops…',
+  )
+})
