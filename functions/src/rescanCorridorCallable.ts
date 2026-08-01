@@ -32,6 +32,15 @@ export async function runRescanCorridor(
   tripId: string,
   center: LatLng,
   radiusKm: number,
+  // A traveler-typed description of what they're looking for, from
+  // AddCorridorStopForm's "Describe what you want" mode — see
+  // rescanCorridorPrompt.ts's own doc comment. Optional: omitted, this is
+  // the plain "Rescan this area" behavior, unchanged.
+  query?: string,
+  // The explore-mode route corridor — see generateRescanCandidates' own doc
+  // comment. Optional: omitted, filtering stays distance-from-center as
+  // before.
+  backbone?: LatLng[],
 ): Promise<number> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
@@ -47,6 +56,8 @@ export async function runRescanCorridor(
     radiusKm,
     notesFreeText: trip.notes.freeText,
     tripId,
+    query,
+    backbone,
   })
 
   let nextRank = 0
@@ -90,15 +101,21 @@ export const rescanCorridor = onCall(
     const tripId = request.data?.tripId
     const center = request.data?.center as LatLng | undefined
     const radiusKm = request.data?.radiusKm
+    const query = request.data?.query
+    const backbone = request.data?.backbone as LatLng[] | undefined
     if (
       typeof tripId !== 'string' ||
       typeof center?.lat !== 'number' ||
       typeof center?.lng !== 'number' ||
-      typeof radiusKm !== 'number'
+      typeof radiusKm !== 'number' ||
+      (query !== undefined && typeof query !== 'string') ||
+      (backbone !== undefined &&
+        (!Array.isArray(backbone) ||
+          backbone.some((p) => typeof p?.lat !== 'number' || typeof p?.lng !== 'number')))
     ) {
       throw new HttpsError(
         'invalid-argument',
-        'tripId, center {lat,lng}, and radiusKm are required',
+        'tripId, center {lat,lng}, and radiusKm are required; query, if given, must be a string; backbone, if given, must be an array of {lat,lng}',
       )
     }
     if (radiusKm <= 0 || radiusKm > MAX_RESCAN_RADIUS_KM) {
@@ -107,7 +124,19 @@ export const rescanCorridor = onCall(
         `radiusKm must be between 0 and ${MAX_RESCAN_RADIUS_KM}`,
       )
     }
-    const stopsWritten = await runRescanCorridor(tripId, center, radiusKm)
+    if (query !== undefined && query.trim().length > 200) {
+      throw new HttpsError('invalid-argument', 'query must be 200 characters or fewer')
+    }
+    if (backbone !== undefined && backbone.length > 50) {
+      throw new HttpsError('invalid-argument', 'backbone must be 50 points or fewer')
+    }
+    const stopsWritten = await runRescanCorridor(
+      tripId,
+      center,
+      radiusKm,
+      query?.trim() || undefined,
+      backbone,
+    )
     return { stopsWritten }
   },
 )

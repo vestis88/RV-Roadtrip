@@ -250,3 +250,33 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
     timeout: 10_000,
   })
 })
+
+test('"Describe it" mode requires a description, then degrades to an error banner without Claude/Places access', async ({
+  page,
+}) => {
+  await createTripWithPlan(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await page.getByTestId('add-corridor-stop-toggle').click()
+  await page.getByTestId('add-corridor-stop-mode-search').click()
+
+  // Empty query is rejected client-side, no callable invoked.
+  await page.getByTestId('corridor-search-submit').click()
+  await expect(page.getByTestId('corridor-search-error')).toContainText(
+    'Describe',
+  )
+
+  await page.getByTestId('corridor-search-query').fill('coffee stop')
+  await page.getByTestId('corridor-search-submit').click()
+  // Same credential-less degradation the plain rescan test above exercises
+  // — confirms this reaches the same backend call with a query attached,
+  // not a no-op.
+  await expect(page.getByTestId('corridor-search-error')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  // The form stays open (not auto-closed on failure) so the traveler can
+  // adjust the query and retry.
+  await expect(page.getByTestId('add-corridor-stop-form')).toBeVisible()
+})

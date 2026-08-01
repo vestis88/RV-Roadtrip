@@ -67,6 +67,15 @@ interface ExploreMapScreenProps {
 export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const { corridorStops } = useCorridorStops(tripId)
   const [zoom, setZoom] = useState(6)
+  // "Rescan this area"/"Add stop" both anchor to wherever the traveler is
+  // actually looking, not a fixed point — OverviewMapScreen already tracks
+  // this the same way; this screen previously didn't, so both actions
+  // silently searched near the trip's start point regardless of how far
+  // the map had been panned/zoomed away from it.
+  const [center, setCenter] = useState<LatLng>({
+    lat: trip.settings.startPoint.lat,
+    lng: trip.settings.startPoint.lng,
+  })
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -187,7 +196,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             defaultZoom={zoom}
             mapId="rv-trip-explore"
             gestureHandling="greedy"
-            onCameraChanged={(event: MapCameraChangedEvent) => setZoom(event.detail.zoom)}
+            onCameraChanged={(event: MapCameraChangedEvent) => {
+              setZoom(event.detail.zoom)
+              setCenter(event.detail.center)
+            }}
           >
             <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
             <AdvancedMarker
@@ -223,9 +235,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
           <AddCorridorStopForm
             tripId={tripId}
-            defaultLocation={{ ...trip.settings.startPoint, name: '' }}
+            defaultLocation={{ ...center, name: '' }}
+            backbone={backbone}
           />
-          <RescanCorridorButton tripId={tripId} center={trip.settings.startPoint} />
+          <RescanCorridorButton tripId={tripId} center={center} />
         </div>
       </div>
 

@@ -88,6 +88,125 @@ describe('generateRescanCandidates', () => {
     expect(params.system).toMatch(/DO NOT invent/i)
   })
 
+  // "Describe what you want" (AddCorridorStopForm, 2026-08-01): a traveler
+  // query narrows what this same call looks for instead of the generic
+  // "what's worth stopping for" pass.
+  it('includes the traveler\'s query as a focusQuery when one is given', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      query: 'coffee stop',
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent.focusQuery).toBe('coffee stop')
+  })
+
+  it('omits focusQuery entirely from a plain rescan with no query', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+
+    await runRescan()
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent).not.toHaveProperty('focusQuery')
+  })
+
+  // Route-aware search (2026-08-01, following user feedback that "along
+  // route" should mean the actual explore-mode corridor, not just wherever
+  // the map happens to be panned): when `backbone` is given, filtering
+  // switches from distance-off-center to detour-off-backbone.
+  it('filters by detour off the route backbone instead of distance from center when backbone is given', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce(responseWithFinds(['OnRoute', 'OffRoute']))
+    geocodeQueryMock.mockReset().mockImplementation((query: string) =>
+      Promise.resolve(
+        query.startsWith('OnRoute')
+          ? { lat: 61.5, lng: 9.0 } // roughly on the backbone line below
+          : { lat: 61.5, lng: 12.0 }, // ~150km east of it
+      ),
+    )
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({
+      // Deliberately far from both finds and a tiny radius — proves the
+      // center/radiusKm pair isn't what's doing the filtering here.
+      center: { lat: 0, lng: 0 },
+      radiusKm: 1,
+      backbone: [
+        { lat: 61.0, lng: 9.0 },
+        { lat: 62.0, lng: 9.0 },
+      ],
+    })
+
+    expect(finds.map((f) => f.name)).toEqual(['OnRoute'])
+  })
+
+  it('sends routeWaypoints instead of areaDescription/radiusKm in the prompt when backbone is given', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      backbone: [
+        { lat: 61.0, lng: 9.0 },
+        { lat: 62.0, lng: 9.0 },
+      ],
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent).toHaveProperty('routeWaypoints')
+    expect(userContent).not.toHaveProperty('areaDescription')
+    expect(userContent).not.toHaveProperty('radiusKm')
+  })
+
+  it('falls back to distance-from-center filtering when backbone has fewer than 2 points', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      backbone: [{ lat: 61.0, lng: 9.0 }],
+    })
+
+    expect(finds).toHaveLength(1)
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent).toHaveProperty('areaDescription')
+  })
+
   it('drops a find outside the requested radius', async () => {
     createMock
       .mockReset()

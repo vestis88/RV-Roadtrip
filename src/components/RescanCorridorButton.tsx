@@ -1,16 +1,11 @@
 import { useState } from 'react'
-import { httpsCallable } from 'firebase/functions'
 import type { LatLng } from '@rv/shared'
-import { functions } from '../lib/firebase'
+import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
 
 interface RescanCorridorButtonProps {
   tripId: string
   center: LatLng
 }
-
-/** A fixed, conservative default — comfortably under the callable's own
- * MAX_RESCAN_RADIUS_KM cap. No radius picker in this first cut. */
-const RESCAN_RADIUS_KM = 25
 
 /**
  * "Rescan this area" (phase 3): searches near the map's current center and
@@ -30,14 +25,10 @@ export function RescanCorridorButton({ tripId, center }: RescanCorridorButtonPro
     setError(null)
     setStatus(null)
     try {
-      const call = httpsCallable<
-        { tripId: string; center: LatLng; radiusKm: number },
-        { stopsWritten: number }
-      >(functions, 'rescanCorridor')
-      const result = await call({ tripId, center, radiusKm: RESCAN_RADIUS_KM })
+      const result = await rescanCorridorArea(tripId, center, RESCAN_RADIUS_KM)
       setStatus(
-        result.data.stopsWritten > 0
-          ? `Found ${result.data.stopsWritten} new stop${result.data.stopsWritten === 1 ? '' : 's'} nearby.`
+        result.stopsWritten > 0
+          ? `Found ${result.stopsWritten} new stop${result.stopsWritten === 1 ? '' : 's'} nearby.`
           : 'Nothing new found nearby.',
       )
     } catch (err) {

@@ -143,6 +143,37 @@ describe('runRescanCorridor', () => {
     })
   })
 
+  // "Describe what you want" (AddCorridorStopForm, 2026-08-01).
+  it('passes a query through to the generator when one is given', async () => {
+    const { tripId } = await createTripForUser('uidRescanQuery')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(tripId, CENTER, 15, 'coffee stop')
+
+    expect(generateRescanCandidatesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ query: 'coffee stop' }),
+    )
+  })
+
+  // Route-aware search (2026-08-01) — see rescanCorridor.test.ts for the
+  // actual detour-filtering behavior this backbone enables.
+  it('passes the route backbone through to the generator when one is given', async () => {
+    const { tripId } = await createTripForUser('uidRescanBackbone')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+    const backbone = [
+      { lat: 61.0, lng: 9.0 },
+      { lat: 62.0, lng: 9.0 },
+    ]
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(tripId, CENTER, 15, 'coffee stop', backbone)
+
+    expect(generateRescanCandidatesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ backbone }),
+    )
+  })
+
   it('writes nothing when the search finds nothing', async () => {
     const { tripId } = await createTripForUser('uidRescanC')
     generateRescanCandidatesMock.mockReset().mockResolvedValue([])

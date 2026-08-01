@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
-import { haversineDistanceKm, type LatLng } from '@rv/shared'
+import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
 import { geocodeQuery } from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
@@ -25,6 +25,17 @@ export const MAX_RESCAN_RADIUS_KM = 50
 /** Caps how many proposed stops one rescan can add — a single search
  * shouldn't be able to flood the corridor with dozens of unreviewed pins. */
 export const MAX_RESCAN_RESULTS = 10
+
+/**
+ * When searching along a route backbone (see `backbone` below) instead of a
+ * plain point+radius, this is the filter that replaces `radiusKm`: how far
+ * off the corridor a find is allowed to sit, measured the same way
+ * ExploreCandidateCard's own detour badges are (estimateDetourKm — cheapest
+ * extra km via this point on top of whatever backbone leg it's nearest).
+ * Deliberately smaller than MAX_RESCAN_RADIUS_KM: "along the route" implies
+ * a genuinely minor detour, not a 50km side trip.
+ */
+export const MAX_QUERY_SEARCH_DETOUR_KM = 30
 
 function stripCodeFences(text: string): string {
   return text
@@ -66,15 +77,21 @@ export interface RescanFind {
 
 /**
  * Searches near `center` for stops worth adding to the corridor, within
- * `radiusKm`. Each find is geocoded (biased near `center`) and then actually
- * measured against `radiusKm` — a find that doesn't geocode is dropped
- * (nothing to check its distance against).
+ * `radiusKm` — or, when `backbone` is given (2026-08-01, the explore-mode
+ * route corridor — see buildRescanCorridorPrompt's own doc comment), along
+ * that whole route instead, filtered by detour-off-backbone rather than
+ * distance from one point. Each find is geocoded (still biased near
+ * `center` either way — a reasonable bias point regardless of which filter
+ * applies) and then actually measured server-side — a find that doesn't
+ * geocode is dropped (nothing to check its distance/detour against).
  */
 export async function generateRescanCandidates(input: {
   center: LatLng
   radiusKm: number
   notesFreeText?: string
   tripId?: string
+  query?: string
+  backbone?: LatLng[]
 }): Promise<RescanFind[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRescanCorridorPrompt(input)
@@ -137,8 +154,19 @@ export async function generateRescanCandidates(input: {
     }),
   )
 
-  const withinRadius = located.filter((find): find is RescanFind => {
+  const useBackbone = input.backbone && input.backbone.length >= 2
+  const filtered = located.filter((find): find is RescanFind => {
     if (!find) return false
+    if (useBackbone) {
+      const detourKm = estimateDetourKm(find, input.backbone!)
+      if (detourKm > MAX_QUERY_SEARCH_DETOUR_KM) {
+        console.info(
+          `Dropping rescan find "${find.name}" — ≈${Math.round(detourKm)} km detour off route (max ${MAX_QUERY_SEARCH_DETOUR_KM} km)`,
+        )
+        return false
+      }
+      return true
+    }
     const distanceKm = haversineDistanceKm(find, input.center)
     if (distanceKm > input.radiusKm) {
       console.info(
@@ -149,5 +177,5 @@ export async function generateRescanCandidates(input: {
     return true
   })
 
-  return withinRadius.slice(0, MAX_RESCAN_RESULTS)
+  return filtered.slice(0, MAX_RESCAN_RESULTS)
 }
