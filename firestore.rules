@@ -62,8 +62,14 @@ service cloud.firestore {
     }
 
     match /planRequests/{requestId} {
-      allow create: if request.auth != null;
-      allow read: if request.auth != null;
+      // A planRequests doc is what triggers generatePlan.ts's expensive
+      // Claude/Places/Routes pipeline — without isMember here, any signed-in
+      // user could fire a full generation against a trip they don't belong
+      // to just by knowing its tripId, burning that trip's owner's API
+      // quota and overwriting their days. Matches every other subcollection
+      // in this ruleset, which all gate on isMember(tripId).
+      allow create: if isMember(request.resource.data.tripId);
+      allow read: if isMember(resource.data.tripId);
       allow update, delete: if false;
     }
   }

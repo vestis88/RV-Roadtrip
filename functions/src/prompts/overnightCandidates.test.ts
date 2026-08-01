@@ -116,4 +116,40 @@ describe('generateClaudeOvernightCandidates', () => {
     expect(createMock).toHaveBeenCalledTimes(2)
     expect(candidates[0].type).toBe('stellplatz')
   })
+
+  // Regression: Claude has no geocode step to fall back on for these two
+  // candidate types (no queryable database to check its coordinates
+  // against), so a hallucinated lat/lng far from the requested point
+  // previously went straight to the traveler as a legitimate "nearby"
+  // option.
+  it('drops a candidate whose coordinates are implausibly far from the requested point', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            candidates: [
+              // ~5km from near — plausible.
+              { name: 'Nearby stop', lat: 61.15, lng: 10.55, description: 'Close by.' },
+              // Rome, nowhere near a Lillehammer-area search — a
+              // hallucinated/wrong coordinate.
+              { name: 'Hallucinated stop', lat: 41.9, lng: 12.5, description: 'Far away.' },
+            ],
+          }),
+        },
+      ],
+    })
+
+    const { generateClaudeOvernightCandidates } = await import(
+      './overnightCandidates.js'
+    )
+    const candidates = await generateClaudeOvernightCandidates({
+      kind: 'wild',
+      near: { lat: 61.1, lng: 10.5 },
+      country: 'NO',
+    })
+
+    expect(candidates.map((c) => c.name)).toEqual(['Nearby stop'])
+  })
 })

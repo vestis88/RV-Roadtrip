@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { corridorStopSchema, type LatLng, type Trip } from '@rv/shared'
+import { requireTripMember } from './authz.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
   MAX_RESCAN_RADIUS_KM,
@@ -93,7 +94,13 @@ export async function runRescanCorridor(
 }
 
 export const rescanCorridor = onCall(
-  { secrets: [claudeApiKey, googlePlacesApiKey] },
+  {
+    secrets: [claudeApiKey, googlePlacesApiKey],
+    // Same reasoning as exploreHighlightsCallable.ts's own timeoutSeconds:
+    // the underlying Claude call retries and geocodes every find before
+    // returning, which can plausibly exceed the 60s default.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
@@ -130,6 +137,7 @@ export const rescanCorridor = onCall(
     if (backbone !== undefined && backbone.length > 50) {
       throw new HttpsError('invalid-argument', 'backbone must be 50 points or fewer')
     }
+    await requireTripMember(tripId, request.auth.uid)
     const stopsWritten = await runRescanCorridor(
       tripId,
       center,

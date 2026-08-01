@@ -143,3 +143,18 @@ describe('generateExploreHighlightsForTrip', () => {
     )
   })
 })
+
+describe('generateExploreHighlights callable', () => {
+  it('rejects a signed-in caller who is not a member of the trip', async () => {
+    const { tripId } = await createTripForUser('uidExploreCallableOwner')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+    const { generateExploreHighlights } = await import('./exploreHighlightsCallable.js')
+    await expect(
+      generateExploreHighlights.run({
+        data: { tripId },
+        auth: { uid: 'uidExploreCallableStranger' },
+      } as never),
+    ).rejects.toThrow('Not a member of this trip')
+    expect(generateRegionHighlightsMock).not.toHaveBeenCalled()
+  })
+})

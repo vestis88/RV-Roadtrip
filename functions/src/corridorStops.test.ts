@@ -137,4 +137,36 @@ describe('buildCorridorStopWrites', () => {
     const stop = snap.docs[0].data() as CorridorStop
     expect(stop.why).toBe('Gateway to Rondane National Park')
   })
+
+  // Regression: a loop trip revisiting its own starting town (or any
+  // hub-and-spoke itinerary returning to a base) previously collapsed two
+  // unrelated visits into one corridorStops doc, since grouping keyed
+  // purely on lat/lng with no adjacency check.
+  it('keeps non-consecutive visits to the same coordinates as separate stops', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorLoop')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    const oslo = { name: 'Oslo', lat: 59.9, lng: 10.7, country: 'NO' }
+    const otta = { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' }
+    const outboundRef = tripRef.collection('days').doc()
+    const middleRef = tripRef.collection('days').doc()
+    const returnRef = tripRef.collection('days').doc()
+    const writtenDays: { ref: DocumentReference; day: TripDay }[] = [
+      { ref: outboundRef, day: day({ index: 0, overnight: oslo }) },
+      { ref: middleRef, day: day({ index: 1, overnight: otta }) },
+      { ref: returnRef, day: day({ index: 2, overnight: oslo }) },
+    ]
+
+    await commitInChunks(db, buildCorridorStopWrites(tripRef, writtenDays))
+
+    const snap = await tripRef.collection('corridorStops').get()
+    const stops = snap.docs.map((d) => d.data() as CorridorStop)
+    expect(stops).toHaveLength(3)
+    const osloStops = stops.filter((s) => s.name === 'Oslo')
+    expect(osloStops).toHaveLength(2)
+    expect(osloStops.map((s) => s.linkedDayIds).sort()).toEqual(
+      [[outboundRef.id], [returnRef.id]].sort(),
+    )
+  })
 })

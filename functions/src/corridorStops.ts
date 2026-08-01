@@ -10,6 +10,16 @@ import type { PendingWrite } from './firestoreBatch.js'
  * verbatim for every day at that stop, never recomputed, so exact-match
  * grouping carries no floating-point drift risk).
  *
+ * `writtenDays` must already be in trip-chronological order — grouping only
+ * merges a run of *adjacent* same-coordinate days, not every day anywhere in
+ * the trip that happens to share a coordinate. A loop itinerary revisiting
+ * its own starting town, or a hub-and-spoke trip returning to a base
+ * campsite, would otherwise collapse two unrelated visits into one
+ * corridorStops doc whose linkedDayIds span non-contiguous days —
+ * corridorReconciliation.ts treats each doc as a single contiguous block, so
+ * reordering/removing that stop would move or delete days from two
+ * unrelated points in the itinerary together.
+ *
  * Every stop this produces is 'committed': it's already locked into a real
  * generated plan, not a rescan suggestion or a traveler-placed pin (phase 3).
  */
@@ -17,21 +27,22 @@ export function buildCorridorStopWrites(
   tripRef: DocumentReference,
   writtenDays: { ref: DocumentReference; day: TripDay }[],
 ): PendingWrite[] {
-  const groups = new Map<string, { day: TripDay; dayIds: string[] }>()
+  const groups: { day: TripDay; dayIds: string[] }[] = []
   for (const { ref, day } of writtenDays) {
     const key = `${day.overnight.lat}|${day.overnight.lng}`
-    const existing = groups.get(key)
-    if (existing) {
-      existing.dayIds.push(ref.id)
-      if (!existing.day.highlightReason && day.highlightReason) {
-        existing.day = day
+    const last = groups[groups.length - 1]
+    const lastKey = last && `${last.day.overnight.lat}|${last.day.overnight.lng}`
+    if (last && lastKey === key) {
+      last.dayIds.push(ref.id)
+      if (!last.day.highlightReason && day.highlightReason) {
+        last.day = day
       }
     } else {
-      groups.set(key, { day, dayIds: [ref.id] })
+      groups.push({ day, dayIds: [ref.id] })
     }
   }
 
-  return Array.from(groups.values()).map(({ day, dayIds }) => ({
+  return groups.map(({ day, dayIds }) => ({
     op: 'set',
     ref: tripRef.collection('corridorStops').doc(),
     data: corridorStopSchema.parse({

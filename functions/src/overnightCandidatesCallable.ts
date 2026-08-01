@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { CountryGuide, OvernightStopCandidate, TripDay } from '@rv/shared'
+import { requireTripMember } from './authz.js'
 import { googlePlacesApiKey, searchCampsiteCandidates } from './placesApi.js'
 import { searchStellplatzCandidates } from './overpassApi.js'
 import {
@@ -111,7 +112,14 @@ export async function fetchOvernightCandidates(
 }
 
 export const getOvernightCandidates = onCall(
-  { secrets: [claudeApiKey, googlePlacesApiKey] },
+  {
+    secrets: [claudeApiKey, googlePlacesApiKey],
+    // Runs Places + Overpass + Claude in parallel, then a second sequential
+    // Claude call when OSM finds nothing — the worst case of the four
+    // Claude-calling callables in this file, so needs the same headroom
+    // exploreHighlightsCallable.ts's own doc comment explains.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
@@ -121,6 +129,7 @@ export const getOvernightCandidates = onCall(
     if (typeof tripId !== 'string' || typeof dayId !== 'string') {
       throw new HttpsError('invalid-argument', 'tripId and dayId are required')
     }
+    await requireTripMember(tripId, request.auth.uid)
     const candidates = await fetchOvernightCandidates(tripId, dayId)
     return { candidates }
   },

@@ -197,3 +197,18 @@ describe('runRescanCorridor', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('rescanCorridor callable', () => {
+  it('rejects a signed-in caller who is not a member of the trip', async () => {
+    const { tripId } = await createTripForUser('uidRescanCallableOwner')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+    const { rescanCorridor } = await import('./rescanCorridorCallable.js')
+    await expect(
+      rescanCorridor.run({
+        data: { tripId, center: CENTER, radiusKm: 25 },
+        auth: { uid: 'uidRescanCallableStranger' },
+      } as never),
+    ).rejects.toThrow('Not a member of this trip')
+    expect(generateRescanCandidatesMock).not.toHaveBeenCalled()
+  })
+})

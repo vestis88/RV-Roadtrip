@@ -261,10 +261,21 @@ describe('shareCodes/{code}', () => {
 })
 
 describe('planRequests/{requestId}', () => {
-  it('lets any authenticated user create a plan request', async () => {
-    const db = testEnv.authenticatedContext(STRANGER_UID).firestore()
+  it('lets a trip member create a plan request for their own trip', async () => {
+    const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
     await assertSucceeds(
       setDoc(doc(db, 'planRequests', 'req1'), {
+        tripId: TRIP_ID,
+        kind: 'full',
+        status: 'pending',
+      }),
+    )
+  })
+
+  it('denies a signed-in stranger creating a plan request for a trip they are not a member of', async () => {
+    const db = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'planRequests', 'req1Stranger'), {
         tripId: TRIP_ID,
         kind: 'full',
         status: 'pending',
@@ -296,5 +307,19 @@ describe('planRequests/{requestId}', () => {
       updateDoc(doc(db, 'planRequests', 'req3'), { status: 'error' }),
     )
     await assertFails(deleteDoc(doc(db, 'planRequests', 'req3')))
+  })
+
+  it('lets a trip member read a plan request for their own trip, but not a stranger', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'planRequests', 'req4'), {
+        tripId: TRIP_ID,
+        kind: 'full',
+        status: 'pending',
+      })
+    })
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertSucceeds(getDoc(doc(memberDb, 'planRequests', 'req4')))
+    const strangerDb = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    await assertFails(getDoc(doc(strangerDb, 'planRequests', 'req4')))
   })
 })

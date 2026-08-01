@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
-import type { LatLng, OvernightStopCandidate } from '@rv/shared'
+import { haversineDistanceKm, type LatLng, type OvernightStopCandidate } from '@rv/shared'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import {
   buildOvernightCandidatesPrompt,
@@ -12,6 +12,14 @@ export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 
 const MODEL = 'claude-sonnet-5'
 const MAX_ATTEMPTS = 2
+// Unlike every other Claude call in this codebase (see planTrip.ts's own
+// doc comment: "Claude is deliberately not asked for coordinates — models
+// invent plausible-looking wrong ones"), this one has no Places geocode
+// step to fall back on — a stellplatz/wild-camping spot has no queryable
+// database to geocode against. The next best guard is a sanity distance
+// check: a genuine "near this overnight stop" suggestion should be local,
+// not somewhere else in the country a hallucinated coordinate could land.
+const MAX_CANDIDATE_DISTANCE_KM = 50
 
 const overnightCandidateResponseSchema = z.object({
   candidates: z
@@ -90,15 +98,26 @@ export async function generateClaudeOvernightCandidates(input: {
 
     try {
       const parsed = parseOvernightCandidatesResponse(text)
-      return parsed.candidates.map((candidate) => ({
-        name: candidate.name,
-        type: input.kind,
-        lat: candidate.lat,
-        lng: candidate.lng,
-        country: input.country,
-        description: candidate.description,
-        source: 'claude' as const,
-      }))
+      return parsed.candidates
+        .filter((candidate) => {
+          const distanceKm = haversineDistanceKm(input.near, candidate)
+          if (distanceKm > MAX_CANDIDATE_DISTANCE_KM) {
+            console.warn(
+              `Overnight candidate "${candidate.name}" dropped — ${Math.round(distanceKm)}km from the requested point, past MAX_CANDIDATE_DISTANCE_KM`,
+            )
+            return false
+          }
+          return true
+        })
+        .map((candidate) => ({
+          name: candidate.name,
+          type: input.kind,
+          lat: candidate.lat,
+          lng: candidate.lng,
+          country: input.country,
+          description: candidate.description,
+          source: 'claude' as const,
+        }))
     } catch (error) {
       lastError = error
       messages.push({ role: 'assistant', content: text })

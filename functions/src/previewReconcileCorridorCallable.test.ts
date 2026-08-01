@@ -85,3 +85,18 @@ describe('previewReconcileCorridor (computeCorridorReconciliation, the resolver 
     expect((await tripRef.get()).data()?.planMeta.status).toBe('idle')
   })
 })
+
+describe('previewReconcileCorridor callable', () => {
+  it('rejects a signed-in caller who is not a member of the trip', async () => {
+    const { tripId } = await createTripForUser('uidPreviewCallableOwner')
+    const { previewReconcileCorridor } = await import(
+      './previewReconcileCorridorCallable.js'
+    )
+    await expect(
+      previewReconcileCorridor.run({
+        data: { tripId, newStopOrder: [] },
+        auth: { uid: 'uidPreviewCallableStranger' },
+      } as never),
+    ).rejects.toThrow('Not a member of this trip')
+  })
+})

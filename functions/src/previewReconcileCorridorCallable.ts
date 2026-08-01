@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/https'
+import { requireTripMember } from './authz.js'
 import { computeCorridorReconciliation } from './corridorReconciliation.js'
 import { googleRoutesApiKey } from './routesApi.js'
 import { googlePlacesApiKey } from './placesApi.js'
@@ -16,7 +17,15 @@ import { claudeApiKey } from './prompts/planTrip.js'
  * placeholder) before deciding to confirm.
  */
 export const previewReconcileCorridor = onCall(
-  { secrets: [googleRoutesApiKey, claudeApiKey, googlePlacesApiKey] },
+  {
+    secrets: [googleRoutesApiKey, claudeApiKey, googlePlacesApiKey],
+    // Runs a real detail-phase Claude call plus Places enrichment for any
+    // newly-added stop, same class of work as the other Claude-calling
+    // callables in this file's sibling modules — see
+    // exploreHighlightsCallable.ts's own doc comment for why 60s isn't
+    // enough headroom.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
@@ -33,6 +42,7 @@ export const previewReconcileCorridor = onCall(
         'tripId and newStopOrder (string[]) are required',
       )
     }
+    await requireTripMember(tripId, request.auth.uid)
     const { changes, removedStopNames, addedDays, endDateChange } =
       await computeCorridorReconciliation(tripId, newStopOrder)
     return { changes, removedStopNames, addedDays, endDateChange }

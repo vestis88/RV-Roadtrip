@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { TripSettings } from '@rv/shared'
+import { requireTripMember } from './authz.js'
 import { claudeApiKey, generateCountryGuide } from './prompts/countryGuide.js'
 
 export async function refreshCountryGuideForTrip(
@@ -29,7 +30,13 @@ export async function refreshCountryGuideForTrip(
 }
 
 export const refreshCountryGuide = onCall(
-  { secrets: [claudeApiKey] },
+  {
+    secrets: [claudeApiKey],
+    // Same reasoning as exploreHighlightsCallable.ts: the underlying Claude
+    // call retries (MAX_ATTEMPTS) and uses web_search (up to 8 uses), which
+    // can plausibly exceed the 60s default.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
@@ -42,6 +49,7 @@ export const refreshCountryGuide = onCall(
         'tripId and countryCode are required',
       )
     }
+    await requireTripMember(tripId, request.auth.uid)
     await refreshCountryGuideForTrip(tripId, countryCode)
     return { countryCode }
   },

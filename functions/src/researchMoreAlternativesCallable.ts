@@ -1,6 +1,7 @@
 import { getFirestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Activity, LatLng, Meal, Restaurant, TripDay } from '@rv/shared'
+import { requireTripMember } from './authz.js'
 import {
   RESEARCH_BATCH_SIZE,
   backfillActivities,
@@ -152,6 +153,7 @@ export const researchMoreAlternatives = onCall(
         'visibleCount, when provided, must be a positive integer',
       )
     }
+    await requireTripMember(tripId, request.auth.uid)
     const added = await runResearchMoreAlternatives(
       tripId,
       dayId,

@@ -270,3 +270,21 @@ describe('runResearchMoreAlternatives — restaurants', () => {
     ).toBe(true)
   })
 })
+
+describe('researchMoreAlternatives callable', () => {
+  it('rejects a signed-in caller who is not a member of the trip', async () => {
+    const { tripId } = await createTripForUser('uidResearchCallableOwner')
+    await seedDay(tripId, 'day1')
+    backfillActivitiesMock.mockReset()
+    const { researchMoreAlternatives } = await import(
+      './researchMoreAlternativesCallable.js'
+    )
+    await expect(
+      researchMoreAlternatives.run({
+        data: { tripId, dayId: 'day1', kind: 'activity' },
+        auth: { uid: 'uidResearchCallableStranger' },
+      } as never),
+    ).rejects.toThrow('Not a member of this trip')
+    expect(backfillActivitiesMock).not.toHaveBeenCalled()
+  })
+})

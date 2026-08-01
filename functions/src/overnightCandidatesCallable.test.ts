@@ -206,3 +206,19 @@ describe('fetchOvernightCandidates', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('getOvernightCandidates callable', () => {
+  it('rejects a signed-in caller who is not a member of the trip', async () => {
+    const { tripId } = await createTripForUser('uidOvernightCallableOwner')
+    await seedDay(tripId, '2026-08-01')
+    searchCampsiteCandidatesMock.mockReset()
+    const { getOvernightCandidates } = await import('./overnightCandidatesCallable.js')
+    await expect(
+      getOvernightCandidates.run({
+        data: { tripId, dayId: '2026-08-01' },
+        auth: { uid: 'uidOvernightCallableStranger' },
+      } as never),
+    ).rejects.toThrow('Not a member of this trip')
+    expect(searchCampsiteCandidatesMock).not.toHaveBeenCalled()
+  })
+})

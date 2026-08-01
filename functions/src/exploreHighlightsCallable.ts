@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Trip } from '@rv/shared'
+import { requireTripMember } from './authz.js'
 import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
 import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
@@ -105,6 +106,7 @@ export const generateExploreHighlights = onCall(
     if (typeof tripId !== 'string') {
       throw new HttpsError('invalid-argument', 'tripId is required')
     }
+    await requireTripMember(tripId, request.auth.uid)
     return generateExploreHighlightsForTrip(tripId)
   },
 )
