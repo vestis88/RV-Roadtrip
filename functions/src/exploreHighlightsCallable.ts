@@ -5,6 +5,15 @@ import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
 import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
 
+// If the function's container is killed by its own onCall timeout (or
+// crashes outright) after claiming the lock but before the `finally` below
+// runs, `planMeta.exploreStatus` is left stuck at 'generating' forever —
+// every future click would fail immediately with "Already finding great
+// stops" (see the transaction below). Comfortably above how long a genuine
+// run should ever take (generateExploreHighlights' own timeoutSeconds), so
+// this only ever kicks in for an actually-abandoned lock, not a slow one.
+const STALE_EXPLORE_LOCK_MS = 5 * 60 * 1000
+
 /**
  * Explore mode's own generation entry point (2026-07-30) — deliberately NOT
  * routed through the planRequests/generatePlan.ts pipeline the full/replan
@@ -28,10 +37,18 @@ export async function generateExploreHighlightsForTrip(
     if (!tripSnap.exists) {
       throw new HttpsError('not-found', 'Trip not found')
     }
-    if (tripSnap.data()?.planMeta?.exploreStatus === 'generating') {
-      return false
+    const meta = tripSnap.data()?.planMeta
+    if (meta?.exploreStatus === 'generating') {
+      const updatedAt = meta.exploreStatusUpdatedAt
+        ? new Date(meta.exploreStatusUpdatedAt).getTime()
+        : 0
+      const isStale = Date.now() - updatedAt > STALE_EXPLORE_LOCK_MS
+      if (!isStale) return false
     }
-    tx.update(tripRef, { 'planMeta.exploreStatus': 'generating' })
+    tx.update(tripRef, {
+      'planMeta.exploreStatus': 'generating',
+      'planMeta.exploreStatusUpdatedAt': new Date().toISOString(),
+    })
     return true
   })
   if (!claimed) {
@@ -71,7 +88,15 @@ export async function generateExploreHighlightsForTrip(
 }
 
 export const generateExploreHighlights = onCall(
-  { secrets: [claudeApiKey] },
+  {
+    secrets: [claudeApiKey],
+    // Default 60s is too tight for a large multi-country trip: the
+    // highlights call itself can retry once (MAX_ATTEMPTS in planTrip.ts),
+    // and every candidate town is then geocoded before this returns. Well
+    // under STALE_EXPLORE_LOCK_MS so a genuinely slow-but-alive run never
+    // races the staleness check above.
+    timeoutSeconds: 180,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')

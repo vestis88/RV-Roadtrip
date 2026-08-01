@@ -102,6 +102,13 @@ export const planMetaSchema = z.object({
   // shared trip clicking "Find great stops" at the same moment still
   // shouldn't both pay for the call. Absent/'idle' outside a run.
   exploreStatus: z.enum(['idle', 'generating']).optional(),
+  // Set whenever exploreStatus flips to 'generating' — lets a stuck lock
+  // (the function's container killed by its own timeout, or crashed, before
+  // the `finally` that resets exploreStatus could run) be reclaimed after a
+  // grace period instead of leaving "Generate overview" permanently
+  // failing with "Already finding great stops" for that trip. See
+  // exploreHighlightsCallable.ts's STALE_EXPLORE_LOCK_MS.
+  exploreStatusUpdatedAt: isoDateTime.optional(),
 })
 
 export const tripSchema = z.object({

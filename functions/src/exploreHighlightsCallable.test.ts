@@ -98,4 +98,48 @@ describe('generateExploreHighlightsForTrip', () => {
     const snap = await db.collection('trips').doc(tripId).get()
     expect(snap.data()?.planMeta?.exploreStatus).toBe('idle')
   })
+
+  it('reclaims a lock left stuck on "generating" by a crashed prior run', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenStaleLock')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    // Simulate a previous invocation that claimed the lock and then never
+    // reached its own `finally` (killed by the platform's timeout, or
+    // crashed) — the lock is stuck 'generating' with an old timestamp,
+    // exactly what a genuinely abandoned run looks like in Firestore.
+    const staleTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreStatus': 'generating',
+      'planMeta.exploreStatusUpdatedAt': staleTimestamp,
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    const result = await generateExploreHighlightsForTrip(tripId)
+
+    expect(result.candidateCount).toBe(1)
+    const snap = await db.collection('trips').doc(tripId).get()
+    expect(snap.data()?.planMeta?.exploreStatus).toBe('idle')
+  })
+
+  it('does not reclaim a lock that is still recent', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenFreshLock')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const recentTimestamp = new Date(Date.now() - 30 * 1000).toISOString()
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreStatus': 'generating',
+      'planMeta.exploreStatusUpdatedAt': recentTimestamp,
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toThrow(
+      'Already finding great stops',
+    )
+  })
 })
