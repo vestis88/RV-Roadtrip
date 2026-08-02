@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Trip } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
@@ -137,6 +138,7 @@ export const generateExploreHighlights = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     if (typeof tripId !== 'string') {
       throw new HttpsError('invalid-argument', 'tripId is required')

@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { corridorStopSchema, type LatLng, type Trip } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
@@ -128,6 +129,7 @@ export const rescanCorridor = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     const center = request.data?.center as LatLng | undefined
     const radiusKm = request.data?.radiusKm

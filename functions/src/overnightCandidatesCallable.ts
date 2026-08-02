@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { FREE_CAMPING_SECTION_ID } from '@rv/shared'
 import type { CountryGuideSection, OvernightStopCandidate, TripDay } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { COUNTRY_GUIDE_SECTIONS_COLLECTION } from './countrySectionsCallable.js'
 import { googlePlacesApiKey, searchCampsiteCandidates } from './placesApi.js'
@@ -142,6 +143,7 @@ export const getOvernightCandidates = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     const dayId = request.data?.dayId
     if (typeof tripId !== 'string' || typeof dayId !== 'string') {

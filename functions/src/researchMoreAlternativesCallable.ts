@@ -1,6 +1,7 @@
 import { getFirestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Activity, LatLng, Meal, Restaurant, TripDay } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import {
   RESEARCH_BATCH_SIZE,
@@ -118,6 +119,7 @@ export const researchMoreAlternatives = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     const dayId = request.data?.dayId
     const kind = request.data?.kind as ResearchKind | undefined

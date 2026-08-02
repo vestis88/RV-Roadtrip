@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { TripSettings } from '@rv/shared'
 import { db, ensureSignedIn, functions } from '../lib/firebase'
@@ -55,6 +65,27 @@ export function useTripSession() {
         } catch (error) {
           console.error('Failed to backfill trip reverse index', error)
         }
+        return
+      }
+
+      // Nothing stored locally does NOT mean "new traveler" any more.
+      // Signing in on a second device is now the normal way to reach your
+      // own trips (they hang off the account, not the browser), so create
+      // only when the account genuinely has none — otherwise a new phone
+      // would greet you with an empty trip while your real ones sat one
+      // menu away.
+      const existing = await getDocs(
+        query(
+          collection(db, 'users', user.uid, 'trips'),
+          orderBy('joinedAt', 'desc'),
+          limit(1),
+        ),
+      )
+      if (cancelled) return
+      if (!existing.empty) {
+        const mostRecent = existing.docs[0].id
+        localStorage.setItem('tripId', mostRecent)
+        setTripId(mostRecent)
         return
       }
 

@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/https'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { computeCorridorReconciliation } from './corridorReconciliation.js'
 import { googleRoutesApiKey } from './routesApi.js'
@@ -30,6 +31,7 @@ export const previewReconcileCorridor = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     const newStopOrder = request.data?.newStopOrder
     if (

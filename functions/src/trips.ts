@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { tripSchema, type Trip } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 
 const SHARE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -120,6 +121,7 @@ export const createTrip = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in')
   }
+  requireAccess(request.auth)
   return createTripForUser(request.auth.uid)
 })
 
@@ -127,6 +129,7 @@ export const joinTrip = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in')
   }
+  requireAccess(request.auth)
   const shareCode = request.data?.shareCode
   if (typeof shareCode !== 'string' || shareCode.trim().length !== 6) {
     throw new HttpsError('invalid-argument', 'shareCode must be 6 characters')

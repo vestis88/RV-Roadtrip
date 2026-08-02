@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Trip } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 /**
@@ -53,6 +54,7 @@ export const deleteTrip = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in')
   }
+  requireAccess(request.auth)
   const tripId = request.data?.tripId
   if (typeof tripId !== 'string') {
     throw new HttpsError('invalid-argument', 'tripId is required')

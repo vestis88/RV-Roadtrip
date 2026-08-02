@@ -1,6 +1,7 @@
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
+import { requireAccess } from './accessControl.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 
 /**
@@ -77,6 +78,7 @@ export const mergeTrips = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Must be signed in')
   }
+  requireAccess(request.auth)
   const oldUid = request.data?.oldUid
   const oldIdToken = request.data?.oldIdToken
   if (typeof oldUid !== 'string' || typeof oldIdToken !== 'string') {

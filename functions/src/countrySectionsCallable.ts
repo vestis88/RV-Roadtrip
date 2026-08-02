@@ -8,6 +8,7 @@ import {
   type CountryGuideSection,
   type TripSettings,
 } from '@rv/shared'
+import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { claudeApiKey, generateCountrySection } from './prompts/countrySection.js'
 
@@ -132,6 +133,7 @@ export const researchCountrySections = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Must be signed in')
     }
+    requireAccess(request.auth)
     const tripId = request.data?.tripId
     const countryCode = request.data?.countryCode
     const countryName = request.data?.countryName

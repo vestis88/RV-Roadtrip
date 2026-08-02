@@ -7,39 +7,58 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
     }
 
+    // "May this signed-in user use the app at all", as opposed to
+    // isMember()'s "may they touch THIS trip". The `access` custom claim is
+    // handed out only by the claimAccess callable, only to a verified email
+    // on config/allowlist — so it is what separates the owner's two trusted
+    // accounts from any other visitor who happened to sign in. Every rule
+    // below requires BOTH: this is an extra gate in front of the existing
+    // per-trip checks, never a replacement for them.
+    function hasAccess() {
+      return request.auth != null && request.auth.token.access == true;
+    }
+
     match /trips/{tripId} {
       // Trip creation and joining-by-code only happen via the createTrip
       // and joinTrip Cloud Functions (Admin SDK bypasses these rules).
-      allow read, update: if isMember(tripId);
+      allow read, update: if hasAccess() && isMember(tripId);
       allow create, delete: if false;
 
       match /members/{uid} {
-        allow read: if isMember(tripId);
+        allow read: if hasAccess() && isMember(tripId);
         allow write: if false;
       }
 
       match /days/{dayId} {
-        allow read, write: if isMember(tripId);
+        allow read, write: if hasAccess() && isMember(tripId);
 
         match /activities/{placeId} {
-          allow read, write: if isMember(tripId);
+          allow read, write: if hasAccess() && isMember(tripId);
         }
 
         match /restaurants/{placeId} {
-          allow read, write: if isMember(tripId);
+          allow read, write: if hasAccess() && isMember(tripId);
         }
       }
 
       match /corridorStops/{stopId} {
-        allow read, write: if isMember(tripId);
+        allow read, write: if hasAccess() && isMember(tripId);
       }
 
       match /log/{entryId} {
-        allow read, write: if isMember(tripId);
+        allow read, write: if hasAccess() && isMember(tripId);
       }
     }
 
     match /shareCodes/{code} {
+      allow read, write: if false;
+    }
+
+    // The access allowlist itself. Owner-maintained from the Firebase
+    // console (the Admin SDK ignores these rules); denied to every client
+    // both ways, because reading it would expose the trusted addresses and
+    // writing it would let a caller add themselves and then claimAccess.
+    match /config/{document=**} {
       allow read, write: if false;
     }
 
@@ -60,19 +79,19 @@ service cloud.firestore {
     // that has actually run the research, and letting a client write here
     // would let anyone poison what every other traveler reads.
     match /countryGuideSections/{sectionDocId} {
-      allow read: if request.auth != null;
+      allow read: if hasAccess();
       allow write: if false;
     }
 
     // Per-traveler preferences, of which the country research brief is the
     // first — never shared, unlike the research it produces.
     match /users/{uid}/preferences/{prefId} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if hasAccess() && request.auth.uid == uid;
     }
 
     match /users/{uid}/trips/{tripId} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if request.auth != null && request.auth.uid == uid && isMember(tripId);
+      allow read: if hasAccess() && request.auth.uid == uid;
+      allow write: if hasAccess() && request.auth.uid == uid && isMember(tripId);
     }
 
     match /planRequests/{requestId} {
@@ -82,8 +101,8 @@ service cloud.firestore {
       // to just by knowing its tripId, burning that trip's owner's API
       // quota and overwriting their days. Matches every other subcollection
       // in this ruleset, which all gate on isMember(tripId).
-      allow create: if isMember(request.resource.data.tripId);
-      allow read: if isMember(resource.data.tripId);
+      allow create: if hasAccess() && isMember(request.resource.data.tripId);
+      allow read: if hasAccess() && isMember(resource.data.tripId);
       allow update, delete: if false;
     }
   }

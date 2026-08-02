@@ -3,7 +3,6 @@ import {
   connectAuthEmulator,
   getAuth,
   onAuthStateChanged,
-  signInAnonymously,
   type User,
 } from 'firebase/auth'
 import {
@@ -39,17 +38,25 @@ if (import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true') {
   connectFunctionsEmulator(functions, '127.0.0.1', 5001)
 }
 
+/**
+ * Resolves with whoever is already signed in, once Firebase has reported
+ * an auth state.
+ *
+ * It used to sign the visitor in ANONYMOUSLY when nobody was — which is
+ * how opening the bare URL granted an account, a trip, a share code and a
+ * working "Generate plan" button to anyone who found the address. Sign-in
+ * is now the AccessGate's job, and nothing that calls this mounts until
+ * the gate has granted access, so a missing user here is a bug rather
+ * than a case to paper over.
+ */
 export function ensureSignedIn(): Promise<User> {
   return new Promise((resolve, reject) => {
     const unsubscribe = onAuthStateChanged(
       auth,
       (user) => {
         unsubscribe()
-        if (user) {
-          resolve(user)
-        } else {
-          signInAnonymously(auth).then((cred) => resolve(cred.user), reject)
-        }
+        if (user) resolve(user)
+        else reject(new Error('Not signed in'))
       },
       reject,
     )
