@@ -57,11 +57,17 @@ export function ExploreCandidateCard({
           onSelect()
         }
       }}
+      // The same two states PlaceCard and MarkerBadge already draw, in the
+      // same colours: orange for "I just tapped this to look at it", sky for
+      // "this one is in", which in explore mode means `locked` — the exact
+      // counterpart of a Day View place whose status is 'selected'. This
+      // card used emerald for that, so a kept stop's own map pin (already
+      // sky, via MarkerBadge) disagreed with its card.
       className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
         highlighted
-          ? 'ring-2 ring-orange-500'
+          ? 'border-orange-600 ring-2 ring-orange-500'
           : stop.status === 'locked'
-            ? 'ring-2 ring-emerald-500'
+            ? 'border-sky-600 ring-2 ring-sky-400'
             : ''
       }`}
     >

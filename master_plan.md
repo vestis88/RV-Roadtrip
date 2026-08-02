@@ -845,6 +845,10 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
   - `main` fast-forwarded to the branch (a clean ancestor, no merge commit) at the exact commit already deployed and verified, so the deploy that followed was a no-op in content.
   - The deploy job's condition is now `main` alone. CI's push trigger went the other way — **un-filtered, every branch** — because a hardcoded branch name in a trigger is precisely what rotted here; testing everything while deploying only trunk is what keeps this from recurring.
 
+- [x] **A kept stop wears the same blue as a selected place** (requested 2026-08-02 — "Give the selected must see in overview the same blue (?) indication as selected in detailed planning") — the app already had a two-colour language for this and explore mode was the one screen not speaking it: orange for "I just tapped this to look at it", sky for "this one is in". `PlaceCard` draws a Day View place with `status: 'selected'` in `border-sky-600 ring-2 ring-sky-400`, and `MarkerBadge` already drew a **locked corridor stop's own map pin** in exactly that sky — while `ExploreCandidateCard` drew the same stop's card in emerald. So a kept stop disagreed with itself, pin versus card.
+  - `locked` is the right counterpart to `status: 'selected'`: both mean "the traveler has committed to this", as opposed to a suggestion. The card now uses the same two class pairs `PlaceCard` does, including the border on the tapped state that it was previously missing.
+  - Covered by a new e2e test mirroring `manual-editing.spec.ts`'s own colour assertions: a fresh candidate has neither class, "Keep this" adds `border-sky-600` without adding the orange, and tapping then adds `border-orange-600` on top.
+
 ---
 
 **END OF MASTER PLAN — keep this file in the repo root as `MASTER_PLAN.md` and update checkboxes with every commit.**
