@@ -57,12 +57,13 @@ export function buildRescanCorridorPrompt(input: {
   // server-side filtering switches to detour-off-backbone instead of
   // distance-from-center when this is present — see generateRescanCandidates).
   backbone?: LatLng[]
-  // Place NAMES for the same geography (2026-08-02). Sending only
-  // coordinates was a real, measured mistake: asked for "a cozy restaurant
-  // in Hillerød" near "latitude 55.93, longitude 12.31", the model spent its
-  // entire web-search budget working out where that was before it could look
-  // for a restaurant — minutes, then a timeout, on a question Claude answers
-  // in two seconds when the town is named. Optional, and the coordinate form
+  // Place NAMES for the same geography (2026-08-02). A traveler's own query
+  // always named its town if it had one — it arrives verbatim in focusQuery
+  // — so this is not what made those searches slow (that was web-search
+  // grounding; see querySearch.ts). It matters for the geography the APP
+  // supplies: a plain "Rescan this area" whose only anchor was a pair of
+  // decimals, and hard rule 1's "is this a small detour off the corridor?",
+  // asked against up to 50 more of them. Optional, and the coordinate form
   // remains as the fallback: reverse geocoding is best-effort client-side.
   centerName?: string
   waypointNames?: string[]

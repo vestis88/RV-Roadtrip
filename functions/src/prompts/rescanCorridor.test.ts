@@ -185,11 +185,10 @@ describe('generateRescanCandidates', () => {
     expect(userContent).not.toHaveProperty('radiusKm')
   })
 
-  // The reported failure: "Hitta en mysig restaurang i Hillerød" spent four
-  // minutes and then timed out, while the same question answered in about
-  // two seconds in Claude chat. The difference was the prompt — the app sent
-  // "latitude 55.93, longitude 12.31" and nothing else, so the model had to
-  // work out where it had been sent before it could search there.
+  // A search the traveler didn't phrase geographically ("what's worth
+  // stopping for here") used to anchor on nothing but a pair of decimals.
+  // Note this is NOT the fix for the reported Hillerød timeout — that query
+  // named its own town and still failed; see querySearch.ts.
   it('names the area instead of sending coordinates when centerName is given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
     geocodeQueryMock.mockReset()

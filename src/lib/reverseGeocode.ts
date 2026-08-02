@@ -2,16 +2,19 @@
  * Turns the map's centre into a name a person (or a model) would recognise —
  * "Hillerød, Denmark" rather than "latitude 55.93, longitude 12.31".
  *
- * This exists because of what the search prompt was actually being told.
- * Every rescan sent Claude the centre as bare coordinates, on the reasoning
- * that giving it no geography meant it could invent none. In practice that
- * inverted the cost: asked for "a cozy restaurant in Hillerød" near
- * "latitude 55.93, longitude 12.31", the model first had to work out where
- * on earth that was — burning its whole web-search budget and minutes of
- * wall time before it could even start looking for restaurants. Asked the
- * same question with the town's name, Claude answers in about two seconds
- * (as the traveler demonstrated in Claude chat, side by side with the app
- * failing).
+ * What this is NOT: it is not why a search naming its own town ("a cozy
+ * restaurant in Hillerød") used to fail. That query reached the model
+ * verbatim as `focusQuery`, town and all — the traveler pointed this out
+ * after an earlier version of this comment claimed otherwise. The slowness
+ * there was the tool, not the geography: web-search grounding instead of a
+ * place lookup (see querySearch.ts).
+ *
+ * What it IS for: the searches where the app supplies the geography rather
+ * than the traveler. A plain "Rescan this area" says only "what's worth
+ * stopping for near here", and "here" used to be a pair of decimals; the
+ * corridor was up to 50 more of them, against which the prompt asks the
+ * model to judge whether a find is a small detour. Names make both of those
+ * answerable.
  *
  * Resolved on the client because the Maps JS API is already loaded here for
  * the map itself — no extra key, no extra API to enable server-side.
