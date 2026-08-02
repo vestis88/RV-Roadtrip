@@ -51,63 +51,60 @@ beforeEach(() => {
 })
 
 describe('voteExploreCandidate', () => {
-  it('swaps ranks with the neighbour above when moving up inside a tier', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('a', 'must-see', 0),
-      stop('b', 'must-see', 1),
-    ])
-
-    await voteExploreCandidate('trip1', grouped, 'b', 'up')
-
-    expect(batchUpdate).toHaveBeenCalledWith('b', { rank: 0 })
-    expect(batchUpdate).toHaveBeenCalledWith('a', { rank: 1 })
-    expect(updateDocMock).not.toHaveBeenCalled()
-  })
-
-  it('swaps ranks with the neighbour below when moving down inside a tier', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('a', 'must-see', 0),
-      stop('b', 'must-see', 1),
-    ])
-
-    await voteExploreCandidate('trip1', grouped, 'a', 'down')
-
-    expect(batchUpdate).toHaveBeenCalledWith('a', { rank: 1 })
-    expect(batchUpdate).toHaveBeenCalledWith('b', { rank: 0 })
-  })
-
-  // The reported bug: at a tier edge both buttons were dead, so a stop could
-  // never change priority at all.
-  it('promotes into the tier above when already at the top of its own tier', async () => {
+  // Reported 2026-08-02: "promoting cards in overview mode should move them a
+  // full category, not just one step up/down." A stop mid-tier used to need
+  // one tap per sibling before its category changed at all, and every tap
+  // before the last looked like nothing had happened.
+  it('promotes a whole category from the middle of its tier, in one vote', async () => {
     const grouped = groupCandidatesByPriority([
       stop('m1', 'must-see', 0),
       stop('m2', 'must-see', 1),
       stop('w1', 'worth-a-detour', 0),
+      stop('w2', 'worth-a-detour', 1),
+      stop('w3', 'worth-a-detour', 2),
     ])
 
-    await voteExploreCandidate('trip1', grouped, 'w1', 'up')
+    await voteExploreCandidate('trip1', grouped, 'w2', 'up')
 
-    // Enters must-see at its bottom edge — one position up in the flattened
-    // list, not a leap to the very top.
-    expect(updateDocMock).toHaveBeenCalledWith('w1', {
+    // Lands at must-see's bottom edge — the shortest visible move across the
+    // boundary, not a leap to the very top.
+    expect(updateDocMock).toHaveBeenCalledWith('w2', {
       priority: 'must-see',
       rank: 2,
     })
+    // No rank-swapping with siblings any more.
     expect(batchUpdate).not.toHaveBeenCalled()
   })
 
-  it('demotes into the tier below when already at the bottom of its own tier', async () => {
+  it('demotes a whole category from the middle of its tier, in one vote', async () => {
     const grouped = groupCandidatesByPriority([
       stop('m1', 'must-see', 0),
+      stop('m2', 'must-see', 1),
+      stop('m3', 'must-see', 2),
       stop('w1', 'worth-a-detour', 0),
       stop('w2', 'worth-a-detour', 1),
     ])
 
-    await voteExploreCandidate('trip1', grouped, 'm1', 'down')
+    await voteExploreCandidate('trip1', grouped, 'm2', 'down')
 
     // Enters worth-a-detour at its top edge.
-    expect(updateDocMock).toHaveBeenCalledWith('m1', {
+    expect(updateDocMock).toHaveBeenCalledWith('m2', {
       priority: 'worth-a-detour',
+      rank: -1,
+    })
+    expect(batchUpdate).not.toHaveBeenCalled()
+  })
+
+  it('skips no category: worth-a-detour demotes to nice-if-convenient, not past it', async () => {
+    const grouped = groupCandidatesByPriority([
+      stop('w1', 'worth-a-detour', 0),
+      stop('n1', 'nice-if-convenient', 0),
+    ])
+
+    await voteExploreCandidate('trip1', grouped, 'w1', 'down')
+
+    expect(updateDocMock).toHaveBeenCalledWith('w1', {
+      priority: 'nice-if-convenient',
       rank: -1,
     })
   })
@@ -123,17 +120,23 @@ describe('voteExploreCandidate', () => {
     })
   })
 
-  it('does nothing at the very top of the whole list', async () => {
-    const grouped = groupCandidatesByPriority([stop('m1', 'must-see', 0)])
+  it('does nothing above the top category, wherever in it the stop sits', async () => {
+    const grouped = groupCandidatesByPriority([
+      stop('m1', 'must-see', 0),
+      stop('m2', 'must-see', 1),
+    ])
 
-    await voteExploreCandidate('trip1', grouped, 'm1', 'up')
+    await voteExploreCandidate('trip1', grouped, 'm2', 'up')
 
     expect(updateDocMock).not.toHaveBeenCalled()
     expect(batchUpdate).not.toHaveBeenCalled()
   })
 
-  it('does nothing at the very bottom of the whole list', async () => {
-    const grouped = groupCandidatesByPriority([stop('n1', 'nice-if-convenient', 0)])
+  it('does nothing below the bottom category, wherever in it the stop sits', async () => {
+    const grouped = groupCandidatesByPriority([
+      stop('n1', 'nice-if-convenient', 0),
+      stop('n2', 'nice-if-convenient', 1),
+    ])
 
     await voteExploreCandidate('trip1', grouped, 'n1', 'down')
 

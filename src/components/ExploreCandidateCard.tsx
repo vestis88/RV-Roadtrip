@@ -20,8 +20,7 @@ interface ExploreCandidateCardProps {
 
 /**
  * One row in explore mode's candidate list (below the map — see
- * ExploreMapScreen). Up/down votes move the stop one position through the
- * flattened tier list, changing its priority when it crosses a boundary
+ * ExploreMapScreen). Up/down votes move the stop a whole category at a time
  * (see voteExploreCandidate's own doc comment); "Keep this" promotes
  * straight to `locked` — the same status a manually pinned stop gets, since
  * both mean "the traveler wants this in the eventual route."

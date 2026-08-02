@@ -6,6 +6,7 @@ import { useCountryGuide } from '../hooks/useCountryGuide'
 import { functions } from '../lib/firebase'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
 import { isoCountryFlag } from '../lib/countryFlag'
+import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 
 function countryName(code: string): string {
   return EUROPEAN_COUNTRIES.find((c) => c.code === code)?.name ?? code
@@ -62,7 +63,7 @@ export function CountryDetailScreen() {
       const call = httpsCallable<
         { tripId: string; countryCode: string },
         { countryCode: string }
-      >(functions, 'refreshCountryGuide')
+      >(functions, 'refreshCountryGuide', { timeout: LONG_CALLABLE_TIMEOUT_MS })
       await call({ tripId, countryCode: code })
     } catch (err) {
       console.error('refreshCountryGuide failed', err)

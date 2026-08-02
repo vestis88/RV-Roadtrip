@@ -2,6 +2,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { ReconcileDayChange } from '@rv/shared'
 import { db, functions } from './firebase'
+import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 
 export interface ReconcileCorridorPreview {
   changes: ReconcileDayChange[]
@@ -17,7 +18,7 @@ export async function previewReconcileCorridor(
   const call = httpsCallable<
     { tripId: string; newStopOrder: string[] },
     ReconcileCorridorPreview
-  >(functions, 'previewReconcileCorridor')
+  >(functions, 'previewReconcileCorridor', { timeout: LONG_CALLABLE_TIMEOUT_MS })
   const result = await call({ tripId, newStopOrder })
   return result.data
 }

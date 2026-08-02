@@ -365,7 +365,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   {TIER_LABEL[tier]}
                 </h3>
                 <div className="space-y-2">
-                  {grouped[tier].map((stop, i) => (
+                  {grouped[tier].map((stop) => (
                     <ExploreCandidateCard
                       key={stop.id}
                       stop={stop}
@@ -376,16 +376,12 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                         if (element) cardRefs.current.set(stop.id, element)
                         else cardRefs.current.delete(stop.id)
                       }}
-                      // A vote crosses tiers rather than stopping at a tier
-                      // edge, so the only truly immovable positions are the
-                      // very top and very bottom of the whole list.
-                      canVoteUp={!(tier === TIER_ORDER[0] && i === 0)}
-                      canVoteDown={
-                        !(
-                          tier === TIER_ORDER[TIER_ORDER.length - 1] &&
-                          i === grouped[tier].length - 1
-                        )
-                      }
+                      // A vote moves the stop a whole category, so what
+                      // matters is which category it's in, not where it sits
+                      // within one: only the top and bottom categories have a
+                      // dead arrow.
+                      canVoteUp={tier !== TIER_ORDER[0]}
+                      canVoteDown={tier !== TIER_ORDER[TIER_ORDER.length - 1]}
                       onSelect={() => setSelectedId(stop.id)}
                       onVoteUp={() => vote(stop.id, 'up')}
                       onVoteDown={() => vote(stop.id, 'down')}

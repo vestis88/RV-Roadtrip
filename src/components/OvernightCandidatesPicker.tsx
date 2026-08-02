@@ -4,6 +4,7 @@ import type { OvernightStopCandidate, Trip, TripDay } from '@rv/shared'
 import { functions } from '../lib/firebase'
 import { googleMapsSearchUrl } from '../lib/mapLinks'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
+import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 
 interface OvernightCandidatesPickerProps {
   tripId: string
@@ -83,7 +84,7 @@ export function OvernightCandidatesPicker({
       const call = httpsCallable<
         { tripId: string; dayId: string },
         { candidates: OvernightStopCandidate[] }
-      >(functions, 'getOvernightCandidates')
+      >(functions, 'getOvernightCandidates', { timeout: LONG_CALLABLE_TIMEOUT_MS })
       const result = await call({ tripId, dayId })
       setCandidates(result.data.candidates)
     } catch (err) {

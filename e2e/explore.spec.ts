@@ -117,12 +117,16 @@ test('"Find great stops" requires a start and finish point first', async ({ page
   )
 })
 
-test('voting reorders within a priority tier, and lock/reject change status', async ({
+test('voting moves a stop a whole category, and lock/reject change status', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
   await seedCandidate(tripId, { name: 'Otta', rank: 0 })
-  await seedCandidate(tripId, { name: 'Lillehammer', rank: 1 })
+  await seedCandidate(tripId, {
+    name: 'Lillehammer',
+    priority: 'nice-if-convenient',
+    rank: 1,
+  })
 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('explore-map-screen').waitFor()
@@ -131,7 +135,6 @@ test('voting reorders within a priority tier, and lock/reject change status', as
   await expect(list).toContainText('Otta')
   await expect(list).toContainText('Lillehammer')
 
-  // Vote Lillehammer (rank 1) up past Otta (rank 0).
   const ottaSnap = await adminDb
     .collection('trips')
     .doc(tripId)
@@ -142,6 +145,7 @@ test('voting reorders within a priority tier, and lock/reject change status', as
   const lillehammerId = ottaSnap.docs[0].id
   await page.getByTestId(`explore-candidate-up-${lillehammerId}`).click()
 
+  // One vote, one whole category — not a rank shuffle inside the same one.
   await expect
     .poll(async () => {
       const snap = await adminDb
@@ -150,9 +154,9 @@ test('voting reorders within a priority tier, and lock/reject change status', as
         .collection('corridorStops')
         .doc(lillehammerId)
         .get()
-      return snap.data()?.rank
+      return snap.data()?.priority
     })
-    .toBe(0)
+    .toBe('worth-a-detour')
 
   await page.getByTestId(`explore-candidate-lock-${lillehammerId}`).click()
   await expect
@@ -194,7 +198,7 @@ test('voting reorders within a priority tier, and lock/reject change status', as
 // be possible to promote/demote" — a vote used to only swap rank inside one
 // tier, so the top and bottom stop of every tier had both buttons disabled
 // and nothing could ever change priority.
-test('promoting past the top of a tier moves the stop into the tier above', async ({
+test('promoting a stop moves it into the category above', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
@@ -235,11 +239,15 @@ test('promoting past the top of a tier moves the stop into the tier above', asyn
     .toBe('worth-a-detour')
 })
 
-test('the top of the first tier and the bottom of the last are the only immovable positions', async ({
+// A vote is a category move, so what disables an arrow is the stop's
+// CATEGORY, never its position within one: every stop in must-see has a dead
+// up arrow, including one sitting below a sibling.
+test('only the top and bottom categories have a dead arrow, wherever a stop sits in them', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
   await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+  await seedCandidate(tripId, { name: 'Dombås', priority: 'must-see', rank: 1 })
   await seedCandidate(tripId, {
     name: 'Lillehammer',
     priority: 'nice-if-convenient',
@@ -251,12 +259,16 @@ test('the top of the first tier and the bottom of the last are the only immovabl
 
   const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
   const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  const dombasId = (await stops.where('name', '==', 'Dombås').limit(1).get()).docs[0].id
   const lillehammerId = (
     await stops.where('name', '==', 'Lillehammer').limit(1).get()
   ).docs[0].id
 
   await expect(page.getByTestId(`explore-candidate-up-${ottaId}`)).toBeDisabled()
   await expect(page.getByTestId(`explore-candidate-down-${ottaId}`)).toBeEnabled()
+  // Second in must-see, not first — still nowhere to be promoted to.
+  await expect(page.getByTestId(`explore-candidate-up-${dombasId}`)).toBeDisabled()
+  await expect(page.getByTestId(`explore-candidate-down-${dombasId}`)).toBeEnabled()
   await expect(
     page.getByTestId(`explore-candidate-down-${lillehammerId}`),
   ).toBeDisabled()
