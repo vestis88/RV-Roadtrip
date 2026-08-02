@@ -105,5 +105,14 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
+      # --force is what lets a deploy DELETE a function that no longer exists
+      # in source. Without it, `firebase deploy` stops and asks — which in
+      # CI means it aborts, and every subsequent deploy aborts too, on the
+      # same removed function. That is exactly what happened when
+      # refreshCountryGuide was replaced by researchCountrySections: six
+      # consecutive pushes ran their tests green and then deployed nothing,
+      # so the live app sat on a build from hours earlier while the branch
+      # moved on. Hosting, functions and rules all deploy together here, so
+      # one aborted function deletion silently withholds the frontend too.
       - name: Deploy to Firebase
-        run: npx firebase-tools deploy --project ${{ vars.FIREBASE_PROJECT_ID }} --non-interactive
+        run: npx firebase-tools deploy --project ${{ vars.FIREBASE_PROJECT_ID }} --non-interactive --force
