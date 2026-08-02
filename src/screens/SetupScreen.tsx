@@ -8,7 +8,7 @@ export function SetupScreen() {
   const { tripId, trip } = useTripContext()
   return (
     <>
-      <ShareTripMenu trip={trip} />
+      <ShareTripMenu tripId={tripId} trip={trip} />
       <AccountBackupMenu />
       <SettingsScreen tripId={tripId} trip={trip} />
       <NotesScreen tripId={tripId} trip={trip} />

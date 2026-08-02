@@ -21,6 +21,7 @@ const TRIP_ID = 'trip1'
 const MEMBER_UID = 'memberUid'
 const OTHER_MEMBER_UID = 'otherMemberUid'
 const STRANGER_UID = 'strangerUid'
+const SHARE_TOKEN = 'sT0kEn_sT0kEn_sT0kEn_sT0kEn_sT0kEn_sT0kEn_1'
 
 let testEnv: RulesTestEnvironment
 
@@ -39,6 +40,10 @@ async function seedTrip() {
       summary: 'Day one',
     })
     await setDoc(doc(db, 'shareCodes', 'AB12CD'), { tripId: TRIP_ID })
+    await setDoc(doc(db, 'shareTokens', SHARE_TOKEN), {
+      tripId: TRIP_ID,
+      createdAt: '2026-01-01T00:00:00Z',
+    })
     await setDoc(doc(db, 'users', MEMBER_UID, 'trips', TRIP_ID), {
       joinedAt: '2026-01-01T00:00:00Z',
     })
@@ -256,6 +261,52 @@ describe('shareCodes/{code}', () => {
     const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
     await assertFails(
       setDoc(doc(db, 'shareCodes', 'ZZ99ZZ'), { tripId: TRIP_ID }),
+    )
+  })
+})
+
+// The family view link's only access control is the secrecy of its token
+// (viewSharedTrip resolves it through the Admin SDK). A client that could
+// read this collection could enumerate every trip's public link; one that
+// could write it could aim an existing link at a trip it has no claim on.
+describe('shareTokens/{token}', () => {
+  it('denies any client read, member or not', async () => {
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertFails(getDoc(doc(memberDb, 'shareTokens', SHARE_TOKEN)))
+
+    const strangerDb = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    await assertFails(getDoc(doc(strangerDb, 'shareTokens', SHARE_TOKEN)))
+
+    const anonDb = testEnv.unauthenticatedContext().firestore()
+    await assertFails(getDoc(doc(anonDb, 'shareTokens', SHARE_TOKEN)))
+  })
+
+  it('denies listing the collection', async () => {
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertFails(getDocs(collection(memberDb, 'shareTokens')))
+  })
+
+  it('denies any client write — creating, repointing, or un-revoking a link', async () => {
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    await assertFails(
+      setDoc(doc(memberDb, 'shareTokens', 'mintedByAClient'), {
+        tripId: TRIP_ID,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(memberDb, 'shareTokens', SHARE_TOKEN), {
+        tripId: 'someOtherTripId',
+      }),
+    )
+    await assertFails(deleteDoc(doc(memberDb, 'shareTokens', SHARE_TOKEN)))
+
+    const anonDb = testEnv.unauthenticatedContext().firestore()
+    await assertFails(
+      setDoc(doc(anonDb, 'shareTokens', 'mintedByAStranger'), {
+        tripId: TRIP_ID,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
     )
   })
 })

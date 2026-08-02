@@ -265,6 +265,37 @@ export async function createTripWithPlan(page: Page): Promise<string> {
 }
 
 /**
+ * Logs one diary entry against a day's first activity, the way marking a
+ * card Done does. Specs that render the diary (rather than exercise the
+ * marking flow itself) otherwise start from an empty log.
+ */
+export async function seedDiaryEntry(
+  tripId: string,
+  date: string,
+  note: string,
+): Promise<void> {
+  const dayId = await getDayIdByDate(tripId, date)
+  const activities = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .collection('activities')
+    .limit(1)
+    .get()
+  if (activities.empty) {
+    throw new Error(`No activity to log against on ${date} of trip ${tripId}`)
+  }
+  await adminDb.collection('trips').doc(tripId).collection('log').add({
+    date,
+    refType: 'activity',
+    refPath: activities.docs[0].ref.path,
+    note,
+    createdAt: new Date().toISOString(),
+  })
+}
+
+/**
  * Day docs have stable, auto-generated Firestore IDs, not date-keyed ones —
  * there's no other way to reach a specific day directly (e.g.
  * `/map/day/<id>`) in this sandbox, since Google Maps JS is network-blocked

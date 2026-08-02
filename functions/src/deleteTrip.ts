@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { Trip } from '@rv/shared'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
+import { SHARE_TOKENS_COLLECTION } from './shareTokens.js'
 
 /**
  * Deletes a trip entirely: every day/activity/restaurant/corridorStop/
@@ -28,6 +29,10 @@ export async function deleteTripForUser(uid: string, tripId: string): Promise<vo
 
   const trip = tripSnap.data() as Trip
   const membersSnap = await tripRef.collection('members').get()
+  const shareTokensSnap = await db
+    .collection(SHARE_TOKENS_COLLECTION)
+    .where('tripId', '==', tripId)
+    .get()
 
   // One delete per member plus the share code — chunked for the same reason
   // every other per-item write list here is (see firestoreBatch.ts).
@@ -40,6 +45,12 @@ export async function deleteTripForUser(uid: string, tripId: string): Promise<vo
       op: 'delete',
       ref: db.collection('shareCodes').doc(trip.meta.shareCode),
     })
+  }
+  // Family view links outlive the trip otherwise: the endpoint already 404s
+  // once the trip document is gone, but leaving the tokens behind keeps a
+  // growing pile of rows pointing at nothing.
+  for (const tokenDoc of shareTokensSnap.docs) {
+    writes.push({ op: 'delete', ref: tokenDoc.ref })
   }
   await commitInChunks(db, writes)
 

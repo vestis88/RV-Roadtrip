@@ -6,11 +6,17 @@ import { DayViewScreen } from './screens/DayViewScreen'
 import { DiaryScreen } from './screens/DiaryScreen'
 import { OverviewMapScreen } from './screens/OverviewMapScreen'
 import { SetupScreen } from './screens/SetupScreen'
+import { SharedTripScreen } from './screens/SharedTripScreen'
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Outside AppShell deliberately: the shell signs the visitor in
+            (useTripSession) and provides a trip context, and a relative
+            following a view-only link must get neither — no account, no
+            membership, nothing that could write to the trip. */}
+        <Route path="/share/:token" element={<SharedTripScreen />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<SetupScreen />} />
           <Route path="/map" element={<OverviewMapScreen />} />

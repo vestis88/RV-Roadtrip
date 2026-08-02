@@ -3,6 +3,10 @@ import { initializeApp } from 'firebase-admin/app'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createTripForUser, joinTripByCode } from './trips.js'
 import { deleteTripForUser } from './deleteTrip.js'
+import {
+  createShareTokenForTrip,
+  resolveShareToken,
+} from './shareTokens.js'
 
 const PROJECT_ID = 'demo-rv-trip-planner'
 
@@ -42,6 +46,15 @@ describe('deleteTripForUser', () => {
         await db.collection('users').doc('uidDeleteB').collection('trips').doc(tripId).get()
       ).exists,
     ).toBe(false)
+  })
+
+  it('takes the family view link down with the trip', async () => {
+    const { tripId } = await createTripForUser('uidDeleteShareLink')
+    const { token } = await createShareTokenForTrip('uidDeleteShareLink', tripId)
+
+    await deleteTripForUser('uidDeleteShareLink', tripId)
+
+    await expect(resolveShareToken(token)).resolves.toBeNull()
   })
 
   it('rejects a non-member', async () => {

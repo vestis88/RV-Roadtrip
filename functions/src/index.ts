@@ -16,6 +16,8 @@ initializeApp()
 getFirestore().settings({ ignoreUndefinedProperties: true })
 
 export { createTrip, joinTrip } from './trips.js'
+export { createTripShareLink, revokeTripShareLink } from './shareTokens.js'
+export { viewSharedTrip } from './viewSharedTrip.js'
 export { mergeTrips } from './mergeTrips.js'
 export { deleteTrip } from './deleteTrip.js'
 export { generatePlan } from './generatePlan.js'

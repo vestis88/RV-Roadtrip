@@ -418,6 +418,88 @@ export const logEntrySchema = z.object({
   createdAt: isoDateTime,
 })
 
+// Family share links (2026-08-02): the read-only projection a guest holding
+// a share token receives from the viewSharedTrip endpoint. Deliberately its
+// own set of schemas rather than reusing Trip/TripDay/Activity/... — this is
+// the one payload in the app that crosses the trust boundary to someone who
+// is not a member and is not even signed in, so every field a viewer gets is
+// written out here by hand. The field that must never appear is
+// meta.shareCode: that is the EDITOR invite code (joinTrip grants full
+// read/write on the trip to whoever types it), so a viewer holding it would
+// have exactly the access the share link exists to withhold. Spreading a
+// Trip would leak it today and leak whatever private field gets added to
+// Trip tomorrow; listing fields explicitly fails closed instead.
+export const sharedTripPlaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  blurb: z.string(),
+  status: itemStatusSchema,
+  category: activityCategorySchema.optional(),
+  timeOfDay: activityTimeOfDaySchema.optional(),
+  meal: mealSchema.optional(),
+  rating: z.number().min(0).max(5).optional(),
+  ratingCount: z.number().int().nonnegative().optional(),
+  photoUrl: z.string().url().optional(),
+  googleMapsUrl: z.string().url().optional(),
+})
+
+export const sharedTripDaySchema = z.object({
+  id: z.string(),
+  index: z.number().int().nonnegative(),
+  date: isoDate,
+  type: z.enum(['drive', 'rest']),
+  summary: z.string(),
+  highlightReason: z.string().optional(),
+  overnight: overnightStopSchema,
+  drive: driveLegSchema.optional(),
+  activities: z.array(sharedTripPlaceSchema),
+  restaurants: z.array(sharedTripPlaceSchema),
+})
+
+export const sharedTripStopSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  country: z.string().length(2).optional(),
+  why: z.string().optional(),
+  status: corridorStopStatusSchema,
+})
+
+/**
+ * A diary entry as a guest sees it. `placeName` is resolved server-side
+ * because `refPath` points into `trips/{id}/days/...`, which no guest can
+ * read — the in-app DiaryScreen resolves the same name with its own
+ * client-side getDoc, an option only a signed-in member has.
+ */
+export const sharedTripDiaryEntrySchema = z.object({
+  id: z.string(),
+  date: isoDate,
+  refType: z.enum(['activity', 'restaurant']),
+  placeName: z.string(),
+  note: z.string().optional(),
+  createdAt: isoDateTime,
+})
+
+export const sharedTripViewSchema = z.object({
+  trip: z.object({
+    name: z.string(),
+    startDate: isoDate,
+    endDate: isoDate,
+    startPoint: namedPointSchema,
+    endPoint: namedPointSchema,
+    planStatus: planStatusSchema,
+    totalKm: z.number().nonnegative().optional(),
+    avgDriveMinutesPerDay: z.number().nonnegative().optional(),
+    generatedAt: isoDateTime.optional(),
+  }),
+  days: z.array(sharedTripDaySchema),
+  corridorStops: z.array(sharedTripStopSchema),
+  diary: z.array(sharedTripDiaryEntrySchema),
+  /** When the server read this — the view is live, not a stored snapshot. */
+  fetchedAt: isoDateTime,
+})
+
 export const planRequestSchema = z.object({
   tripId: z.string(),
   kind: z.enum(['full', 'replan', 'insertRestDay', 'reconcileCorridor']),
@@ -499,4 +581,9 @@ export type CountryBriefSection = z.infer<typeof countryBriefSectionSchema>
 export type CountryBrief = z.infer<typeof countryBriefSchema>
 export type CountryGuideSection = z.infer<typeof countryGuideSectionSchema>
 export type LogEntry = z.infer<typeof logEntrySchema>
+export type SharedTripPlace = z.infer<typeof sharedTripPlaceSchema>
+export type SharedTripDay = z.infer<typeof sharedTripDaySchema>
+export type SharedTripStop = z.infer<typeof sharedTripStopSchema>
+export type SharedTripDiaryEntry = z.infer<typeof sharedTripDiaryEntrySchema>
+export type SharedTripView = z.infer<typeof sharedTripViewSchema>
 export type PlanRequest = z.infer<typeof planRequestSchema>
