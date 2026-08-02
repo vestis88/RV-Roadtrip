@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AdvancedMarker,
   Map as GoogleMap,
-  useMap,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
 import type { Activity, LatLng } from '@rv/shared'
@@ -33,6 +32,7 @@ import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ReorderCorridorPanel } from '../components/ReorderCorridorPanel'
 import { DirectionsRoute } from '../components/DirectionsRoute'
+import { MapPanner } from '../components/MapPanner'
 import { ExploreMapScreen } from './ExploreMapScreen'
 
 interface SelectedPlace {
@@ -43,14 +43,6 @@ interface SelectedPlace {
 }
 
 /** Pans the map to whichever activity/restaurant marker was last tapped. */
-function MapPanner({ target }: { target: SelectedPlace | null }) {
-  const map = useMap()
-  useEffect(() => {
-    if (map && target) map.panTo({ lat: target.lat, lng: target.lng })
-  }, [map, target])
-  return null
-}
-
 export function OverviewMapScreen() {
   const { tripId, trip } = useTripContext()
   const navigate = useNavigate()

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AdvancedMarker,
   Map as GoogleMap,
-  useMap,
 } from '@vis.gl/react-google-maps'
 import type { ActivityTimeOfDay, Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
@@ -13,6 +12,7 @@ import { buildDayRoutePoints } from '../lib/buildOverviewRoute'
 import { CardRow } from '../components/CardRow'
 import { FitToPoints } from '../components/FitToPoints'
 import { DirectionsRoute } from '../components/DirectionsRoute'
+import { MapPanner } from '../components/MapPanner'
 import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
@@ -36,14 +36,6 @@ interface SelectedPlace {
   name: string
   lat: number
   lng: number
-}
-
-function MapPanner({ target }: { target: SelectedPlace | null }) {
-  const map = useMap()
-  useEffect(() => {
-    if (map && target) map.panTo({ lat: target.lat, lng: target.lng })
-  }, [map, target])
-  return null
 }
 
 interface IndexedPlace {

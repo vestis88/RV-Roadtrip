@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AdvancedMarker,
   Map as GoogleMap,
-  useMap,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
 import {
@@ -26,6 +25,7 @@ import {
 import { isoCountryFlag } from '../lib/countryFlag'
 import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
+import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
@@ -38,14 +38,6 @@ const TIER_LABEL: Record<CorridorStopPriority, string> = {
   'must-see': 'Must-see',
   'worth-a-detour': 'Worth a detour',
   'nice-if-convenient': 'Nice if convenient',
-}
-
-/** Pans the map to whichever candidate was last selected, from either the
- * map itself or the list below it. */
-function MapPanner({ target }: { target: LatLng | null }) {
-  const map = useMap()
-  if (map && target) map.panTo(target)
-  return null
 }
 
 interface ExploreMapScreenProps {
