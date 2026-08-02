@@ -73,6 +73,8 @@ export function OverviewMapScreen() {
   const [changeText, setChangeText] = useState('')
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
   const [routeError, setRouteError] = useState<string | null>(null)
+  const [submittingChangeRequest, setSubmittingChangeRequest] = useState(false)
+  const [changeRequestError, setChangeRequestError] = useState<string | null>(null)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [selectedCorridorStopId, setSelectedCorridorStopId] = useState<
     string | null
@@ -129,13 +131,28 @@ export function OverviewMapScreen() {
   }
 
   async function submitChangeRequest() {
-    await submitPlanChangeRequest(
-      tripId,
-      trip,
-      changeText,
-      Array.from(lockedDayIds),
-    )
-    setChangeRequestOpen(false)
+    setChangeRequestError(null)
+    // A replan is the expensive path; a blank request fires one with no
+    // instructions at all, and a double-tap fired two.
+    if (!changeText.trim()) {
+      setChangeRequestError('Describe what you would like changed first.')
+      return
+    }
+    setSubmittingChangeRequest(true)
+    try {
+      await submitPlanChangeRequest(
+        tripId,
+        trip,
+        changeText,
+        Array.from(lockedDayIds),
+      )
+      setChangeRequestOpen(false)
+    } catch (error) {
+      console.error('Failed to submit change request', error)
+      setChangeRequestError('Could not send that request — please try again.')
+    } finally {
+      setSubmittingChangeRequest(false)
+    }
   }
 
   // Recomputed from whatever the current fetch produced rather than snapshotted
@@ -295,10 +312,19 @@ export function OverviewMapScreen() {
             type="button"
             data-testid="submit-change-request"
             className="btn btn-primary mt-3"
-            onClick={submitChangeRequest}
+            disabled={submittingChangeRequest}
+            onClick={() => void submitChangeRequest()}
           >
-            Submit
+            {submittingChangeRequest ? 'Sending…' : 'Submit'}
           </button>
+          {changeRequestError && (
+            <p
+              data-testid="change-request-error"
+              className="mt-2 text-sm text-red-600"
+            >
+              {changeRequestError}
+            </p>
+          )}
         </div>
       )}
 

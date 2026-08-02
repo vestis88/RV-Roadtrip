@@ -134,7 +134,16 @@ export function AddCorridorStopForm({
       <button
         type="button"
         data-testid="add-corridor-stop-toggle"
-        onClick={() => setOpen(true)}
+        // Seed the location from wherever the map is looking NOW. This form
+        // stays mounted between uses (only `open` toggles), so `useState`
+        // captured the map centre once at page load: pan somewhere else,
+        // open this, submit without touching the Location field, and the
+        // stop silently landed back at the original centre — a blank-looking
+        // field quietly carrying stale coordinates.
+        onClick={() => {
+          setLocation(defaultLocation)
+          setOpen(true)
+        }}
         className="btn btn-sm border border-dashed border-neutral-300 bg-white/95 text-neutral-600 shadow-md backdrop-blur-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
         + Add stop

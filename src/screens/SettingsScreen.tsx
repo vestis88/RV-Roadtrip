@@ -32,6 +32,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // Shared between "Generate overview" and "Generate full plan" — see
   // hasRoute's own doc comment for why this check exists.
   const [routeError, setRouteError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   // `overviewSubmitting` alone only tracks *this* call, made from *this*
   // mount of the component — navigating away and back (e.g. tapping the
   // Map tab mid-generation, out of curiosity or impatience) remounts
@@ -62,8 +63,18 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
 
   function commit(partial: Partial<TripSettings>) {
     setSettings((prev) => ({ ...prev, ...partial }))
+    setSaveError(null)
     updateTripSettings(tripId, partial, trip.planMeta.status).catch(
-      (error: unknown) => console.error('Failed to save settings', error),
+      (error: unknown) => {
+        // The optimistic local update above stays on screen either way, and
+        // the render-time resync only re-reads on a trip switch — so a
+        // failed write used to leave the field showing a value that was
+        // never persisted, with only a console line to show for it. The
+        // traveler would then generate against settings they believed they
+        // had changed.
+        console.error('Failed to save settings', error)
+        setSaveError('Could not save that change — check your connection.')
+      },
     )
   }
 
@@ -89,6 +100,12 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     setSubmitting(true)
     try {
       await submitPlanRequest(tripId, 'full')
+      setConfirmOpen(false)
+    } catch (error) {
+      // Previously uncaught: the rejection went unhandled, the dialog stayed
+      // open, and nothing said the request hadn't been made.
+      console.error('submitPlanRequest failed', error)
+      setOverviewError('Could not start the plan — please try again.')
       setConfirmOpen(false)
     } finally {
       setSubmitting(false)
@@ -372,6 +389,14 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="route-required-error"
           >
             {routeError}
+          </p>
+        )}
+        {saveError && (
+          <p
+            className="mt-2 text-sm text-red-600 dark:text-red-400"
+            data-testid="settings-save-error"
+          >
+            {saveError}
           </p>
         )}
       </div>

@@ -72,11 +72,52 @@ export function PlaceAutocompleteInput({
         )
     }
 
+    /**
+     * Typing a name and moving on without picking a suggestion is a normal
+     * thing to do, and the name alone still has to be accepted (a blank
+     * start/finish point is what blocks generation — see validateRoute.ts).
+     * But keeping the PREVIOUS place's coordinates under a new name is
+     * worse than having none: the field reads "Bergen" while its lat/lng
+     * still point at Oslo, and every consumer downstream — the map pin, the
+     * route backbone, the detour estimates, the stop written to Firestore —
+     * silently trusts those coordinates. So the typed text is resolved
+     * through the same Places lookup a picked suggestion goes through, and
+     * only its own coordinates are ever paired with its own name.
+     */
+    async function resolveTypedName(typed: string): Promise<void> {
+      try {
+        const { suggestions } =
+          await placesLibrary!.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+            input: typed,
+          })
+        const prediction = suggestions[0]?.placePrediction
+        if (!prediction) return
+        const place = prediction.toPlace()
+        await place.fetchFields({ fields: ['formattedAddress', 'displayName', 'location'] })
+        const location = place.location
+        if (!location) return
+        // The traveler may have kept typing while this was in flight —
+        // applying a stale resolution would reintroduce the very mismatch
+        // this exists to prevent.
+        if (element.value !== typed) return
+        onChangeRef.current({
+          name: place.formattedAddress ?? place.displayName ?? typed,
+          lat: location.lat(),
+          lng: location.lng(),
+        })
+      } catch (error) {
+        console.error('Could not resolve typed place name', error)
+      }
+    }
+
     function handleBlur() {
       const currentValue = element.value
-      if (currentValue !== valueRef.current.name) {
-        onChangeRef.current({ ...valueRef.current, name: currentValue })
-      }
+      if (currentValue === valueRef.current.name) return
+      // Accept the name immediately so nothing depending on it has to wait
+      // on the network, and drop the now-mismatched coordinates rather than
+      // letting them outlive the place they described.
+      onChangeRef.current({ name: currentValue, lat: 0, lng: 0 })
+      if (currentValue.trim()) void resolveTypedName(currentValue)
     }
 
     function handleError(event: Event) {

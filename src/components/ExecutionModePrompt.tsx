@@ -57,22 +57,32 @@ export function ExecutionModePrompt({
         className="card mx-4 mt-3 flex max-w-2xl flex-wrap items-center gap-2 p-3 text-sm text-neutral-900 sm:mx-auto dark:text-white"
       >
         <span>Location access is off — enter where you are:</span>
-        <input
-          type="number"
-          data-testid="manual-position-lat"
-          placeholder="Latitude"
-          value={lat}
-          onChange={(event) => setLat(event.target.value)}
-          className="field field-sm w-24"
-        />
-        <input
-          type="number"
-          data-testid="manual-position-lng"
-          placeholder="Longitude"
-          value={lng}
-          onChange={(event) => setLng(event.target.value)}
-          className="field field-sm w-24"
-        />
+        {/* Wrapped in real labels rather than relying on placeholders: a
+            placeholder disappears the moment you start typing, leaving both
+            boxes indistinguishable, and screen readers announced them as
+            two unlabelled number inputs. */}
+        <label className="flex items-center gap-1">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Lat</span>
+          <input
+            type="number"
+            data-testid="manual-position-lat"
+            placeholder="Latitude"
+            value={lat}
+            onChange={(event) => setLat(event.target.value)}
+            className="field field-sm w-24"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Lng</span>
+          <input
+            type="number"
+            data-testid="manual-position-lng"
+            placeholder="Longitude"
+            value={lng}
+            onChange={(event) => setLng(event.target.value)}
+            className="field field-sm w-24"
+          />
+        </label>
         <button
           type="button"
           data-testid="manual-position-submit"

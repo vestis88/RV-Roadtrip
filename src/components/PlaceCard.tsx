@@ -26,6 +26,13 @@ interface PlaceCardProps {
   onToggleSelected?: () => void
   onMarkDone?: (note: string) => void
   onMarkSkipped?: () => void
+  /**
+   * A status change for this row's scope is already in flight. Every action
+   * below can trigger a requeue — which may spend a paid Places/Claude call
+   * to refill the pool — so a double-tap could consume two reserve items or
+   * fire that call twice for one intended action.
+   */
+  busy?: boolean
   /** Activities only (never passed for restaurants, which already have a
    * fixed `meal`) — absent `timeOfDay` reads as 'all-day'. Only shown once
    * selected: picking a time of day is meaningless for something not even
@@ -50,6 +57,7 @@ export function PlaceCard({
   onToggleSelected,
   onMarkDone,
   onMarkSkipped,
+  busy = false,
   timeOfDay,
   onSetTimeOfDay,
 }: PlaceCardProps) {
@@ -141,17 +149,34 @@ export function PlaceCard({
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
                 />
-                <button
-                  type="button"
-                  data-testid={`${testId}-confirm-done`}
-                  className="btn btn-sm btn-primary"
-                  onClick={() => {
-                    onMarkDone?.(noteDraft)
-                    setAddingNote(false)
-                  }}
-                >
-                  Confirm done
-                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    data-testid={`${testId}-confirm-done`}
+                    className="btn btn-sm btn-primary"
+                    disabled={busy}
+                    onClick={() => {
+                      onMarkDone?.(noteDraft)
+                      setAddingNote(false)
+                    }}
+                  >
+                    Confirm done
+                  </button>
+                  {/* Tapping "Done" by mistake used to be a dead end: the
+                      button row was replaced by this note field with no way
+                      back short of reloading. */}
+                  <button
+                    type="button"
+                    data-testid={`${testId}-cancel-done`}
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => {
+                      setAddingNote(false)
+                      setNoteDraft('')
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -159,6 +184,7 @@ export function PlaceCard({
                   <button
                     type="button"
                     data-testid={`${testId}-mark-selected`}
+                    disabled={busy}
                     onClick={(event) => {
                       stop(event)
                       onToggleSelected()
@@ -172,6 +198,7 @@ export function PlaceCard({
                   <button
                     type="button"
                     data-testid={`${testId}-mark-done`}
+                    disabled={busy}
                     onClick={(event) => {
                       stop(event)
                       setAddingNote(true)
@@ -185,6 +212,7 @@ export function PlaceCard({
                   <button
                     type="button"
                     data-testid={`${testId}-mark-skipped`}
+                    disabled={busy}
                     onClick={(event) => {
                       stop(event)
                       onMarkSkipped()

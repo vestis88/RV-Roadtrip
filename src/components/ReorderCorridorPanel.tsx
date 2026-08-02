@@ -48,6 +48,20 @@ export function ReorderCorridorPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The corridor is shared-trip data: another traveler adding, removing or
+  // locking a stop while this panel is open would otherwise leave `order`
+  // referencing stops that no longer exist (or missing new ones), and the
+  // reconcile call would be computed from that stale list. Render-time
+  // resync, the same pattern SettingsScreen/NotesScreen use — keyed on the
+  // incoming stop ids, and only while still editing, so it can never
+  // discard a reordering mid-review.
+  const incomingIds = stops.map((s) => s.id).join('|')
+  const [syncedIds, setSyncedIds] = useState(incomingIds)
+  if (step === 'edit' && incomingIds !== syncedIds) {
+    setSyncedIds(incomingIds)
+    setOrder(stops.map((s) => s.id))
+  }
+
   const nameById = new Map([...stops, ...addableStops].map((s) => [s.id, s.name]))
   const availableToAdd = addableStops.filter((s) => !order.includes(s.id))
 

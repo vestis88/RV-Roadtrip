@@ -102,7 +102,13 @@ export function AddCustomStopForm({
         <button
           type="button"
           data-testid="add-custom-stop-toggle"
-          onClick={() => setOpen(true)}
+          // Re-seed from the current anchor on open — this form stays
+          // mounted across day navigation, so the mount-time value goes
+          // stale (see AddCorridorStopForm's own note).
+          onClick={() => {
+            setLocation(defaultLocation)
+            setOpen(true)
+          }}
           className="btn btn-sm w-full border border-dashed border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           + Add custom stop

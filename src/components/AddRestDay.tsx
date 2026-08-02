@@ -20,14 +20,19 @@ interface AddRestDayProps {
 export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function confirm() {
     setSubmitting(true)
+    setError(null)
     try {
       await submitInsertRestDay(tripId, dayId)
       setOpen(false)
-    } catch (error) {
-      console.error('Failed to request an extra rest day', error)
+    } catch (err) {
+      // Previously console-only: the button simply returned to normal and
+      // the traveler had no way to tell the request had failed.
+      console.error('Failed to request an extra rest day', err)
+      setError('Could not add a rest day — please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -73,6 +78,11 @@ export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
           Cancel
         </button>
       </div>
+      {error && (
+        <p data-testid="add-rest-day-error" className="text-sm text-red-600">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

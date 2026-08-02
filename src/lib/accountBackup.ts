@@ -17,6 +17,42 @@ export type LinkGoogleResult =
   | { status: 'cancelled' }
   | { status: 'redirecting' }
 
+const PENDING_MERGE_KEY = 'pendingTripMerge'
+// Firebase ID tokens are valid for an hour; a retry past that can't prove
+// control of the abandoned uid any more, so the record is dropped rather
+// than retried forever against a token the backend will reject.
+const PENDING_MERGE_TTL_MS = 55 * 60 * 1000
+
+interface PendingMerge {
+  oldUid: string
+  oldIdToken: string
+  capturedAt: number
+}
+
+function readPendingMerge(): PendingMerge | null {
+  try {
+    const raw = localStorage.getItem(PENDING_MERGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PendingMerge
+    if (Date.now() - parsed.capturedAt > PENDING_MERGE_TTL_MS) {
+      localStorage.removeItem(PENDING_MERGE_KEY)
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function runMerge(pending: PendingMerge): Promise<void> {
+  const mergeTrips = httpsCallable<
+    { oldUid: string; oldIdToken: string },
+    { mergedTripIds: string[] }
+  >(functions, 'mergeTrips')
+  await mergeTrips({ oldUid: pending.oldUid, oldIdToken: pending.oldIdToken })
+  localStorage.removeItem(PENDING_MERGE_KEY)
+}
+
 /**
  * The one real wrinkle in linking: if this Google account is already
  * linked to a DIFFERENT Firebase user (e.g. it already backed up another
@@ -30,6 +66,18 @@ export type LinkGoogleResult =
  * Firebase surfaces this the same way either way: the link attempt itself
  * fails with this code, `oldUser` is untouched, and only signing in with
  * the extracted credential actually switches identities.
+ *
+ * The sign-in genuinely has to happen BEFORE the merge — `mergeTrips`
+ * authenticates as the *surviving* account and merges into whoever is
+ * calling — which makes the window between them the dangerous part: the
+ * old uid is already abandoned, and nothing can re-mint its ID token. A
+ * merge that failed there (flaky connection, function timeout) used to
+ * lose every trip on the old account permanently, with only a generic
+ * "Could not link Google account" to show for it. So the proof needed to
+ * finish the merge is persisted BEFORE the identity switch, and
+ * `completePendingGoogleLinkRedirect` drains it on the next load — the
+ * traveler's trips come back on their own rather than needing the exact
+ * moment to have gone perfectly.
  */
 async function mergeIntoSurvivingAccount(
   oldUser: User,
@@ -38,17 +86,41 @@ async function mergeIntoSurvivingAccount(
   const credential = GoogleAuthProvider.credentialFromError(authError)
   if (!credential) throw authError
 
-  const oldUid = oldUser.uid
-  const oldIdToken = await oldUser.getIdToken()
-  const signInResult = await signInWithCredential(auth, credential)
+  const pending: PendingMerge = {
+    oldUid: oldUser.uid,
+    oldIdToken: await oldUser.getIdToken(),
+    capturedAt: Date.now(),
+  }
+  // Written before the point of no return, not after it.
+  try {
+    localStorage.setItem(PENDING_MERGE_KEY, JSON.stringify(pending))
+  } catch {
+    // A storage failure mustn't block the link itself — it only costs the
+    // automatic retry, and the merge below still usually succeeds outright.
+  }
 
-  const mergeTrips = httpsCallable<
-    { oldUid: string; oldIdToken: string },
-    { mergedTripIds: string[] }
-  >(functions, 'mergeTrips')
-  await mergeTrips({ oldUid, oldIdToken })
+  const signInResult = await signInWithCredential(auth, credential)
+  await runMerge(pending)
 
   return { status: 'merged', email: signInResult.user.email }
+}
+
+/**
+ * Finishes a merge whose callable didn't land at the time (see
+ * mergeIntoSurvivingAccount). Safe to call on every load: a no-op with no
+ * record stored, and `mergeTrips` is idempotent — it re-grants memberships
+ * the surviving account may already have.
+ */
+export async function retryPendingTripMerge(): Promise<boolean> {
+  const pending = readPendingMerge()
+  if (!pending || !auth.currentUser) return false
+  try {
+    await runMerge(pending)
+    return true
+  } catch (error) {
+    console.error('Pending trip merge retry failed — will try again next load', error)
+    return false
+  }
 }
 
 function toLinkedResult(result: UserCredential): LinkGoogleResult {
@@ -110,6 +182,11 @@ export async function linkGoogleAccount(): Promise<LinkGoogleResult> {
 export async function completePendingGoogleLinkRedirect(): Promise<LinkGoogleResult | null> {
   const currentUser = auth.currentUser
   if (!currentUser) return null
+
+  // Independent of the redirect result: a merge left unfinished by the popup
+  // flow needs draining too, and this is the one thing already called on
+  // every load.
+  await retryPendingTripMerge()
 
   try {
     const result = await getRedirectResult(auth)

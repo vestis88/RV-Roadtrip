@@ -43,8 +43,21 @@ export function ExploreCandidateCard({
   return (
     <div
       ref={innerRef}
+      // Tap-to-highlight is this card's primary interaction, so it needs the
+      // same keyboard affordance PlaceCard already implements — without it
+      // only the vote/keep/reject buttons were reachable, and the card
+      // itself could not be activated at all without a pointer.
+      role="button"
+      tabIndex={0}
+      aria-pressed={highlighted}
       data-testid={`explore-candidate-${stop.id}`}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
       className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
         highlighted
           ? 'ring-2 ring-orange-500'

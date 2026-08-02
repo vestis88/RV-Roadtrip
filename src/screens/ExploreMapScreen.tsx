@@ -80,6 +80,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   // Same reasoning as SettingsScreen.tsx's own `exploring`: a generation
   // fired from Trip Setup and still running server-side must show as
   // "still working" here too, on a screen that never made that call
@@ -171,8 +172,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
   }
 
-  async function vote(stopId: string, direction: 'up' | 'down') {
-    await voteExploreCandidate(tripId, grouped, stopId, direction)
+  function vote(stopId: string, direction: 'up' | 'down') {
+    runStopAction(
+      voteExploreCandidate(tripId, grouped, stopId, direction),
+      'Could not reorder that stop — please try again.',
+    )
   }
 
   async function commit() {
@@ -180,9 +184,30 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     try {
       await submitPlanRequest(tripId, 'fromExploreCandidates')
       setConfirmOpen(false)
+    } catch (error) {
+      // Without this the rejection was unhandled, the dialog stayed open
+      // with no explanation, and the traveler had no way to tell a failed
+      // submit from a slow one.
+      console.error('submitPlanRequest failed', error)
+      setGenError('Could not start the full plan — please try again.')
+      setConfirmOpen(false)
     } finally {
       setCommitting(false)
     }
+  }
+
+  /**
+   * Keep/Not-interested/Remove are plain Firestore writes that used to be
+   * fired as floating promises — a permission-denied or offline write did
+   * nothing at all and said nothing at all, while the card sat there
+   * looking untouched.
+   */
+  function runStopAction(action: Promise<void>, failureMessage: string) {
+    setActionError(null)
+    action.catch((error: unknown) => {
+      console.error(failureMessage, error)
+      setActionError(failureMessage)
+    })
   }
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
@@ -210,6 +235,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         {genError && (
           <p data-testid="explore-find-stops-error" className="text-sm text-red-600">
             {genError}
+          </p>
+        )}
+        {actionError && (
+          <p data-testid="explore-action-error" className="text-sm text-red-600">
+            {actionError}
           </p>
         )}
         <button
@@ -341,11 +371,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                         )
                       }
                       onSelect={() => setSelectedId(stop.id)}
-                      onVoteUp={() => void vote(stop.id, 'up')}
-                      onVoteDown={() => void vote(stop.id, 'down')}
-                      onLock={() => setCorridorStopStatus(tripId, stop.id, 'locked')}
+                      onVoteUp={() => vote(stop.id, 'up')}
+                      onVoteDown={() => vote(stop.id, 'down')}
+                      onLock={() =>
+                        runStopAction(
+                          setCorridorStopStatus(tripId, stop.id, 'locked'),
+                          'Could not keep that stop — please try again.',
+                        )
+                      }
                       onReject={() => {
-                        deleteCorridorStop(tripId, stop.id)
+                        runStopAction(
+                          deleteCorridorStop(tripId, stop.id),
+                          'Could not remove that stop — please try again.',
+                        )
                         if (selectedId === stop.id) setSelectedId(null)
                       }}
                     />

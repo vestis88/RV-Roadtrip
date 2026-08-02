@@ -3,17 +3,24 @@ import type { Trip } from '@rv/shared'
 
 export function ShareTripMenu({ trip }: { trip: Trip }) {
   const [linkCopied, setLinkCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
   const [joinCodeDraft, setJoinCodeDraft] = useState('')
 
   async function copyShareLink() {
     if (!trip.meta.shareCode) return
     const url = `${window.location.origin}${window.location.pathname}?join=${trip.meta.shareCode}`
+    setCopyError(null)
     try {
       await navigator.clipboard.writeText(url)
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2000)
     } catch (error) {
+      // Clipboard access is refused outright in some contexts (insecure
+      // origin, older browsers, denied permission). The button silently
+      // never flipped to "Copied!", which is indistinguishable from it
+      // still working — so show the link to copy by hand instead.
       console.error('Failed to copy share link', error)
+      setCopyError(url)
     }
   }
 
@@ -55,6 +62,11 @@ export function ShareTripMenu({ trip }: { trip: Trip }) {
             >
               {linkCopied ? 'Copied!' : 'Copy link'}
             </button>
+      {copyError && (
+        <p data-testid="share-link-copy-error" className="mt-1 text-xs text-red-600">
+          Couldn't copy automatically — copy this link: {copyError}
+        </p>
+      )}
           </div>
         )}
         <form

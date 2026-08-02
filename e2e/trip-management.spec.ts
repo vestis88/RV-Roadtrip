@@ -198,8 +198,14 @@ test('deleting a trip removes it from the switcher; deleting the active trip swi
   // trip that no longer exists.
   await page.getByTestId(`trip-delete-${secondTripId}`).click()
   await page.getByTestId(`trip-delete-confirm-${secondTripId}`).click()
+  // Deleting the ACTIVE trip makes the app switch away, and a raw
+  // page.evaluate polled across that transition dies with "Execution
+  // context was destroyed" whenever a poll lands mid-navigation — the
+  // exact race evaluateWithRetry exists for (see its own doc comment).
+  // Every other localStorage read in this suite already goes through it;
+  // this one was missed, which is why it was the suite's flakiest test.
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem('tripId')))
+    .poll(() => evaluateWithRetry(page, () => localStorage.getItem('tripId')))
     .not.toBe(secondTripId)
   await page.getByTestId('trip-name-input').waitFor()
 })

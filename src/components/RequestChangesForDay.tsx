@@ -26,16 +26,26 @@ export function RequestChangesForDay({
   const [open, setOpen] = useState(false)
   const [changeText, setChangeText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function submit() {
+    setError(null)
+    // Submitting blank fired a real replan with no instructions at all —
+    // the same expensive regeneration ConfirmGenerateDialog exists to gate,
+    // triggered by an empty textarea.
+    if (!changeText.trim()) {
+      setError('Describe what you would like changed first.')
+      return
+    }
     setSubmitting(true)
     try {
       const lockedDayIds = allDayIds.filter((id) => id !== dayId)
       await submitPlanChangeRequest(tripId, trip, changeText, lockedDayIds)
       setChangeText('')
       setOpen(false)
-    } catch (error) {
-      console.error('Failed to submit per-day change request', error)
+    } catch (err) {
+      console.error('Failed to submit per-day change request', err)
+      setError('Could not send that request — please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -91,6 +101,14 @@ export function RequestChangesForDay({
           Cancel
         </button>
       </div>
+      {error && (
+        <p
+          data-testid="request-changes-for-day-error"
+          className="text-sm text-red-600"
+        >
+          {error}
+        </p>
+      )}
     </div>
   )
 }

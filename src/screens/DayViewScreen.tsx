@@ -176,6 +176,9 @@ function PlaceCardSection({
               photoUrl={place.photoUrl}
               googleMapsUrl={place.googleMapsUrl}
               status={place.status}
+              // A requeue for this scope is already running — see PlaceCard's
+              // own `busy` doc comment for why a second tap is costly.
+              busy={requeuing}
               selected={selectedPlaceId === cardId}
               onTap={() =>
                 onSelect(cardId, {

@@ -22,11 +22,18 @@ export function TripSwitcher({
 }: TripSwitcherProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   async function confirmDelete(tripId: string) {
     setDeletingId(tripId)
+    setDeleteError(null)
     try {
       await onDelete(tripId)
+    } catch (error) {
+      // Without this the rejection was unhandled and the row just returned
+      // to normal — indistinguishable from a trip that really was deleted.
+      console.error('Failed to delete trip', error)
+      setDeleteError('Could not delete that trip — please try again.')
     } finally {
       setDeletingId(null)
       setConfirmingId(null)
@@ -117,6 +124,11 @@ export function TripSwitcher({
               )
             })}
           </ul>
+        )}
+        {deleteError && (
+          <p data-testid="trip-delete-error" className="px-2 py-1 text-sm text-red-600">
+            {deleteError}
+          </p>
         )}
       </div>
     </details>
