@@ -256,6 +256,116 @@ async function resolveBatch(
   return picks
 }
 
+export interface QueryPlaceFind {
+  name: string
+  lat: number
+  lng: number
+  /** ISO 3166-1 alpha-2, from the place's own address components. */
+  country: string
+  rating?: number
+  ratingCount?: number
+  summary?: string
+}
+
+const QUERY_SEARCH_FIELD_MASK =
+  'places.displayName,places.location,places.rating,places.userRatingCount,places.addressComponents,places.editorialSummary,places.formattedAddress'
+
+/** Places' own bias radius cap. */
+const MAX_BIAS_RADIUS_METERS = 50_000
+
+function countryFromAddressComponents(
+  components: { shortText?: string; types?: string[] }[] | undefined,
+): string | undefined {
+  const country = components?.find((component) =>
+    component.types?.includes('country'),
+  )?.shortText
+  return country && country.length === 2 ? country.toUpperCase() : undefined
+}
+
+/**
+ * Answers a traveler's typed description ("a cozy restaurant in Hillerød")
+ * straight from Google Places, in one request.
+ *
+ * This exists because the "Describe it" search used to go to Claude with
+ * web search for every query, which took minutes and then timed out on
+ * exactly the questions Google answers instantly — reported with a
+ * screenshot of the app's own failure next to Google Maps showing a dozen
+ * well-rated restaurants in the same town. Anything phrased as "a <kind of
+ * place> in/near <somewhere>" is a Places text search; Claude is worth its
+ * latency only for the questions Places genuinely can't answer.
+ *
+ * Returns coordinates directly, so unlike the Claude path these finds need
+ * no separate geocoding round-trip. Places whose country can't be
+ * determined are dropped rather than guessed — corridorStopSchema requires
+ * a real 2-letter code, and the wrong one lands the stop in the wrong
+ * country's guide.
+ */
+export async function searchPlacesByQuery(
+  query: string,
+  near: LatLng,
+  biasRadiusKm: number,
+): Promise<QueryPlaceFind[]> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — place search requires real data and has no synthetic fallback.',
+    )
+  }
+  const response = await fetch(
+    'https://places.googleapis.com/v1/places:searchText',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': QUERY_SEARCH_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        textQuery: query,
+        locationBias: {
+          circle: {
+            center: { latitude: near.lat, longitude: near.lng },
+            radius: Math.min(biasRadiusKm * 1000, MAX_BIAS_RADIUS_METERS),
+          },
+        },
+      }),
+    },
+  )
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `Places query search failed with ${response.status}: ${body.slice(0, 500)}`,
+    )
+  }
+  const data = (await response.json()) as {
+    places?: {
+      displayName?: { text?: string }
+      location?: { latitude: number; longitude: number }
+      rating?: number
+      userRatingCount?: number
+      addressComponents?: { shortText?: string; types?: string[] }[]
+      editorialSummary?: { text?: string }
+      formattedAddress?: string
+    }[]
+  }
+  return (data.places ?? []).flatMap((place) => {
+    const name = place.displayName?.text
+    const country = countryFromAddressComponents(place.addressComponents)
+    if (!name || !place.location || !country) return []
+    return [
+      {
+        name,
+        lat: place.location.latitude,
+        lng: place.location.longitude,
+        country,
+        rating: place.rating,
+        ratingCount: place.userRatingCount,
+        summary: place.editorialSummary?.text ?? place.formattedAddress,
+      },
+    ]
+  })
+}
+
 /**
  * Resolves a free-text place query (e.g. "Lillehammer Camping, Lillehammer,
  * NO") to coordinates, biased near a reference point. Unlike resolveOne,

@@ -8,6 +8,7 @@ import {
   claudeApiKey,
   generateRescanCandidates,
 } from './prompts/rescanCorridor.js'
+import { findStopsForQuery } from './querySearch.js'
 
 /**
  * "Rescan this area" (phase 3 of the persistent-corridor overhaul): searches
@@ -52,14 +53,28 @@ export async function runRescanCorridor(
   const trip = tripSnap.data() as Trip
   const isExploring = trip.planMeta.status === 'idle'
 
-  const finds = await generateRescanCandidates({
-    center,
-    radiusKm,
-    notesFreeText: trip.notes.freeText,
-    tripId,
-    query,
-    backbone,
-  })
+  // A typed query goes to Places first (see findStopsForQuery); the plain
+  // "Rescan this area" pass has no query to search for and is Claude's job
+  // by definition — "what's worth stopping for around here" is a judgement,
+  // not a lookup.
+  const finds = query
+    ? (
+        await findStopsForQuery({
+          query,
+          center,
+          radiusKm,
+          notesFreeText: trip.notes.freeText,
+          tripId,
+          backbone,
+        })
+      ).finds
+    : await generateRescanCandidates({
+        center,
+        radiusKm,
+        notesFreeText: trip.notes.freeText,
+        tripId,
+        backbone,
+      })
 
   let nextRank = 0
   if (isExploring && finds.length > 0) {

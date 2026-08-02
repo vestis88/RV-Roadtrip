@@ -10,6 +10,17 @@ export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 
 const MODEL = 'claude-sonnet-5'
 const MAX_ATTEMPTS = 2
+/**
+ * Don't START a retry once this much of the budget is gone.
+ *
+ * Each attempt is a Claude call with up to 3 web searches, so two of them
+ * back to back can run for minutes — and did: a "Describe it" search was
+ * reported taking four minutes and then failing, which is the client's own
+ * 190s timeout firing mid-second-attempt. A retry that cannot finish before
+ * the traveler is shown an error isn't resilience, it's just spend. One
+ * slow-but-complete attempt beats two that get cut off.
+ */
+const RETRY_DEADLINE_MS = 100_000
 
 /**
  * How large a "rescan this area" search radius is allowed to be, in
@@ -99,7 +110,14 @@ export async function generateRescanCandidates(input: {
 
   let found: z.infer<typeof rescanResponseSchema> | undefined
   let lastError: unknown
+  const startedAt = Date.now()
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0 && Date.now() - startedAt > RETRY_DEADLINE_MS) {
+      console.warn(
+        `Skipping rescan retry — ${Math.round((Date.now() - startedAt) / 1000)}s already spent`,
+      )
+      break
+    }
     let response: Anthropic.Message
     try {
       response = await client.messages.create({
@@ -154,11 +172,24 @@ export async function generateRescanCandidates(input: {
     }),
   )
 
-  const useBackbone = input.backbone && input.backbone.length >= 2
-  const filtered = located.filter((find): find is RescanFind => {
+  return filterFindsToCorridor(located, input)
+}
+
+/**
+ * Drops finds that aren't actually where the traveler is looking — the same
+ * measurement whether the find came from Claude or straight from Places, so
+ * both paths honour the same "along this route" / "within this radius"
+ * promise the form makes.
+ */
+export function filterFindsToCorridor(
+  finds: (RescanFind | null)[],
+  bounds: { center: LatLng; radiusKm: number; backbone?: LatLng[] },
+): RescanFind[] {
+  const useBackbone = bounds.backbone && bounds.backbone.length >= 2
+  const filtered = finds.filter((find): find is RescanFind => {
     if (!find) return false
     if (useBackbone) {
-      const detourKm = estimateDetourKm(find, input.backbone!)
+      const detourKm = estimateDetourKm(find, bounds.backbone!)
       if (detourKm > MAX_QUERY_SEARCH_DETOUR_KM) {
         console.info(
           `Dropping rescan find "${find.name}" — ≈${Math.round(detourKm)} km detour off route (max ${MAX_QUERY_SEARCH_DETOUR_KM} km)`,
@@ -167,10 +198,10 @@ export async function generateRescanCandidates(input: {
       }
       return true
     }
-    const distanceKm = haversineDistanceKm(find, input.center)
-    if (distanceKm > input.radiusKm) {
+    const distanceKm = haversineDistanceKm(find, bounds.center)
+    if (distanceKm > bounds.radiusKm) {
       console.info(
-        `Dropping rescan find "${find.name}" — ≈${Math.round(distanceKm)} km away (radius ${input.radiusKm} km)`,
+        `Dropping rescan find "${find.name}" — ≈${Math.round(distanceKm)} km away (radius ${bounds.radiusKm} km)`,
       )
       return false
     }
