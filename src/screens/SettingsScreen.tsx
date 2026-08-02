@@ -6,6 +6,7 @@ import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
 import { PRESET_INTERESTS } from '../lib/interests'
+import { mergeRemoteSettings } from '../lib/mergeRemoteSettings'
 import { generateExploreHighlights } from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { updateTripSettings } from '../lib/updateTripSettings'
@@ -56,12 +57,36 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // local text state, keyed on tripId here since TripSettings has no
   // per-edit watermark the way notes.updatedAt gives NotesScreen.
   const [syncedTripId, setSyncedTripId] = useState(tripId)
+  // Fields edited during this mount; the server copy never overwrites them
+  // (see mergeRemoteSettings). Reset on a trip switch, since those edits
+  // belong to the trip being switched away from.
+  const [dirtyKeys, setDirtyKeys] = useState<ReadonlySet<keyof TripSettings>>(
+    () => new Set(),
+  )
+  // Every snapshot of the trip doc hands us a brand-new object, including
+  // ones triggered by something entirely unrelated to settings (planMeta
+  // ticking over during a generation, say) — so this only tracks *which*
+  // remote copy has already been folded in; mergeRemoteSettings decides
+  // whether any of it actually differs.
+  const [syncedSettings, setSyncedSettings] = useState(trip.settings)
   if (tripId !== syncedTripId) {
     setSyncedTripId(tripId)
+    setSyncedSettings(trip.settings)
+    setDirtyKeys(new Set())
     setSettings(trip.settings)
+  } else if (trip.settings !== syncedSettings) {
+    setSyncedSettings(trip.settings)
+    setSettings((prev) => mergeRemoteSettings(prev, trip.settings, dirtyKeys))
   }
 
   function commit(partial: Partial<TripSettings>) {
+    setDirtyKeys((prev) => {
+      const next = new Set(prev)
+      for (const key of Object.keys(partial) as (keyof TripSettings)[]) {
+        next.add(key)
+      }
+      return next
+    })
     setSettings((prev) => ({ ...prev, ...partial }))
     setSaveError(null)
     updateTripSettings(tripId, partial, trip.planMeta.status).catch(
@@ -118,7 +143,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   function openGenerateConfirm() {
     setRouteError(null)
     if (!hasRoute(settings)) {
-      setRouteError('Set a start and finish point above first.')
+      setRouteError('Set a start and finish point above first — pick each from the suggestions so we can place it on the map.')
       return
     }
     setConfirmOpen(true)
@@ -142,7 +167,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     // trip" carried over other settings but the traveler hadn't set a
     // destination yet).
     if (!hasRoute(settings)) {
-      setRouteError('Set a start and finish point above first.')
+      setRouteError('Set a start and finish point above first — pick each from the suggestions so we can place it on the map.')
       return
     }
     setOverviewSubmitting(true)

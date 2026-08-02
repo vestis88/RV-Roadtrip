@@ -164,7 +164,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     // must be caught here rather than relying on the Claude call itself to
     // notice — it previously just returned zero stops with no explanation.
     if (!hasRoute(trip.settings)) {
-      setGenError('Set a start and finish point in Trip Setup first.')
+      setGenError('Set a start and finish point in Trip Setup first — pick each from the suggestions so we can place it on the map.')
       return
     }
     setGenerating(true)

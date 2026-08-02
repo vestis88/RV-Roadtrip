@@ -36,6 +36,24 @@ async function getPlaceInputValue(locator: import('@playwright/test').Locator) {
   return locator.evaluate((el: HTMLInputElement) => el.value)
 }
 
+/**
+ * Sets a start/finish point WITH real coordinates, the way picking a
+ * Places suggestion does in the real app. Typing a name alone can't work
+ * here: hasRoute now requires located points (a named point still sitting
+ * on the (0,0) sentinel is exactly the Gulf-of-Guinea bug it guards
+ * against), and the Maps API is unreachable in this sandbox, so a typed
+ * name can never resolve.
+ */
+async function seedRoute(tripId: string) {
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
+}
+
 test('settings form fills and persists across reload, without falsely marking an idle trip stale', async ({
   page,
 }) => {
@@ -155,16 +173,22 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
 
   // A route is required before either button will spend a Claude call —
   // see the dedicated test below for that guard itself.
-  await setPlaceInput(page.getByTestId('start-point-input'), 'Oslo, Norway')
-  await setPlaceInput(page.getByTestId('end-point-input'), 'Bergen, Norway')
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+  await seedRoute(tripId)
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
 
   // No CLAUDE_API_KEY in this sandbox — same credential-less degradation
   // explore.spec.ts's own "find great stops" test exercises, confirming
   // this button drives the same generateExploreHighlights callable rather
   // than silently doing nothing.
   await page.getByTestId('generate-overview-button').click()
+  // Generous timeout: this is often the first callable the functions
+  // emulator runs in a suite, and its cold start includes a Secret Manager
+  // lookup that can only fail slowly here (no credentials in the sandbox).
   await expect(page.getByTestId('generate-overview-error')).toBeVisible({
-    timeout: 10_000,
+    timeout: 30_000,
   })
   // A failed attempt must not navigate away.
   await expect(page.getByTestId('trip-name-input')).toBeVisible()
@@ -192,12 +216,36 @@ test('"Generate overview" and "Generate full plan" both require a start and fini
   )
   await expect(page.getByTestId('confirm-generate-dialog')).toHaveCount(0)
 
-  // Filling in just one point still isn't enough.
-  await setPlaceInput(page.getByTestId('start-point-input'), 'Oslo, Norway')
+  // Naming just one point still isn't enough.
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+    })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
   await page.getByTestId('generate-overview-button').click()
   await expect(page.getByTestId('route-required-error')).toBeVisible()
 
-  await setPlaceInput(page.getByTestId('end-point-input'), 'Bergen, Norway')
+  // A point that has a NAME but no located coordinates is still refused —
+  // that's the state a typed-but-unresolved place leaves behind.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({ 'settings.endPoint': { name: 'Bergen, Norway', lat: 0, lng: 0 } })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await page.getByTestId('generate-plan-button').click()
+  await expect(page.getByTestId('confirm-generate-dialog')).toHaveCount(0)
+  await expect(page.getByTestId('route-required-error')).toBeVisible()
+
+  // Only once it is genuinely located does the expensive path open up.
+  await seedRoute(tripId)
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
   await page.getByTestId('generate-plan-button').click()
   await expect(page.getByTestId('confirm-generate-dialog')).toBeVisible()
 })
