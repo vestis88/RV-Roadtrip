@@ -14,8 +14,12 @@ service cloud.firestore {
     // accounts from any other visitor who happened to sign in. Every rule
     // below requires BOTH: this is an extra gate in front of the existing
     // per-trip checks, never a replacement for them.
+    //
+    // Read through get() with a default: most signed-in users have no custom
+    // claims at all, and a bare `request.auth.token.access` on a token that
+    // lacks the key is an evaluation error rather than a plain false.
     function hasAccess() {
-      return request.auth != null && request.auth.token.access == true;
+      return request.auth != null && request.auth.token.get('access', false) == true;
     }
 
     match /trips/{tripId} {

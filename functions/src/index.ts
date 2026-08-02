@@ -15,6 +15,9 @@ initializeApp()
 // in the schema, so omitting them is correct, not a bug to work around.
 getFirestore().settings({ ignoreUndefinedProperties: true })
 
+// The gate every other callable sits behind — see accessControl.ts. It is
+// deliberately the one callable that does not require the access claim.
+export { claimAccess } from './claimAccessCallable.js'
 export { createTrip, joinTrip } from './trips.js'
 export { mergeTrips } from './mergeTrips.js'
 export { deleteTrip } from './deleteTrip.js'

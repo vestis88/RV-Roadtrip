@@ -14,6 +14,14 @@ const PROJECT_ID = 'demo-rv-trip-planner'
 
 let testEnv: RulesTestEnvironment
 
+// These read through firestore.rules, which since the login gate requires the
+// `access` claim on top of trip membership — see accessControl.ts. What's
+// under test here is membership, so every context carries the claim; the
+// gate itself is covered in firestore-rules.test.ts.
+function authedDb(uid: string) {
+  return testEnv.authenticatedContext(uid, { access: true }).firestore()
+}
+
 beforeAll(async () => {
   initializeApp({ projectId: PROJECT_ID })
   testEnv = await initializeTestEnvironment({
@@ -37,9 +45,9 @@ describe('createTrip + joinTrip', () => {
     const { tripId, shareCode } = await createTripForUser('uidA')
     await joinTripByCode('uidB', shareCode)
 
-    const aliceDb = testEnv.authenticatedContext('uidA').firestore()
-    const bobDb = testEnv.authenticatedContext('uidB').firestore()
-    const strangerDb = testEnv.authenticatedContext('uidC').firestore()
+    const aliceDb = authedDb('uidA')
+    const bobDb = authedDb('uidB')
+    const strangerDb = authedDb('uidC')
 
     await assertSucceeds(getDoc(doc(aliceDb, 'trips', tripId)))
     await assertSucceeds(getDoc(doc(bobDb, 'trips', tripId)))
@@ -58,8 +66,8 @@ describe('users/{uid}/trips reverse index', () => {
 
     const { tripId } = await createTripForUser('uidA')
 
-    const aliceDb = testEnv.authenticatedContext('uidA').firestore()
-    const strangerDb = testEnv.authenticatedContext('uidC').firestore()
+    const aliceDb = authedDb('uidA')
+    const strangerDb = authedDb('uidC')
 
     const aliceIndex = await getDocs(collection(aliceDb, 'users', 'uidA', 'trips'))
     expect(aliceIndex.docs.map((d) => d.id)).toEqual([tripId])
@@ -74,11 +82,11 @@ describe('users/{uid}/trips reverse index', () => {
     const { tripId, shareCode } = await createTripForUser('uidA')
     await joinTripByCode('uidB', shareCode)
 
-    const bobDb = testEnv.authenticatedContext('uidB').firestore()
+    const bobDb = authedDb('uidB')
     const bobIndex = await getDocs(collection(bobDb, 'users', 'uidB', 'trips'))
     expect(bobIndex.docs.map((d) => d.id)).toEqual([tripId])
 
-    const aliceDb = testEnv.authenticatedContext('uidA').firestore()
+    const aliceDb = authedDb('uidA')
     const aliceIndex = await getDocs(collection(aliceDb, 'users', 'uidA', 'trips'))
     expect(aliceIndex.docs.map((d) => d.id)).toEqual([tripId])
   })
@@ -89,7 +97,7 @@ describe('users/{uid}/trips reverse index', () => {
     const { tripId: firstTripId } = await createTripForUser('uidA')
     const { tripId: secondTripId } = await createTripForUser('uidA')
 
-    const aliceDb = testEnv.authenticatedContext('uidA').firestore()
+    const aliceDb = authedDb('uidA')
     const aliceIndex = await getDocs(collection(aliceDb, 'users', 'uidA', 'trips'))
     expect(new Set(aliceIndex.docs.map((d) => d.id))).toEqual(
       new Set([firstTripId, secondTripId]),
@@ -98,7 +106,7 @@ describe('users/{uid}/trips reverse index', () => {
 
   it('a client cannot write to the index directly (must go through createTrip/joinTrip)', async () => {
     await testEnv.clearFirestore()
-    const aliceDb = testEnv.authenticatedContext('uidA').firestore()
+    const aliceDb = authedDb('uidA')
     await assertFails(
       setDoc(doc(aliceDb, 'users', 'uidA', 'trips', 'someTripId'), {
         joinedAt: '2026-01-01T00:00:00Z',

@@ -282,9 +282,27 @@ describe('researchMoreAlternatives callable', () => {
     await expect(
       researchMoreAlternatives.run({
         data: { tripId, dayId: 'day1', kind: 'activity' },
-        auth: { uid: 'uidResearchCallableStranger' },
+        auth: { uid: 'uidResearchCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
+    expect(backfillActivitiesMock).not.toHaveBeenCalled()
+  })
+
+  // See rescanCorridorCallable.test.ts's counterpart: membership is not
+  // enough on its own once the app is invite-only.
+  it('rejects a member whose token carries no access claim', async () => {
+    const { tripId } = await createTripForUser('uidResearchNoClaim')
+    await seedDay(tripId, 'day1')
+    backfillActivitiesMock.mockReset()
+    const { researchMoreAlternatives } = await import(
+      './researchMoreAlternativesCallable.js'
+    )
+    await expect(
+      researchMoreAlternatives.run({
+        data: { tripId, dayId: 'day1', kind: 'activity' },
+        auth: { uid: 'uidResearchNoClaim', token: {} },
+      } as never),
+    ).rejects.toThrow('does not have access to this app')
     expect(backfillActivitiesMock).not.toHaveBeenCalled()
   })
 })

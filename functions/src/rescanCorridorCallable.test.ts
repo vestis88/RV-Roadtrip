@@ -206,9 +206,25 @@ describe('rescanCorridor callable', () => {
     await expect(
       rescanCorridor.run({
         data: { tripId, center: CENTER, radiusKm: 25 },
-        auth: { uid: 'uidRescanCallableStranger' },
+        auth: { uid: 'uidRescanCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
+    expect(generateRescanCandidatesMock).not.toHaveBeenCalled()
+  })
+
+  // The access claim gates the app as a whole, membership gates the trip —
+  // this caller is a genuine member and still gets nothing, which is the
+  // point: without it, any visitor who signs in spends the owner's budget.
+  it('rejects a member whose token carries no access claim', async () => {
+    const { tripId } = await createTripForUser('uidRescanNoClaim')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+    const { rescanCorridor } = await import('./rescanCorridorCallable.js')
+    await expect(
+      rescanCorridor.run({
+        data: { tripId, center: CENTER, radiusKm: 25 },
+        auth: { uid: 'uidRescanNoClaim', token: {} },
+      } as never),
+    ).rejects.toThrow('does not have access to this app')
     expect(generateRescanCandidatesMock).not.toHaveBeenCalled()
   })
 })

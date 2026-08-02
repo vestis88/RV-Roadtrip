@@ -216,7 +216,7 @@ describe('getOvernightCandidates callable', () => {
     await expect(
       getOvernightCandidates.run({
         data: { tripId, dayId: '2026-08-01' },
-        auth: { uid: 'uidOvernightCallableStranger' },
+        auth: { uid: 'uidOvernightCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
     expect(searchCampsiteCandidatesMock).not.toHaveBeenCalled()

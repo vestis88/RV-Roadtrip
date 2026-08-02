@@ -95,7 +95,7 @@ describe('previewReconcileCorridor callable', () => {
     await expect(
       previewReconcileCorridor.run({
         data: { tripId, newStopOrder: [] },
-        auth: { uid: 'uidPreviewCallableStranger' },
+        auth: { uid: 'uidPreviewCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
   })

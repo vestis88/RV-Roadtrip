@@ -263,7 +263,7 @@ describe('generateExploreHighlights callable', () => {
     await expect(
       generateExploreHighlights.run({
         data: { tripId },
-        auth: { uid: 'uidExploreCallableStranger' },
+        auth: { uid: 'uidExploreCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
     expect(generateRegionHighlightsMock).not.toHaveBeenCalled()
