@@ -1,8 +1,13 @@
 name: CI
 
 on:
+  # Every branch, deliberately un-filtered. A hardcoded feature-branch name
+  # here rots the moment that branch is renamed or retired, and until
+  # 2026-08-02 this app's entire history lived on one such branch — with
+  # `main` holding a single empty commit — so the branch name was
+  # load-bearing infrastructure. Testing everything and deploying only
+  # `main` (see the deploy job's own condition) keeps that from recurring.
   push:
-    branches: [main, claude/master-plan-docs-drokop]
   pull_request:
     branches: [main]
 
@@ -70,7 +75,7 @@ jobs:
     needs: build
     if: >
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/master-plan-docs-drokop') &&
+      github.ref == 'refs/heads/main' &&
       vars.FIREBASE_PROJECT_ID != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
     runs-on: ubuntu-latest
     permissions:

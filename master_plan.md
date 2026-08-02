@@ -840,6 +840,11 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
   - Fixed by adding `--force` to the deploy command, which is what authorises a non-interactive deletion of functions no longer in source.
   - The process failure is worth recording next to the technical one: each of those pushes was reported as "green", on the strength of a local test run, with "CI will confirm on push" and then no follow-up. The build job WAS green every time — it was the deploy job that failed, and nobody looked. Checking the run after pushing is the difference between six deploys and none.
 
+- [x] **`main` is now the trunk, and the only thing that deploys** (2026-08-02, after mapping the trade-offs) — until today `main` held a single "Initial commit" and all 170 commits of the actual app lived on `claude/master-plan-docs-drokop`, which was also what production deployed from. Two lines in `ci.yml` were the only thing pointing there, which made a feature-branch name load-bearing infrastructure: rename or delete it and deploys stop, silently.
+  - The cost was mostly paid by anyone starting fresh. A new session clones the repo and lands on the default branch — an empty scaffold — and has to be told the branch name out of band. `git diff main...HEAD` reported the whole app as new (literally "203 files changed, 47,296 insertions" during a review pass), so no diff against trunk meant anything, no PR was reviewable, and branch protection had nothing useful to protect.
+  - `main` fast-forwarded to the branch (a clean ancestor, no merge commit) at the exact commit already deployed and verified, so the deploy that followed was a no-op in content.
+  - The deploy job's condition is now `main` alone. CI's push trigger went the other way — **un-filtered, every branch** — because a hardcoded branch name in a trigger is precisely what rotted here; testing everything while deploying only trunk is what keeps this from recurring.
+
 ---
 
 **END OF MASTER PLAN — keep this file in the repo root as `MASTER_PLAN.md` and update checkboxes with every commit.**
