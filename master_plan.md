@@ -50,37 +50,83 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 ## 3. SYSTEM ARCHITECTURE
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  PWA (React)  — phone A / phone B / iPad                │
-│  ┌──────────┐ ┌──────────┐ ┌─────────┐ ┌─────────────┐  │
-│  │ Trip     │ │ Overview │ │ Day     │ │ Country     │  │
-│  │ Setup    │ │ Map      │ │ View    │ │ Guide       │  │
-│  └────┬─────┘ └────┬─────┘ └────┬────┘ └──────┬──────┘  │
-│       └────────────┴─────┬──────┴─────────────┘         │
-│                    Firestore SDK (real-time listeners,  │
-│                    offline persistence enabled)         │
-└──────────────────────────┬──────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  PWA (React + Vite)  — phone A / phone B / iPad                   │
+│  ┌────────┐ ┌─────────┐ ┌──────────┐ ┌─────┐ ┌───────┐ ┌───────┐  │
+│  │ Trip   │ │ Map tab │ │ Day View │ │Diary│ │Country│ │ Trip  │  │
+│  │ Setup  │ │ (2 modes│ │          │ │     │ │ Guide │ │switch │  │
+│  └───┬────┘ │  below) │ └────┬─────┘ └──┬──┘ └───┬───┘ └───┬───┘  │
+│      └──────┴────┬────┴──────┴──────────┴────────┴─────────┘      │
+│         Firestore SDK (real-time listeners, offline cache)        │
+│         + httpsCallable for the on-demand operations              │
+└──────────────────────────┬────────────────────────────────────────┘
                            │
-        ┌──────────────────┴──────────────────┐
-        │           FIREBASE                  │
-        │  Firestore  ←→  Cloud Functions     │
-        │  (trip data)     │                  │
-        └──────────────────┼──────────────────┘
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        Claude API   Places API   Routes API
-        (planning)   (details)    (drive times)
+        ┌──────────────────┴───────────────────┐
+        │             FIREBASE                 │
+        │  Firestore  ←→  Cloud Functions      │
+        │  (trip data)    (europe-west1)       │
+        └──────────────────┼───────────────────┘
+            ┌──────────┬───┴────┬───────────┐
+            ▼          ▼        ▼           ▼
+        Claude API  Places   Routes    Overpass/OSM
+        (planning)  (detail) (drive)   (stellplatz)
 ```
 
-**Data flow for plan generation:**
-1. Client writes `planRequest` doc to Firestore (status: `pending`).
-2. Cloud Function `generatePlan` triggers on that write.
-3. Function reads trip inputs + freeform notes → calls Claude with the Planning Prompt (Section 6) → Claude returns structured JSON itinerary skeleton (stops, day types, pacing).
-4. Function enriches each stop: Routes API for real drive times/distances; Places API for 5 activities + 9 restaurants per day (rating, hours, photo, place_id).
-5. Function writes the full plan into Firestore; status: `ready`. All devices update live.
-6. Re-plans reuse the same pipeline with a `replanContext` (current location, completed log, remaining dates).
+**The Map tab has two modes**, chosen by `planMeta.status`:
 
-**Why this shape:** keys stay server-side; heavy work is off-device; two phones stay in sync for free via Firestore listeners; offline reads work from Firestore's local cache.
+- **Explore mode** (`status: 'idle'` — no plan yet). `ExploreMapScreen`: a
+  cheap, repeatable curation pass. "Find great stops" / "Generate overview"
+  runs *only* Claude's highlights phase and writes the results as
+  `candidate` corridor stops. The traveler ranks them across three priority
+  tiers, keeps or rejects them, drops pins, and rescans areas — all before
+  paying for a single day of itinerary detail. The drawn route runs through
+  the `locked` + `must-see` stops, so promoting a stop reshapes the route
+  and re-measures every other candidate's detour against it.
+- **Plan mode** (any other status). `OverviewMapScreen`: the generated
+  day-by-day plan, its real driving route, and corridor editing.
+
+**Two independent paths into the backend**, deliberately not merged:
+
+1. **The `planRequests` queue** → `generatePlan` (a Firestore `onDocumentCreated`
+   trigger) — every *expensive* write path: `full`, `replan`, `insertRestDay`,
+   `reconcileCorridor`, `fromExploreCandidates`. Guarded by `planMeta.status`
+   so only one runs per trip at a time.
+2. **`httpsCallable` functions** — everything on-demand and comparatively
+   cheap: `generateExploreHighlights`, `rescanCorridor`,
+   `researchMoreAlternatives`, `getOvernightCandidates`,
+   `previewReconcileCorridor` (a pure dry run), `refreshCountryGuide`, plus
+   trip lifecycle (`createTrip`, `joinTrip`, `deleteTrip`, `mergeTrips`).
+
+   Explore mode's generation is a callable *on purpose*: routing it through
+   `planRequests` would flip the trip out of `idle` and collapse the Map tab
+   back to plan mode mid-curation. It has its own `planMeta.exploreStatus`
+   guard instead.
+
+**Data flow for a full generation:**
+1. Client writes a `planRequests` doc (`status: 'pending'`).
+2. `generatePlan` triggers; a transaction claims `planMeta.status`, rejecting
+   any competing request. The claim carries a heartbeat and expires
+   (`planLock.ts`) so a crashed run can't wedge the trip forever.
+3. Claude runs in three sequential phases (Section 6.1): highlights →
+   route outline → per-chunk day detail. An explore-mode commit skips
+   phase 1 and seeds from the traveler's curated stops.
+4. Each day is enriched: Routes API for real drive legs, Places API for
+   activities/restaurants. Days are **staged to `generationStaging` as they
+   resolve**, so a failure resumes rather than restarting.
+5. If the invocation nears its time budget, it writes itself a continuation
+   request (`isContinuation`) and hands off — a long trip spans several
+   invocations rather than dying at the 540s ceiling.
+6. Days are committed, `corridorStops` re-materialized, checkpoint cleared,
+   `status: 'ready'`. All devices update live via Firestore listeners.
+
+**Authorization.** Callables run on the Admin SDK, which bypasses
+`firestore.rules` entirely — so every `tripId`-taking callable must call
+`requireTripMember` (`functions/src/authz.ts`) itself. Rules still govern all
+direct client reads/writes.
+
+**Why this shape:** API keys stay server-side; heavy work is off-device; two
+phones stay in sync for free via Firestore listeners; offline reads work from
+Firestore's local cache.
 
 ---
 
@@ -105,29 +151,61 @@ trips/{tripId}
                  // by fuel type (T-18/T-27's road fees + driving rules sections).
   notes:       { freeText: string, updatedAt }    // THE editable "text file".
                                                   // Injected into EVERY Claude call.
-  planMeta:    { status: idle|pending|generating|ready|error,
-                 avgDriveMinutesPerDay, totalKm, generatedAt, lastReplanAt }
+  planMeta:    { status: idle|pending|generating|ready|error|stale,
+                 avgDriveMinutesPerDay, totalKm, generatedAt, lastReplanAt, error?,
+                 // progress, surfaced live while generating
+                 progressLabel?, progressCurrent?, progressTotal?,
+                 // resumable generation (planCheckpoint.ts) — internal, never rendered
+                 checkpoint?: { settingsHash, skeleton },
+                 // busy-guard heartbeat; lets an abandoned claim expire (planLock.ts)
+                 statusUpdatedAt?,
+                 // explore mode's OWN guard — deliberately separate from `status`,
+                 // so curating never flips the Map tab out of explore mode
+                 exploreStatus?: idle|generating,
+                 exploreStatusUpdatedAt?,
+                 exploreLastRunAt? }              // distinguishes "never searched"
+                                                  // from "searched, found nothing"
 
-trips/{tripId}/days/{dayId}            // dayId = "2026-07-14"
+trips/{tripId}/members/{uid}            // membership; written only by Cloud Functions
+  { joinedAt }
+
+trips/{tripId}/days/{dayId}             // dayId is a Firestore AUTO-ID.
+                                        // (Was the date; changed in phase 2a so a
+                                        // day can be re-dated without being
+                                        // deleted and recreated.)
   { index, date, type: drive|rest,
     overnight: {name, lat, lng, country, campsiteSuggestion},
     drive: { fromName, toName, distanceKm, durationMin,
              slot: morning|midday|evening, polyline },
     summary: string,                    // Claude's 1-2 sentence day pitch
+    highlightReason?: string,           // why this stop is on the route
     extraTimeReason?: string }          // why this place got more time
 
-trips/{tripId}/days/{dayId}/activities/{placeId}
+trips/{tripId}/days/{dayId}/activities/{autoId}
   { name, category: sight|hike|museum|beach|playground|other,
-    lat, lng, rating, ratingCount, googleMapsUrl, photoUrl,
+    lat, lng, placeId?, rating, ratingCount, googleMapsUrl, photoUrl,
     openingHours?, blurb,               // Claude's hidden-gem pitch
     kidFriendly: boolean,
+    timeOfDay?: morning|afternoon|evening,
+    reserve?: boolean,                  // held back to refill the row on a skip
     status: suggested|selected|done|skipped,
     doneAt?, diaryNote? }
 
-trips/{tripId}/days/{dayId}/restaurants/{placeId}
-  { name, meal: breakfast|lunch|dinner, lat, lng, rating, ratingCount,
-    googleMapsUrl, priceLevel, cuisine, blurb,
+trips/{tripId}/days/{dayId}/restaurants/{autoId}
+  { name, meal: breakfast|lunch|dinner, lat, lng, placeId?, rating, ratingCount,
+    googleMapsUrl, priceLevel, cuisine, blurb, reserve?,
     status: suggested|selected|done, doneAt?, diaryNote? }
+
+trips/{tripId}/corridorStops/{stopId}   // the route's stops as first-class objects
+  { name, lat, lng, country?, why?,
+    status: candidate|proposed|committed|locked,
+    //  candidate  — explore mode's curated shortlist
+    //  proposed   — a rescan find awaiting review, post-generation
+    //  committed  — materialized from the generated days
+    //  locked     — the traveler explicitly wants this one
+    linkedDayIds: [dayId],              // committed stops only
+    priority?: must-see|worth-a-detour|nice-if-convenient,  // explore mode only
+    region?, rank? }                    // explore mode only: grouping + ordering
 
 trips/{tripId}/countries/{countryCode}
   { name, drivingRules: string[],       // special/unusual rules
@@ -142,13 +220,38 @@ trips/{tripId}/countries/{countryCode}
 trips/{tripId}/log/{entryId}            // trip diary, derived from "done" items
   { date, refType: activity|restaurant, refPath, note?, createdAt }
 
-planRequests/{requestId}                // write-only queue for Cloud Functions
-  { tripId, kind: full|replan, replanContext?, status, error? }
+trips/{tripId}/generationStaging/{index}  // internal: days already resolved by an
+  { day, activities, restaurants }        // in-flight generation, so a retry or a
+                                          // chained continuation resumes instead
+                                          // of redoing the whole pipeline
+
+users/{uid}/trips/{tripId}              // reverse index powering "My trips"
+  { joinedAt }                          // (membership itself isn't queryable across trips)
+
+shareCodes/{code}                       // code -> tripId lookup; server-only
+  { tripId }
+
+planRequests/{requestId}                // write-only queue for generatePlan
+  { tripId,
+    kind: full|replan|insertRestDay|reconcileCorridor|fromExploreCandidates,
+    replanContext?, insertRestDayContext?, reconcileCorridorContext?,
+    isContinuation?,                    // this request was chained by a prior
+                                        // invocation that ran out of time budget
+    status, error? }
 ```
 
-**Sharing model:** a trip is joined by entering its 6-character `shareCode`. Security rules: only UIDs listed in `trips/{tripId}/members/{uid}` can read/write. Joining via code adds your anonymous UID to members (done through a Cloud Function to validate the code).
+**Sharing model:** a trip is joined by entering its 6-character `shareCode`.
+Security rules: only UIDs listed in `trips/{tripId}/members/{uid}` can
+read/write, and `planRequests` may only be created for a trip you belong to.
+Joining via code goes through a Cloud Function so the code can be validated
+server-side. Note that Cloud Functions run on the Admin SDK and therefore
+bypass these rules entirely — see `requireTripMember` in Section 3.
 
-**Editability:** every settings field and the notes doc are editable at any time from the Settings screen. Any edit sets `planMeta.status = "stale"` and the UI offers a "Re-plan trip" button — plans never regenerate silently.
+**Editability:** every settings field and the notes doc are editable at any
+time from the Settings screen. Editing a trip that already has a plan sets
+`planMeta.status = "stale"` and the UI offers "Re-plan trip" — plans never
+regenerate silently. Editing an `idle` trip leaves it `idle` (there's no plan
+to invalidate).
 
 ---
 
@@ -220,9 +323,28 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 ### 7.1 Trip Setup / Settings
 - Form: dates (range picker), travelers (add rows: name, adult/child, age), interests (chip multi-select + free entry), start & finish (Places autocomplete), preferred countries (multi-select), rest-day frequency (slider: "rest day every N days", default 7, option "none"), max drive hours/day.
 - **Notes panel:** full-screen editable text area bound to `notes.freeText`, autosaved, with "last updated" stamp. Placeholder explains: "Anything here is read by the planner on every generation — allergies, must-sees, driving preferences…"
-- Buttons: Generate plan / Re-plan (visible when `status == stale`).
+- Buttons: **Generate overview** (cheap — runs only Claude's highlights phase and lands you in explore mode on the Map tab) and **Generate full plan** / **Re-plan** (the expensive day-by-day generation, behind a confirmation dialog). Both refuse to spend a call until a start AND finish point are set — a blank point still reads as a valid `(0,0)` coordinate downstream, so it has to be caught here.
 
-### 7.2 Overview Map
+### 7.2 Map tab
+The Map tab renders one of two screens depending on `planMeta.status`.
+
+**Explore mode (`idle` — no plan yet).** `ExploreMapScreen`: map on top,
+ranked candidate list below.
+- "Find great stops" runs the highlights-only curation pass; results appear
+  as `candidate` corridor stops grouped into three priority tiers.
+- Each card can be promoted/demoted (a vote moves it one position through
+  the flattened tier list, changing its tier when it crosses a boundary),
+  kept (`locked`), or rejected. Tapping a map pin scrolls its card into view.
+- The drawn route runs through the `locked` + `must-see` stops, so promoting
+  a stop reshapes the route; every other candidate's detour is then measured
+  against that new shape. Stops on the route show "On route" rather than a
+  detour figure.
+- "+ Add stop" (pick a place, or describe what you want in free text) and
+  "Rescan this area" both anchor to wherever the map is currently looking.
+- "Generate full plan (N stops)" commits the curation into the real
+  generation, behind a confirmation dialog.
+
+**Plan mode (any other status).** `OverviewMapScreen`:
 - Full-screen Google Map with the route polyline and overnight-stop markers.
 - **Zoom-based progressive disclosure:**
   - z < 6: route + start/end + country flags
@@ -251,6 +373,11 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 
 ### 7.6 Diary / Log
 - Chronological list built from `log/` — everything marked Done, with notes and dates. Simple export to text/share sheet.
+
+### 7.7 Trip management & account backup
+- **Trip switcher** in the header ("My trips (N)"): switch between trips, start a new one (inherits the previous trip's settings and notes, but NOT its start/finish points), or delete one. Backed by the `users/{uid}/trips` reverse index, since membership alone isn't queryable across trips.
+- **Share menu:** copy a join link, or enter a 6-character code to join someone else's trip.
+- **Account backup:** optional Google account linking, so a trip survives losing the device. Linking a Google account already tied to another Firebase user merges that account's trips across (`mergeTrips`); the proof needed to complete that merge is persisted before the identity switch so a failure mid-flight can be retried rather than orphaning trips.
 
 ---
 
@@ -654,6 +781,8 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
   - **Silent failures and double-submits.** Consistent error surfacing added where a failed write previously left the UI looking untouched: corridor stop keep/reject/reorder (floating promises with no `.catch` at all), `ExploreMapScreen.commit`/`SettingsScreen.confirmGeneratePlan` (`try/finally` with no `catch` — an unhandled rejection, dialog stuck open, no feedback), `SettingsScreen.commit` (settings writes were console-only, so a failed save left the field showing a value that never persisted and the traveler generated against settings they believed they'd changed), `TripSwitcher` delete, `AddRestDay`, `RequestChangesForDay`, and `ShareTripMenu`'s clipboard (which now shows the link to copy by hand when the API is refused outright). Double-submit guards where a second tap costs real money: `PlaceCard` gained a `busy` prop wired to `DayViewScreen`'s existing `requeuing` state (each action can trigger a paid Places/Claude refill), and `OverviewMapScreen`'s change-request Submit gained both a pending guard and a blank-text guard — as did `RequestChangesForDay`, which could fire a full replan from an empty textarea. Also: keyboard access on `ExploreCandidateCard` (its primary tap-to-highlight interaction was pointer-only, unlike the equivalent `PlaceCard` pattern), real `<label>`s on `ExecutionModePrompt`'s lat/lng inputs, a Cancel on `PlaceCard`'s add-note flow (previously a dead end), and a render-time resync in `ReorderCorridorPanel` so a collaborator editing the corridor mid-review can't leave the reconcile call computed from a stale stop list.
   - **Fixed the suite's flakiest test while here.** `trip-management.spec.ts`'s delete-the-active-trip case polled a raw `page.evaluate` across the navigation that deletion triggers, dying with "Execution context was destroyed" whenever a poll landed mid-transition. Every other localStorage read in the suite already goes through `evaluateWithRetry` (added for exactly this); this one was missed. Verified with three consecutive isolated runs plus a clean full-suite run.
   - Covered by: new `functions/src/planLock.test.ts` (6 tests — fresh/slow-but-alive claims kept, quiet claims reclaimed, and the missing/unparseable-timestamp cases); a new `costGuards.test.ts` case asserting an abandoned claim is actually reclaimed and runs, with the four existing "another operation is running" tests updated to seed the heartbeat a genuinely running operation now always writes. Full suite: 234 backend tests (was 228), 58 frontend unit tests, 76 e2e.
+
+- [x] **Architecture sections refreshed to match the code** (2026-08-02) — Sections 3/4/7 had drifted far enough to mislead. Section 3's diagram showed a single linear "client → planRequests → generatePlan" flow with no mention of explore mode, the callable surface, checkpointing/chaining, the lock model, Overpass, or the fact that callables bypass `firestore.rules` and must authorize themselves; it now describes both Map-tab modes, both backend entry paths (and why explore mode is deliberately NOT routed through `planRequests`), and the real generation flow including staging and continuation. Section 4 was missing `corridorStops`, `generationStaging`, `users/{uid}/trips`, `shareCodes`, and most of `planMeta`, and still documented `dayId = "2026-07-14"` — actively wrong since the phase-2a auto-ID migration, and exactly the kind of stale detail that misleads a reader into re-introducing a fixed bug. Section 7 gained explore mode, the two generate buttons, and trip management/account backup. No code changed; this is documentation catching up.
 
 ---
 

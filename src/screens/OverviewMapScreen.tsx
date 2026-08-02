@@ -332,7 +332,17 @@ export function OverviewMapScreen() {
             gestureHandling="greedy"
             onCameraChanged={(event: MapCameraChangedEvent) => {
               setZoom(event.detail.zoom)
-              setCenter(event.detail.center)
+              // Fires every frame of a drag, and the centre arrives as a
+              // fresh object each time — storing it unconditionally
+              // re-rendered this whole screen (map + candidate list) per
+              // frame. Only the value matters here (it anchors "Rescan this
+              // area"/"Add stop"), so ignore no-op updates.
+              setCenter((prev) =>
+                prev.lat === event.detail.center.lat &&
+                prev.lng === event.detail.center.lng
+                  ? prev
+                  : event.detail.center,
+              )
             }}
           >
             <DirectionsRoute points={routePoints} onError={setRouteError} />
