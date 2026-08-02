@@ -45,6 +45,19 @@ function readPendingMerge(): PendingMerge | null {
 }
 
 async function runMerge(pending: PendingMerge): Promise<void> {
+  // Claim access BEFORE merging, and refresh the token so the new claim is
+  // actually in it. `mergeTrips` now requires that claim like every other
+  // callable, and this path arrives at it moments after
+  // signInWithCredential — a brand-new session that has never claimed
+  // anything. Without this the merge fails with permission-denied on
+  // exactly the flow that exists to stop trips being lost: the traveler's
+  // Google account was already linked elsewhere, so their old uid has just
+  // been abandoned and this call is the only thing that carries its trips
+  // across.
+  const claim = httpsCallable<void, { access: true }>(functions, 'claimAccess')
+  await claim()
+  await auth.currentUser?.getIdToken(true)
+
   const mergeTrips = httpsCallable<
     { oldUid: string; oldIdToken: string },
     { mergedTripIds: string[] }
