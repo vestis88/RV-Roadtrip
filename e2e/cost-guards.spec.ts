@@ -21,6 +21,8 @@ async function waitFor<T>(
   throw new Error('Timed out waiting for condition')
 }
 
+const SEEDED_TRIP_NAME = 'Routed trip'
+
 test('hammering the Generate button creates exactly one plan request', async ({
   page,
 }) => {
@@ -38,11 +40,19 @@ test('hammering the Generate button creates exactly one plan request', async ({
     .collection('trips')
     .doc(tripId)
     .update({
+      'meta.name': SEEDED_TRIP_NAME,
       'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
       'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
     })
   await page.reload()
-  await page.getByTestId('trip-name-input').waitFor()
+  // Firestore's persistent cache serves the previous copy of the trip first
+  // and the server's a moment later, so a reload can render a route-less
+  // trip briefly — clicking Generate in that window is correctly refused
+  // and the test would look flaky. The seeded name rides in on the same
+  // snapshot as the route, so waiting for it means waiting for the route.
+  await expect(page.getByTestId('trip-name-input')).toHaveValue(
+    SEEDED_TRIP_NAME,
+  )
 
   await page.getByTestId('generate-plan-button').click()
   await page.getByTestId('confirm-generate-dialog').waitFor()

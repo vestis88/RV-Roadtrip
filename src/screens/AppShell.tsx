@@ -235,7 +235,7 @@ function AppShell() {
         )}
         {trip && tripId && (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <TripContext.Provider value={{ tripId, trip }}>
+            <TripContext.Provider value={{ tripId, trip, uid }}>
               <ExecutionModeGate tripId={tripId} trip={trip} />
               <Outlet />
             </TripContext.Provider>

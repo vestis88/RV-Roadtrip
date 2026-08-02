@@ -1,7 +1,9 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import type { CountryGuide, OvernightStopCandidate, TripDay } from '@rv/shared'
+import { FREE_CAMPING_SECTION_ID } from '@rv/shared'
+import type { CountryGuideSection, OvernightStopCandidate, TripDay } from '@rv/shared'
 import { requireTripMember } from './authz.js'
+import { COUNTRY_GUIDE_SECTIONS_COLLECTION } from './countrySectionsCallable.js'
 import { googlePlacesApiKey, searchCampsiteCandidates } from './placesApi.js'
 import { searchStellplatzCandidates } from './overpassApi.js'
 import {
@@ -46,6 +48,25 @@ async function safe(
  * candidates for every day at generation time would mean paying the
  * Places/Overpass/Claude cost for stops nobody ever looks at twice.
  */
+/**
+ * Best-effort: the wild-camping prompt is meaningfully better with the
+ * country's free-camping rules in hand, but it degrades to generic advice
+ * without them rather than failing — a country nobody has researched yet is
+ * normal, not an error.
+ */
+async function loadFreeCampingRules(
+  countryCode: string,
+): Promise<string[] | undefined> {
+  const snap = await getFirestore()
+    .collection(COUNTRY_GUIDE_SECTIONS_COLLECTION)
+    .where('countryCode', '==', countryCode)
+    .where('sectionId', '==', FREE_CAMPING_SECTION_ID)
+    .limit(1)
+    .get()
+  if (snap.empty) return undefined
+  return (snap.docs[0].data() as CountryGuideSection).items
+}
+
 export async function fetchOvernightCandidates(
   tripId: string,
   dayId: string,
@@ -61,14 +82,11 @@ export async function fetchOvernightCandidates(
   const near = { lat: day.overnight.lat, lng: day.overnight.lng }
   const country = day.overnight.country
 
-  const guideSnap = await db
-    .collection('trips')
-    .doc(tripId)
-    .collection('countries')
-    .doc(country)
-    .get()
-  const freeCampingRules = (guideSnap.data() as CountryGuide | undefined)
-    ?.freeCampingRules
+  // Country research moved out of the trip (2026-08-02) so it can be reused
+  // across trips: free-camping rules are cached per country, not per vehicle,
+  // so the wild-camping prompt can read whichever entry exists for this
+  // country without needing this trip's own vehicle to match.
+  const freeCampingRules = await loadFreeCampingRules(country)
 
   const [campsites, stellplatzFromOsm, wild] = await Promise.all([
     safe(

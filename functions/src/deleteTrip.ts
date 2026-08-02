@@ -44,7 +44,7 @@ export async function deleteTripForUser(uid: string, tripId: string): Promise<vo
   await commitInChunks(db, writes)
 
   // Everything under trips/{tripId} (days + their activities/restaurants,
-  // corridorStops, countries, log, members, generationStaging) in one
+  // corridorStops, log, members, generationStaging) in one
   // recursive delete rather than hand-walking every subcollection.
   await db.recursiveDelete(tripRef)
 }

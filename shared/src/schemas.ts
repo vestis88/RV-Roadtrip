@@ -377,14 +377,36 @@ export const lpgInfoSchema = z.object({
   tips: z.string(),
 })
 
-export const countryGuideSchema = z.object({
-  name: z.string(),
-  drivingRules: z.array(z.string()),
-  campingRules: z.array(z.string()),
-  freeCampingRules: z.array(z.string()),
-  roadFees: roadFeesSchema,
-  speedLimits: speedLimitsSchema,
-  lpgInfo: lpgInfoSchema,
+/**
+ * One section of the country research brief — the editable "what should I
+ * look up for every country" list (see countryBrief.ts for the defaults and
+ * for how dependsOnVehicle decides cache scope).
+ */
+export const countryBriefSectionSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  brief: z.string().min(1),
+  dependsOnVehicle: z.boolean(),
+})
+
+export const countryBriefSchema = z.object({
+  sections: z.array(countryBriefSectionSchema),
+  updatedAt: isoDateTime,
+})
+
+/**
+ * One researched section, stored OUTSIDE any trip (`countryGuideSections`)
+ * so the same research serves every trip that needs it. The doc ID carries
+ * the country, the section, the brief's hash and — for vehicle-dependent
+ * sections — the vehicle, so a cache hit is always safe to reuse; see
+ * countryGuideSectionDocId.
+ */
+export const countryGuideSectionSchema = z.object({
+  countryCode: z.string().length(2),
+  sectionId: z.string(),
+  title: z.string(),
+  items: z.array(z.string()),
+  sources: z.array(z.string()),
   generatedAt: isoDateTime,
 })
 
@@ -473,6 +495,8 @@ export type Restaurant = z.infer<typeof restaurantSchema>
 export type RoadFees = z.infer<typeof roadFeesSchema>
 export type SpeedLimits = z.infer<typeof speedLimitsSchema>
 export type LpgInfo = z.infer<typeof lpgInfoSchema>
-export type CountryGuide = z.infer<typeof countryGuideSchema>
+export type CountryBriefSection = z.infer<typeof countryBriefSectionSchema>
+export type CountryBrief = z.infer<typeof countryBriefSchema>
+export type CountryGuideSection = z.infer<typeof countryGuideSectionSchema>
 export type LogEntry = z.infer<typeof logEntrySchema>
 export type PlanRequest = z.infer<typeof planRequestSchema>

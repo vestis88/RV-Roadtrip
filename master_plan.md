@@ -207,15 +207,18 @@ trips/{tripId}/corridorStops/{stopId}   // the route's stops as first-class obje
     priority?: must-see|worth-a-detour|nice-if-convenient,  // explore mode only
     region?, rank? }                    // explore mode only: grouping + ordering
 
-trips/{tripId}/countries/{countryCode}
-  { name, drivingRules: string[],       // special/unusual rules
-    campingRules: string[],             // rules + tips
-    freeCampingRules: string[],
-    roadFees: { summary, howToPay, vignetteUrl? },
-    speedLimits: { urban, rural, motorway,   // for 3500kg car-registered RV
-                   notes },
-    lpgInfo: { adapterNeeded, commonBrands, tips },  // stove/fridge/hot-water gas
-    generatedAt }
+countryGuideSections/{docId}            // country research — NOT under a trip, so
+  { countryCode, sectionId, title,      // one lookup serves every trip that needs it
+    items: string[],                    // the findings, one per bullet
+    sources: string[], generatedAt }
+  // docId = `${countryCode}_${sectionId}_${vehicleKey|'any'}_${briefHash}`
+  // (shared/src/countryBrief.ts). Everything that could change the answer is
+  // in the key, so a hit is always safe to reuse: 'any' for sections whose
+  // answer doesn't depend on the RV (camping, LPG), the vehicle's own key for
+  // the ones that do (clearances, weight-banded limits, length-banded ferry
+  // tiers), and the brief's hash so an edited question never serves the old
+  // question's answer — nor overwrites the entry other travelers share.
+  // Client-readable by any signed-in user, client-writable by nobody.
 
 trips/{tripId}/log/{entryId}            // trip diary, derived from "done" items
   { date, refType: activity|restaurant, refPath, note?, createdAt }
@@ -224,6 +227,11 @@ trips/{tripId}/generationStaging/{index}  // internal: days already resolved by 
   { day, activities, restaurants }        // in-flight generation, so a retry or a
                                           // chained continuation resumes instead
                                           // of redoing the whole pipeline
+
+users/{uid}/preferences/countryBrief    // the research brief: what to look up for
+  { sections: [{ id, title, brief,      // EVERY country. Per traveler, not per trip
+                 dependsOnVehicle }],   // (defaults in shared/src/countryBrief.ts)
+    updatedAt }
 
 users/{uid}/trips/{tripId}              // reverse index powering "My trips"
   { joinedAt }                          // (membership itself isn't queryable across trips)
@@ -309,7 +317,7 @@ All three calls: JSON-only output, zod-validated, one retry on parse/schema fail
 - **Locked-day collision safety net.** A locked day can sit anywhere in the remainder's date range (the "Request changes" UI allows locking any day, not just the boundary), but `planTrip()` has no way to be told "skip this date" — so any generated day that would land on an already-locked date is dropped before writing rather than allowed to overwrite it. Known limitation: the route itself isn't planned *around* a mid-range locked day's location (Claude doesn't know it exists), only protected from being overwritten — genuinely reasoning about mid-route locked waypoints is future work if it turns out to matter in practice.
 
 ### 6.3 `countryGuide` prompt — inputs
-- Country code + vehicle block. Must return the exact `countries/{code}` schema (driving rules, camping, free camping, road fees + payment, speed limits for a 3,500 kg car-registered RV, LPG refill info). Enable Claude web search tool in this call so fees/vignette prices are current; require source-cautious phrasing ("as of {date}").
+- One section at a time (`functions/src/prompts/countrySection.ts`): the country, the vehicle, and **that section's own brief text**, which is the instruction. Output is the same flat `{ items, sources }` shape whatever the section asks, so a traveler-written section needs no code change. Enable Claude web search in this call so fees/vignette prices are current; require source-cautious phrasing ("as of {date}").
 
 ### 6.4 Places enrichment (code, not Claude)
 For each Claude-proposed name+town: Places Text Search → take top match within 30 km of the day's route → fetch rating, ratingCount, googleMapsUri, photo, opening hours, priceLevel. If no match ≥3.8 rating with ≥50 reviews, drop it and backfill from Places Nearby Search by category so the counts (5 activities, 3×3 restaurants) always hold.
@@ -482,7 +490,7 @@ This completes Phase 5 (Day view & execution).
 ### PHASE 6 — Country guide UI & polish
 - [x] **T-27** Country tab + detail accordions for the six sections; refresh button.
   ✅ TEST: E2E — every route country listed; all sections render; refresh updates `generatedAt`.
-  NOTE: new CountriesScreen (`/countries`) lists the unique countries across `days` (flag + name, deduped by `EUROPEAN_COUNTRIES`); CountryDetailScreen (`/countries/:code`) renders the six sections as native `<details>` accordions and a "Refresh info" button calling the existing `refreshCountryGuide` callable. E2E (e2e/countries.spec.ts) confirms every route country is listed and, via a guide seeded directly through firebase-admin (mirroring T-26's approach, since there's no live-generated guide to test against), that all six sections render with real content. The "refresh updates generatedAt" half is blocked on CLAUDE_API_KEY like T-14/16/18/22 — the test instead confirms the call fails *gracefully* (a visible error, not a crash) when the secret is missing.
+  NOTE (superseded 2026-08-02 — see the research-brief entry at the end of this file; the per-trip `countries/{code}` document and the whole-guide `refreshCountryGuide` callable are gone): new CountriesScreen (`/countries`) lists the unique countries across `days` (flag + name, deduped by `EUROPEAN_COUNTRIES`); CountryDetailScreen (`/countries/:code`) renders the six sections as native `<details>` accordions and a "Refresh info" button calling the existing `refreshCountryGuide` callable. E2E (e2e/countries.spec.ts) confirms every route country is listed and, via a guide seeded directly through firebase-admin (mirroring T-26's approach, since there's no live-generated guide to test against), that all six sections render with real content. The "refresh updates generatedAt" half is blocked on CLAUDE_API_KEY like T-14/16/18/22 — the test instead confirms the call fails *gracefully* (a visible error, not a crash) when the secret is missing.
 - [x] **T-28** Responsive/offline audit per Section 8 across the three viewports; offline banner for map.
   ✅ TEST: Playwright viewport suite green; offline reload shows day cards + banner.
   NOTE: audited Setup/Map/Diary/Countries at 375×812, 820×1180, 1180×820 — no horizontal scroll on any of them. The audit caught AppShell's nav links and the Map screen's "Request changes" button sitting well under the 44px tap-target minimum (measured ~20px); fixed with `min-h-11` + padding. Added a new `useOnlineStatus` hook and an offline banner on the Map screen (`data-testid="offline-banner"`) — going offline and reloading still shows the header's cached day/km/drive-time numbers (from Firestore's persistentLocalCache) alongside the banner; only the Maps JS tiles themselves need network, per spec. E2E: e2e/responsive-offline.spec.ts.
@@ -799,6 +807,15 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
 - [x] **"Add stop" reported a failure on a search that had actually worked** (reported 2026-08-02 with a screenshot — "Could not search right now — please try again" in the Describe-it panel, with the note "But it did find a place") — the Firebase **client** SDK abandons a callable after 70 seconds by default, and the client hanging up doesn't cancel the function. Every Claude-backed callable here declares `timeoutSeconds: 180` server-side precisely because a run with a retry plus a round of geocoding can take longer than a minute, so the client was quietly the stricter of the two limits: past 70s the traveler got an error while the search went on to succeed and write its stops. Worse than a cosmetic wrong message — the obvious response is to retry, spending a second Claude call on a search that had already worked, and the stops it did find look like they came from nowhere. New `src/lib/callableTimeouts.ts` sets a single `LONG_CALLABLE_TIMEOUT_MS` (190s — deliberately just past the server's own ceiling, so whichever limit fires first is the one that can explain itself) on all five 180s callables: `rescanCorridor`, `generateExploreHighlights`, `getOvernightCandidates`, `refreshCountryGuide`, `previewReconcileCorridor`. `researchMoreAlternatives` is left alone — it has no server-side override, so the client's 70s default is already the looser of the two.
 
 - [x] **Promote/demote moves a whole category, not one position** (requested 2026-08-02 — "Denoting/promoting cards in overview mode should move them a full category, not just one step up/down") — the previous behaviour treated the three tiers as one flat list and moved a stop one position through it, which meant a stop in the middle of a five-stop tier needed five taps to change category, and four of them looked like nothing had happened (the card shuffled one row under the same heading). The category is the part that carries meaning downstream — it's what the route backbone reads (`locked` + `must-see`) and what seeds the full generation — so that's what the arrows change now. Deliberate trade-off: there is no longer any way to reorder stops *within* a category, because nothing reads that order (`buildRouteBackbone` sorts geographically along the corridor; the generation groups by tier), so it was costing taps without buying anything. The stop still lands adjacent to the boundary it crossed, so the card moves the shortest visible distance and promote+demote round-trips. Arrow disabling is now purely categorical: every stop in must-see has a dead up arrow, wherever it sits in that tier.
+
+- [x] **Country research: an editable brief, researched one section at a time, kept across trips** (requested 2026-08-02 — "I think this 'note' should be shown and edited in app. I also want to categorize the current note into sections so you can add just one new item to research, and it won't trigger a full rescan of the previous. I also want the country information saved across trips")
+  - **What it replaces.** The old prompt asked Claude for six fixed topics in one call and stored the answer as a single `trips/{id}/countries/{code}` document with one `generatedAt`. The shape *was* the schema, so the six topics were unaddable-to by construction, "Refresh info" always re-ran all six, and the whole thing was per trip — a new trip re-researched Norway from scratch. None of the brief was visible in the app, let alone editable.
+  - **The brief is now data, and it's yours.** `users/{uid}/preferences/countryBrief` holds an ordered list of `{ id, title, brief, dependsOnVehicle }`, defaulting to the same six topics (`shared/src/countryBrief.ts`). The country screen shows each section's actual question under "What gets asked", and lets you edit it, remove it, or add a new one. One list for every country, as asked: a research item is nearly always about how *this* traveler travels, not about one country.
+  - **One section, one call, one document.** `researchCountrySections` takes the section ids to research and does exactly those — concurrently, each separately fallible, so one bad web search leaves the others written and reports which failed. Adding a seventh item costs one section's worth of Claude and cannot disturb the six already answered, because they are not inputs to it.
+  - **Kept across trips, without serving the wrong answer.** Research lives in a top-level `countryGuideSections` collection whose document ID encodes country + section + brief hash + (for vehicle-dependent sections) the vehicle. So: camping rules researched on one trip show up instantly on the next; changing the RV re-researches clearances, weight-banded speed limits and length-banded ferry tiers and *only* those; and editing a section's question gets its own entry rather than overwriting the one other travelers share. Readable by any signed-in user, writable by no client — the callable is the only thing that has actually done the research.
+  - Also re-points `getOvernightCandidates` (the one other consumer of country data) at the new store, and drops the now-dead whole-guide callable, prompt and schema.
+  - Covered by: 11 unit tests on the key rules (a country-level section shares one entry across vehicles; a vehicle-dependent one doesn't; an edited brief separates; the title doesn't); 6 functions tests (only the asked-for sections are researched — one id in, one Claude call out; storage lands where a second trip will find it; a custom section from the account's brief is researchable; an unknown section is refused; a partial failure keeps what succeeded); 5 rules tests (any signed-in user may read research, no client may write it, signed-out may not read; a traveler owns their brief and cannot read anyone else's); and 4 e2e tests including research from one trip appearing on another.
+  - While in here: two e2e tests were failing intermittently because they seed a route through firebase-admin and click Generate right after a reload — Firestore's persistent cache serves the previous copy of the trip first, so the click could land on a genuinely route-less trip and be correctly refused. Both now seed a recognisable trip name on the same write and wait for it, which is precisely waiting for the snapshot that carries the route. Six consecutive full runs, three before and three after, isolated the race to that and confirmed the fix.
 
 ---
 

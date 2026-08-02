@@ -30,10 +30,6 @@ service cloud.firestore {
         }
       }
 
-      match /countries/{countryCode} {
-        allow read, write: if isMember(tripId);
-      }
-
       match /corridorStops/{stopId} {
         allow read, write: if isMember(tripId);
       }
@@ -56,6 +52,24 @@ service cloud.firestore {
     // reverse index existed (or any other write that landed membership
     // without it), which useTripSession.ts performs client-side the first
     // time it notices one missing.
+    // Country research, deliberately outside every trip so one lookup serves
+    // them all. The document ID encodes country + section + brief + (where
+    // it matters) vehicle, so a reader can only ever find an entry that
+    // answers exactly their question — see countryGuideSectionDocId. Writes
+    // are the researchCountrySections callable's alone: it is the only thing
+    // that has actually run the research, and letting a client write here
+    // would let anyone poison what every other traveler reads.
+    match /countryGuideSections/{sectionDocId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // Per-traveler preferences, of which the country research brief is the
+    // first — never shared, unlike the research it produces.
+    match /users/{uid}/preferences/{prefId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     match /users/{uid}/trips/{tripId} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if request.auth != null && request.auth.uid == uid && isMember(tripId);

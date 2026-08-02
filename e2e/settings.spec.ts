@@ -44,14 +44,30 @@ async function getPlaceInputValue(locator: import('@playwright/test').Locator) {
  * against), and the Maps API is unreachable in this sandbox, so a typed
  * name can never resolve.
  */
+const SEEDED_TRIP_NAME = 'Routed trip'
+
 async function seedRoute(tripId: string) {
   await adminDb
     .collection('trips')
     .doc(tripId)
     .update({
+      'meta.name': SEEDED_TRIP_NAME,
       'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
       'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
     })
+}
+
+/**
+ * Firestore's persistent cache serves the previous copy of the trip first
+ * and the server's a moment later, so a reload right after seeding can
+ * render a route-less trip briefly. Generating in that window is correctly
+ * refused — so wait for the seeded name, which rides in on the very same
+ * snapshot as the route.
+ */
+async function waitForSeededRoute(page: import('@playwright/test').Page) {
+  await expect(page.getByTestId('trip-name-input')).toHaveValue(
+    SEEDED_TRIP_NAME,
+  )
 }
 
 test('settings form fills and persists across reload, without falsely marking an idle trip stale', async ({
@@ -160,6 +176,10 @@ test('editing settings on a trip with a ready plan marks it stale', async ({
 test('Trip Setup offers both "Generate overview" and "Generate full plan" for an idle trip', async ({
   page,
 }) => {
+  // The generate-overview assertion below waits on the functions emulator's
+  // cold start, which can outrun the default 30s per-test budget on its own
+  // — leaving the assertion's own 30s timeout unreachable.
+  test.setTimeout(90_000)
   await page.goto('/')
   await page.getByTestId('trip-name-input').waitFor()
   await expect(page.getByTestId('plan-status')).toHaveText('idle')
@@ -177,7 +197,7 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
   if (!tripId) throw new Error('tripId missing from localStorage')
   await seedRoute(tripId)
   await page.reload()
-  await page.getByTestId('trip-name-input').waitFor()
+  await waitForSeededRoute(page)
 
   // No CLAUDE_API_KEY in this sandbox — same credential-less degradation
   // explore.spec.ts's own "find great stops" test exercises, confirming
@@ -245,7 +265,7 @@ test('"Generate overview" and "Generate full plan" both require a start and fini
   // Only once it is genuinely located does the expensive path open up.
   await seedRoute(tripId)
   await page.reload()
-  await page.getByTestId('trip-name-input').waitFor()
+  await waitForSeededRoute(page)
   await page.getByTestId('generate-plan-button').click()
   await expect(page.getByTestId('confirm-generate-dialog')).toBeVisible()
 })

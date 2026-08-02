@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   activitySchema,
-  countryGuideSchema,
+  countryGuideSectionSchema,
   logEntrySchema,
   planRequestSchema,
   restaurantSchema,
@@ -10,7 +10,7 @@ import {
 } from './schemas.js'
 import {
   fixtureActivity,
-  fixtureCountryGuide,
+  fixtureCountryGuideSection,
   fixtureDay,
   fixtureLogEntry,
   fixturePlanRequest,
@@ -37,9 +37,9 @@ describe('fixture trip validates against every schema', () => {
     )
   })
 
-  it('validates a country guide document', () => {
-    expect(countryGuideSchema.parse(fixtureCountryGuide)).toEqual(
-      fixtureCountryGuide,
+  it('validates a researched country guide section', () => {
+    expect(countryGuideSectionSchema.parse(fixtureCountryGuideSection)).toEqual(
+      fixtureCountryGuideSection,
     )
   })
 

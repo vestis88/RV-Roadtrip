@@ -323,3 +323,84 @@ describe('planRequests/{requestId}', () => {
     await assertFails(getDoc(doc(strangerDb, 'planRequests', 'req4')))
   })
 })
+
+// Country research lives outside every trip so one lookup serves them all
+// (2026-08-02). That makes it the only shared-across-accounts collection in
+// this ruleset, so its two halves both matter: anyone signed in may read it,
+// and nobody may write it — a client write here would let one traveler
+// poison what every other traveler reads.
+describe('countryGuideSections', () => {
+  const SECTION_DOC_ID = 'NO_camping-rules_any_deadbeef'
+
+  it('lets any signed-in traveler read research, including one with no claim on it', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), 'countryGuideSections', SECTION_DOC_ID),
+        {
+          countryCode: 'NO',
+          sectionId: 'camping-rules',
+          title: 'Camping rules',
+          items: ['Book ahead in July.'],
+          sources: [],
+          generatedAt: new Date().toISOString(),
+        },
+      )
+    })
+    const strangerDb = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    await assertSucceeds(
+      getDoc(doc(strangerDb, 'countryGuideSections', SECTION_DOC_ID)),
+    )
+  })
+
+  it('denies every client write, member or not — only the callable researches', async () => {
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    const ref = doc(memberDb, 'countryGuideSections', SECTION_DOC_ID)
+    await assertFails(
+      setDoc(ref, {
+        countryCode: 'NO',
+        sectionId: 'camping-rules',
+        title: 'Camping rules',
+        items: ['Made up.'],
+        sources: [],
+        generatedAt: new Date().toISOString(),
+      }),
+    )
+    await assertFails(updateDoc(ref, { items: ['Made up.'] }))
+    await assertFails(deleteDoc(ref))
+  })
+
+  it('denies reads to a signed-out client', async () => {
+    const anonDb = testEnv.unauthenticatedContext().firestore()
+    await assertFails(
+      getDoc(doc(anonDb, 'countryGuideSections', SECTION_DOC_ID)),
+    )
+  })
+})
+
+describe('users/{uid}/preferences', () => {
+  it('lets a traveler read and write their own research brief', async () => {
+    const db = testEnv.authenticatedContext(MEMBER_UID).firestore()
+    const ref = doc(db, 'users', MEMBER_UID, 'preferences', 'countryBrief')
+    await assertSucceeds(
+      setDoc(ref, {
+        sections: [
+          {
+            id: 'drinking-water',
+            title: 'Drinking water',
+            brief: 'Where to refill.',
+            dependsOnVehicle: false,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      }),
+    )
+    await assertSucceeds(getDoc(ref))
+  })
+
+  it('denies reading or writing someone else’s brief', async () => {
+    const db = testEnv.authenticatedContext(STRANGER_UID).firestore()
+    const ref = doc(db, 'users', MEMBER_UID, 'preferences', 'countryBrief')
+    await assertFails(getDoc(ref))
+    await assertFails(updateDoc(ref, { sections: [] }))
+  })
+})

@@ -1,6 +1,6 @@
 import type {
   Activity,
-  CountryGuide,
+  CountryGuideSection,
   LogEntry,
   PlanRequest,
   Restaurant,
@@ -100,26 +100,15 @@ export const fixtureRestaurant: Restaurant = {
   status: 'suggested',
 }
 
-export const fixtureCountryGuide: CountryGuide = {
-  name: 'Norway',
-  drivingRules: ['Headlights on at all times', 'Studded tires allowed Nov-Apr'],
-  campingRules: ['Campsites require advance booking in July'],
-  freeCampingRules: ['Allemannsretten allows free camping on uncultivated land'],
-  roadFees: {
-    summary: 'Toll roads around major cities, no nationwide vignette.',
-    howToPay: 'AutoPASS, billed automatically via license plate.',
-  },
-  speedLimits: {
-    urban: '50 km/h',
-    rural: '80 km/h',
-    motorway: '90 km/h for vehicles over 3,500 kg registered as car',
-    notes: 'As of 2026-07-05, check local signage for RV-specific limits.',
-  },
-  lpgInfo: {
-    adapterNeeded: 'Norwegian bayonet adapter',
-    commonBrands: ['AGA', 'Kosan Gas'],
-    tips: 'Refill stations are less common outside cities; carry a spare bottle.',
-  },
+export const fixtureCountryGuideSection: CountryGuideSection = {
+  countryCode: 'NO',
+  sectionId: 'free-camping-rules',
+  title: 'Free camping rules',
+  items: [
+    'Allemannsretten allows free camping on uncultivated land, at least 150m from any inhabited house or cabin.',
+    'As of 2026-06-20, motorhomes may not rely on allemannsretten in laybys signed with a no-overnight-parking plate.',
+  ],
+  sources: ['https://www.miljodirektoratet.no/allemannsretten'],
   generatedAt: '2026-06-20T12:05:00Z',
 }
 
