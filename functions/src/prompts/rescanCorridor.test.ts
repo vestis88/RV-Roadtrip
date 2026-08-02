@@ -185,6 +185,83 @@ describe('generateRescanCandidates', () => {
     expect(userContent).not.toHaveProperty('radiusKm')
   })
 
+  // The reported failure: "Hitta en mysig restaurang i Hillerød" spent four
+  // minutes and then timed out, while the same question answered in about
+  // two seconds in Claude chat. The difference was the prompt — the app sent
+  // "latitude 55.93, longitude 12.31" and nothing else, so the model had to
+  // work out where it had been sent before it could search there.
+  it('names the area instead of sending coordinates when centerName is given', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      centerName: 'Hillerød, Denmark',
+      query: 'a cozy restaurant',
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent.areaDescription).toBe('Hillerød, Denmark')
+    expect(JSON.stringify(userContent)).not.toContain('latitude')
+  })
+
+  it('names the corridor instead of listing latitudes when waypointNames are given', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      backbone: [
+        { lat: 61.0, lng: 9.0 },
+        { lat: 62.0, lng: 9.0 },
+      ],
+      waypointNames: ['Oslo, Norway', 'Otta, Norway', 'Trondheim, Norway'],
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent.routeWaypoints).toEqual([
+      'Oslo, Norway',
+      'Otta, Norway',
+      'Trondheim, Norway',
+    ])
+    expect(JSON.stringify(userContent)).not.toContain('latitude')
+  })
+
+  // Reverse geocoding is best-effort on the client, so the coordinate form
+  // has to keep working — worse prompt, but never a broken one.
+  it('still falls back to coordinates when no names are available', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({ center: CENTER, radiusKm: 25 })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(String(userContent.areaDescription)).toContain('latitude')
+  })
+
   it('falls back to distance-from-center filtering when backbone has fewer than 2 points', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
     geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })

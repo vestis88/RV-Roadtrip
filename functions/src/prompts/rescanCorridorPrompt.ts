@@ -57,20 +57,37 @@ export function buildRescanCorridorPrompt(input: {
   // server-side filtering switches to detour-off-backbone instead of
   // distance-from-center when this is present — see generateRescanCandidates).
   backbone?: LatLng[]
+  // Place NAMES for the same geography (2026-08-02). Sending only
+  // coordinates was a real, measured mistake: asked for "a cozy restaurant
+  // in Hillerød" near "latitude 55.93, longitude 12.31", the model spent its
+  // entire web-search budget working out where that was before it could look
+  // for a restaurant — minutes, then a timeout, on a question Claude answers
+  // in two seconds when the town is named. Optional, and the coordinate form
+  // remains as the fallback: reverse geocoding is best-effort client-side.
+  centerName?: string
+  waypointNames?: string[]
 }): { system: string; user: string } {
+  const namedRoute =
+    input.waypointNames && input.waypointNames.length >= 2
+      ? input.waypointNames
+      : undefined
   const user = JSON.stringify({
-    // The model gets no coordinates either — same "no invented geography in,
-    // none out" discipline as the rest of this call. It reasons about the
-    // area from the plain description; the actual geocoding/distance check
-    // happens server-side afterward, biased near `center`.
-    ...(input.backbone && input.backbone.length >= 2
+    // Coordinates are still never sent for the model to reason numerically
+    // with — distances and positions are checked server-side afterward,
+    // biased near `center`. Naming the place is the opposite of inviting
+    // invention: it's what lets the model search for somewhere real.
+    ...(namedRoute
+      ? { routeWaypoints: namedRoute }
+      : input.backbone && input.backbone.length >= 2
       ? {
           routeWaypoints: input.backbone.map(
             (p) => `latitude ${p.lat.toFixed(2)}, longitude ${p.lng.toFixed(2)}`,
           ),
         }
       : {
-          areaDescription: `latitude ${input.center.lat.toFixed(2)}, longitude ${input.center.lng.toFixed(2)}`,
+          areaDescription:
+            input.centerName ??
+            `latitude ${input.center.lat.toFixed(2)}, longitude ${input.center.lng.toFixed(2)}`,
           radiusKm: input.radiusKm,
         }),
     notes: input.notesFreeText ?? '',

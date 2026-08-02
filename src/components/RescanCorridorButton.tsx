@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { LatLng } from '@rv/shared'
 import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
   tripId: string
@@ -25,7 +26,15 @@ export function RescanCorridorButton({ tripId, center }: RescanCorridorButtonPro
     setError(null)
     setStatus(null)
     try {
-      const result = await rescanCorridorArea(tripId, center, RESCAN_RADIUS_KM)
+      const centerName = await reverseGeocodeName(center)
+      const result = await rescanCorridorArea(
+        tripId,
+        center,
+        RESCAN_RADIUS_KM,
+        undefined,
+        undefined,
+        centerName,
+      )
       setStatus(
         result.stopsWritten > 0
           ? `Found ${result.stopsWritten} new stop${result.stopsWritten === 1 ? '' : 's'} nearby.`

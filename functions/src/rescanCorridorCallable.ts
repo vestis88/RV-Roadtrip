@@ -43,6 +43,10 @@ export async function runRescanCorridor(
   // comment. Optional: omitted, filtering stays distance-from-center as
   // before.
   backbone?: LatLng[],
+  // Names for the same geography — see buildRescanCorridorPrompt's own doc
+  // comment for why sending coordinates alone was so expensive.
+  centerName?: string,
+  waypointNames?: string[],
 ): Promise<number> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
@@ -66,6 +70,8 @@ export async function runRescanCorridor(
           notesFreeText: trip.notes.freeText,
           tripId,
           backbone,
+          centerName,
+          waypointNames,
         })
       ).finds
     : await generateRescanCandidates({
@@ -74,6 +80,8 @@ export async function runRescanCorridor(
         notesFreeText: trip.notes.freeText,
         tripId,
         backbone,
+        centerName,
+        waypointNames,
       })
 
   let nextRank = 0
@@ -125,6 +133,8 @@ export const rescanCorridor = onCall(
     const radiusKm = request.data?.radiusKm
     const query = request.data?.query
     const backbone = request.data?.backbone as LatLng[] | undefined
+    const centerName = request.data?.centerName
+    const waypointNames = request.data?.waypointNames
     if (
       typeof tripId !== 'string' ||
       typeof center?.lat !== 'number' ||
@@ -133,11 +143,15 @@ export const rescanCorridor = onCall(
       (query !== undefined && typeof query !== 'string') ||
       (backbone !== undefined &&
         (!Array.isArray(backbone) ||
-          backbone.some((p) => typeof p?.lat !== 'number' || typeof p?.lng !== 'number')))
+          backbone.some((p) => typeof p?.lat !== 'number' || typeof p?.lng !== 'number'))) ||
+      (centerName !== undefined && typeof centerName !== 'string') ||
+      (waypointNames !== undefined &&
+        (!Array.isArray(waypointNames) ||
+          waypointNames.some((name) => typeof name !== 'string')))
     ) {
       throw new HttpsError(
         'invalid-argument',
-        'tripId, center {lat,lng}, and radiusKm are required; query, if given, must be a string; backbone, if given, must be an array of {lat,lng}',
+        'tripId, center {lat,lng}, and radiusKm are required; query and centerName, if given, must be strings; backbone, if given, must be an array of {lat,lng}; waypointNames, if given, must be an array of strings',
       )
     }
     if (radiusKm <= 0 || radiusKm > MAX_RESCAN_RADIUS_KM) {
@@ -152,6 +166,20 @@ export const rescanCorridor = onCall(
     if (backbone !== undefined && backbone.length > 50) {
       throw new HttpsError('invalid-argument', 'backbone must be 50 points or fewer')
     }
+    // These go straight into the prompt, so they're bounded like `query` is.
+    if (centerName !== undefined && centerName.length > 200) {
+      throw new HttpsError('invalid-argument', 'centerName must be 200 characters or fewer')
+    }
+    if (
+      waypointNames !== undefined &&
+      (waypointNames.length > 50 ||
+        waypointNames.some((name: string) => name.length > 200))
+    ) {
+      throw new HttpsError(
+        'invalid-argument',
+        'waypointNames must be 50 names or fewer, each 200 characters or fewer',
+      )
+    }
     await requireTripMember(tripId, request.auth.uid)
     const stopsWritten = await runRescanCorridor(
       tripId,
@@ -159,6 +187,8 @@ export const rescanCorridor = onCall(
       radiusKm,
       query?.trim() || undefined,
       backbone,
+      (centerName as string | undefined)?.trim() || undefined,
+      waypointNames as string[] | undefined,
     )
     return { stopsWritten }
   },

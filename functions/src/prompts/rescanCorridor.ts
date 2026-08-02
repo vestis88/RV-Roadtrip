@@ -103,6 +103,8 @@ export async function generateRescanCandidates(input: {
   tripId?: string
   query?: string
   backbone?: LatLng[]
+  centerName?: string
+  waypointNames?: string[]
 }): Promise<RescanFind[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRescanCorridorPrompt(input)

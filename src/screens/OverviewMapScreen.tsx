@@ -88,7 +88,12 @@ export function OverviewMapScreen() {
   // (corridorStops itself carries no sequence field; linkedDayIds already
   // ties each stop back to real, already-ordered TripDays).
   const dayIndexById = new Map(days.map((day) => [day.id, day.index]))
-  const committedCorridorStops = corridorStops
+  // Ordered by their days, so an empty `days` (the first render, before that
+  // listener's first snapshot) can't produce an order at all — every stop
+  // would tie on Infinity and fall back to whatever order Firestore happened
+  // to return, which the reorder panel then snapshots into its own state.
+  // Reported as an intermittent wrong first stop in that panel.
+  const committedCorridorStops = (days.length === 0 ? [] : corridorStops)
     .filter((stop) => stop.status === 'committed')
     .map((stop) => ({
       id: stop.id,

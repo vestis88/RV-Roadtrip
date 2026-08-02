@@ -3,6 +3,7 @@ import { addDoc, collection } from 'firebase/firestore'
 import { corridorStopSchema, type LatLng, type NamedPoint } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { reverseGeocodeName } from '../lib/reverseGeocode'
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput'
 
 interface AddCorridorStopFormProps {
@@ -16,6 +17,9 @@ interface AddCorridorStopFormProps {
   // Undefined from OverviewMapScreen (post-generation editing has no
   // equivalent "locked candidates" corridor), where search stays point-scoped.
   backbone?: LatLng[]
+  /** Names for `backbone`'s points, in the same order — see
+   * rescanCorridorAction's own doc comment for why the model needs them. */
+  waypointNames?: string[]
 }
 
 type Mode = 'place' | 'search'
@@ -50,6 +54,7 @@ export function AddCorridorStopForm({
   tripId,
   defaultLocation,
   backbone,
+  waypointNames,
 }: AddCorridorStopFormProps) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<Mode>('place')
@@ -109,12 +114,18 @@ export function AddCorridorStopForm({
     setSearching(true)
     setSearchStatus(null)
     try {
+      // Resolved here rather than server-side: the Maps JS API is already
+      // loaded for the map itself, so this costs no new key and no new API.
+      // Undefined on failure, which the prompt handles.
+      const centerName = await reverseGeocodeName(defaultLocation)
       const result = await rescanCorridorArea(
         tripId,
         defaultLocation,
         RESCAN_RADIUS_KM,
         query.trim(),
         backbone,
+        centerName,
+        waypointNames,
       )
       setSearchStatus(
         result.stopsWritten > 0

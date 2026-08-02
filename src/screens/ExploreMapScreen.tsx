@@ -136,6 +136,27 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       ),
     [trip.settings.startPoint, trip.settings.endPoint, routeStops],
   )
+  // The same corridor the backbone describes, in words — so the search
+  // prompt can say "along the route through Helsingør, Hillerød…" instead
+  // of listing latitudes (see reverseGeocode.ts for what that cost).
+  // buildRouteBackbone sorts its middle points along the corridor, so these
+  // are named in geographic order too.
+  const waypointNames = useMemo(
+    () =>
+      [
+        trip.settings.startPoint.name,
+        ...[...routeStops]
+          .sort(
+            (a, b) =>
+              backbone.findIndex((p) => p.lat === a.lat && p.lng === a.lng) -
+              backbone.findIndex((p) => p.lat === b.lat && p.lng === b.lng),
+          )
+          .map((stop) => stop.name),
+        trip.settings.endPoint.name,
+      ].filter((name) => name.trim() !== ''),
+    [trip.settings.startPoint.name, trip.settings.endPoint.name, routeStops, backbone],
+  )
+
   const detourByStopId = useMemo(() => {
     const map = new Map<string, number>()
     for (const stop of candidates) {
@@ -342,6 +363,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             tripId={tripId}
             defaultLocation={{ ...center, name: '' }}
             backbone={backbone}
+            waypointNames={waypointNames}
           />
           <RescanCorridorButton tripId={tripId} center={center} />
         </div>

@@ -56,6 +56,8 @@ export async function findStopsForQuery(input: {
   notesFreeText?: string
   tripId?: string
   backbone?: LatLng[]
+  centerName?: string
+  waypointNames?: string[]
 }): Promise<{ finds: RescanFind[]; source: 'places' | 'claude' }> {
   let places: QueryPlaceFind[] = []
   try {
