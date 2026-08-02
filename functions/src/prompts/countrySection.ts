@@ -114,6 +114,7 @@ export async function generateCountrySection(input: {
 
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const attemptStartedAt = Date.now()
     try {
       const response: Anthropic.Message = await client.messages.create({
         model: MODEL,
@@ -135,6 +136,7 @@ export async function generateCountrySection(input: {
         callType: 'countryGuide',
         tripId: input.tripId,
         attempt,
+        elapsedMs: Date.now() - attemptStartedAt,
         response,
       })
       return parseCountrySectionOutput(textFromResponse(response))

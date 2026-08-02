@@ -123,6 +123,7 @@ async function callWithRetry<T>(
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let response: Anthropic.Message
+    const attemptStartedAt = Date.now()
     try {
       response = await client.messages.create({
         model: MODEL,
@@ -149,7 +150,12 @@ async function callWithRetry<T>(
       lastError = error
       continue
     }
-    logClaudeUsage({ ...usageContext, attempt, response })
+    logClaudeUsage({
+      ...usageContext,
+      attempt,
+      elapsedMs: Date.now() - attemptStartedAt,
+      response,
+    })
     const text = textFromResponse(response)
 
     try {

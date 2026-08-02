@@ -75,6 +75,7 @@ export async function generateClaudeOvernightCandidates(input: {
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let response: Anthropic.Message
+    const attemptStartedAt = Date.now()
     try {
       response = await client.messages.create({
         model: MODEL,
@@ -93,7 +94,13 @@ export async function generateClaudeOvernightCandidates(input: {
       lastError = error
       continue
     }
-    logClaudeUsage({ callType: 'overnight', tripId: input.tripId, attempt, response })
+    logClaudeUsage({
+      callType: 'overnight',
+      tripId: input.tripId,
+      attempt,
+      elapsedMs: Date.now() - attemptStartedAt,
+      response,
+    })
     const text = textFromResponse(response)
 
     try {

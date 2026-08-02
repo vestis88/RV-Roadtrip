@@ -121,10 +121,15 @@ export async function generateRescanCandidates(input: {
       break
     }
     let response: Anthropic.Message
+    const attemptStartedAt = Date.now()
     try {
       response = await client.messages.create({
         model: MODEL,
-        max_tokens: 4000,
+        // A focused query wants a handful of matches, not a survey — and
+        // output length is paid for in wall time, on the call the traveler
+        // is sitting and waiting for. The general "what's worth stopping
+        // for here" pass still gets the full budget.
+        max_tokens: input.query ? 1500 : 4000,
         thinking: { type: 'disabled' },
         system,
         messages,
@@ -143,7 +148,13 @@ export async function generateRescanCandidates(input: {
       lastError = error
       continue
     }
-    logClaudeUsage({ callType: 'rescan', tripId: input.tripId, attempt, response })
+    logClaudeUsage({
+      callType: 'rescan',
+      tripId: input.tripId,
+      attempt,
+      elapsedMs: Date.now() - attemptStartedAt,
+      response,
+    })
     const text = textFromResponse(response)
 
     try {

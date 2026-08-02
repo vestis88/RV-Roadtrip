@@ -831,6 +831,11 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
   - Covered by 3 prompt tests: a named centre replaces the coordinates entirely (nothing in the payload says "latitude"), named waypoints replace the corridor's latitude list, and the coordinate fallback still works with no names.
   - Also fixes an intermittent wrong first stop in the reorder panel, found by the same runs: committed stops are ordered by their linked day's index, so before the days listener's first snapshot every stop tied on Infinity and the order fell back to whatever Firestore returned — which the panel then snapshotted into its own state. It now orders nothing until the days are known.
 
+- [x] **Make the search measure itself, after two wrong diagnoses** (2026-08-02) — asked why the app was slow when a Claude chat turn answered the identical prompt in two seconds, the answer given was "the prompt only had coordinates" (wrong — the query carried its own town name), and then "chat used a place lookup, we used web search" (unverifiable — inferred from a Map card in a screenshot, not evidence). Guessing twice about a latency problem that nobody had timed was the actual mistake.
+  - `logClaudeUsage` now records `elapsedMs` per attempt, beside the output tokens, web-search count and attempt number it already recorded. Those four together separate the three candidate explanations that tokens alone cannot: a slow web search, a long answer, or a silent retry.
+  - `findStopsForQuery` logs `event: "query_search"` — which path answered, how long the Places leg took, total elapsed, how many places came back, and any Places error. One real search in production now says where its time went, in Cloud Logging, without anyone theorising.
+  - One change that reduces latency regardless of which explanation is right: a focused query gets `max_tokens: 1500` instead of 4000. A traveler asking for a restaurant wants a handful of matches, not a survey, and output length is paid for in wall time on the call they're sitting and waiting for. The general "what's worth stopping for here" pass keeps the full budget.
+
 ---
 
 **END OF MASTER PLAN — keep this file in the repo root as `MASTER_PLAN.md` and update checkboxes with every commit.**

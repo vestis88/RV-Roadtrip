@@ -48,6 +48,16 @@ function describePlace(place: QueryPlaceFind, query: string): string {
  * rather than a place, and that IS worth waiting for. A Places failure
  * (quota, outage) falls through the same way rather than failing the search
  * outright.
+ *
+ * Every run logs where its time actually went (`event: "query_search"`).
+ * That's here because two confident explanations for the reported
+ * four-minute search were both wrong — first the prompt's coordinates (the
+ * query named its own town all along), then an assumption about which tools
+ * a Claude chat turn had. Neither was measured. This makes the next real
+ * search say for itself: which path answered, how long each leg took, and
+ * how many places came back — and `claude_usage` beside it carries the
+ * per-attempt duration, output tokens and web-search count, which separates
+ * "web search was slow" from "the answer was long" from "it retried".
  */
 export async function findStopsForQuery(input: {
   query: string
@@ -59,12 +69,16 @@ export async function findStopsForQuery(input: {
   centerName?: string
   waypointNames?: string[]
 }): Promise<{ finds: RescanFind[]; source: 'places' | 'claude' }> {
+  const startedAt = Date.now()
   let places: QueryPlaceFind[] = []
+  let placesError: string | undefined
   try {
     places = await searchPlacesByQuery(input.query, input.center, input.radiusKm)
   } catch (error) {
+    placesError = String(error)
     console.warn('Places query search failed — falling back to Claude', error)
   }
+  const placesMs = Date.now() - startedAt
 
   const located: RescanFind[] = places.slice(0, MAX_QUERY_PLACES).map((place) => ({
     name: place.name,
@@ -76,6 +90,15 @@ export async function findStopsForQuery(input: {
   const withinCorridor = filterFindsToCorridor(located, input)
 
   if (withinCorridor.length > 0) {
+    logQuerySearch({
+      tripId: input.tripId,
+      source: 'places',
+      placesMs,
+      totalMs: Date.now() - startedAt,
+      placesReturned: places.length,
+      finds: withinCorridor.length,
+      placesError,
+    })
     return { finds: withinCorridor, source: 'places' }
   }
 
@@ -83,8 +106,27 @@ export async function findStopsForQuery(input: {
   // a findable place, or everything it found is too far off the route.
   // Claude gets a shot at it either way; it can reason about "along the
   // way" in a way a text search can't.
-  return {
-    finds: await generateRescanCandidates(input),
+  const finds = await generateRescanCandidates(input)
+  logQuerySearch({
+    tripId: input.tripId,
     source: 'claude',
-  }
+    placesMs,
+    totalMs: Date.now() - startedAt,
+    placesReturned: places.length,
+    finds: finds.length,
+    placesError,
+  })
+  return { finds, source: 'claude' }
+}
+
+function logQuerySearch(payload: {
+  tripId?: string
+  source: 'places' | 'claude'
+  placesMs: number
+  totalMs: number
+  placesReturned: number
+  finds: number
+  placesError?: string
+}): void {
+  console.log(JSON.stringify({ event: 'query_search', ...payload }))
 }

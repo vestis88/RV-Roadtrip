@@ -17,6 +17,7 @@ describe('logClaudeUsage', () => {
       callType: 'highlights',
       tripId: 'trip-1',
       attempt: 0,
+      elapsedMs: 1234,
       response: response({
         input_tokens: 100,
         output_tokens: 200,
@@ -34,6 +35,7 @@ describe('logClaudeUsage', () => {
       tripId: 'trip-1',
       model: 'claude-sonnet-5',
       attempt: 0,
+      elapsedMs: 1234,
       inputTokens: 100,
       outputTokens: 200,
       cacheCreationTokens: 10,
@@ -51,6 +53,7 @@ describe('logClaudeUsage', () => {
       logClaudeUsage({
         callType: 'rescan',
         attempt: 1,
+      elapsedMs: 1234,
         response: response(undefined),
       }),
     ).not.toThrow()
