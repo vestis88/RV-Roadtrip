@@ -81,8 +81,22 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // real in-progress state.
   const exploring = generating || trip.planMeta.exploreStatus === 'generating'
 
-  const candidates = corridorStops.filter(
-    (stop) => stop.status === 'candidate' || stop.status === 'locked',
+  // Memoised deliberately, and it matters far more than it looks: every
+  // derived value below hangs off this array's IDENTITY. A bare .filter()
+  // returns a new array on every render, so `routeStops` -> `backbone` all
+  // recompute, `<DirectionsRoute points={backbone}>` sees new `points` in
+  // its effect deps every render, re-requests directions, and setting the
+  // result re-renders — which produces a fresh array again. That loop
+  // sustains itself, fires a Google Directions request per iteration, and
+  // leaves the map impossible to pan or zoom while it runs (reported as
+  // the map freezing after promoting a stop, with the route never
+  // updating — it was being cancelled and restarted continuously).
+  const candidates = useMemo(
+    () =>
+      corridorStops.filter(
+        (stop) => stop.status === 'candidate' || stop.status === 'locked',
+      ),
+    [corridorStops],
   )
   // Distinguishes "never searched" from "searched and genuinely found
   // nothing" for the empty-state message below — both look identical
