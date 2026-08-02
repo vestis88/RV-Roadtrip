@@ -59,14 +59,14 @@ export function ExploreCandidateCard({
       }}
       // The same two states PlaceCard and MarkerBadge already draw, in the
       // same colours: orange for "I just tapped this to look at it", sky for
-      // "this one is in", which in explore mode means `locked` — the exact
-      // counterpart of a Day View place whose status is 'selected'. This
-      // card used emerald for that, so a kept stop's own map pin (already
-      // sky, via MarkerBadge) disagreed with its card.
+      // "this one is in my route". `onRoute` — locked OR must-see — is that
+      // set, and it's the same one the route line is drawn through, so the
+      // card, the pin and the drawn route always agree about which stops
+      // are in.
       className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
         highlighted
           ? 'border-orange-600 ring-2 ring-orange-500'
-          : stop.status === 'locked'
+          : onRoute
             ? 'border-sky-600 ring-2 ring-sky-400'
             : ''
       }`}

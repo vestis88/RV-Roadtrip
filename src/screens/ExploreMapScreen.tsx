@@ -346,7 +346,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               >
                 <MarkerBadge
                   icon={CORRIDOR_CANDIDATE_ICON}
-                  selected={stop.status === 'locked'}
+                  // Blue = "this one is in my route", which here means
+                  // locked OR must-see — the same set buildRouteBackbone is
+                  // drawn through (routeStopIds). Keyed on `locked` alone,
+                  // promoting a stop to must-see bent the route through it
+                  // while its pin still looked like an unconsidered
+                  // candidate.
+                  selected={routeStopIds.has(stop.id)}
                   highlighted={selectedId === stop.id}
                 />
               </AdvancedMarker>

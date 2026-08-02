@@ -194,15 +194,51 @@ test('voting moves a stop a whole category, and lock/reject change status', asyn
     .toBe(false)
 })
 
-// Keeping a stop is explore mode's counterpart of selecting a place in Day
-// View, so it wears the same colour (asked for 2026-08-02) — the same
-// border-sky-600 that manual-editing.spec.ts asserts on an activity card,
-// and that this stop's own map pin already used while its card was green.
-test('keeping a stop marks it with the same blue as a selected place, distinct from tapping', async ({
+// Blue means "this stop is in my route" — the same border-sky-600 that
+// manual-editing.spec.ts asserts on a selected activity card, and the same
+// sky the map pin uses (asked for 2026-08-02). Two ways in: keeping a stop,
+// or promoting it to must-see. Both must look the same, because the route
+// line is already drawn through both.
+test('a stop that is in the route wears the same blue as a selected place', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
-  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    priority: 'worth-a-detour',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  const card = page.getByTestId(`explore-candidate-${ottaId}`)
+
+  // Off the route: neither colour.
+  await expect(card).not.toHaveClass(/border-sky-600/)
+  await expect(card).not.toHaveClass(/border-orange-600/)
+
+  // Promoting to must-see puts it on the route, so it turns blue — this is
+  // the case that used to leave the route bending through a stop whose pin
+  // and card still looked unconsidered.
+  await page.getByTestId(`explore-candidate-up-${ottaId}`).click()
+  await expect(card).toHaveClass(/border-sky-600/)
+
+  // Tap-to-view stays a separate, orange highlight that takes priority.
+  await expect(card).not.toHaveClass(/border-orange-600/)
+  await card.click()
+  await expect(card).toHaveClass(/border-orange-600/)
+})
+
+test('keeping a stop turns it blue too, from any category', async ({ page }) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    priority: 'nice-if-convenient',
+    rank: 0,
+  })
 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('explore-map-screen').waitFor()
@@ -212,16 +248,8 @@ test('keeping a stop marks it with the same blue as a selected place, distinct f
   const card = page.getByTestId(`explore-candidate-${ottaId}`)
 
   await expect(card).not.toHaveClass(/border-sky-600/)
-  await expect(card).not.toHaveClass(/border-orange-600/)
-
   await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
   await expect(card).toHaveClass(/border-sky-600/)
-
-  // Tap-to-view stays a separate, orange highlight — keeping alone must not
-  // trigger it, and tapping takes visual priority once it does.
-  await expect(card).not.toHaveClass(/border-orange-600/)
-  await card.click()
-  await expect(card).toHaveClass(/border-orange-600/)
 })
 
 // Regression: "the promote/demote does not seem to work. Everything should
