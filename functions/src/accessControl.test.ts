@@ -57,14 +57,44 @@ describe('loadAllowedEmails', () => {
     expect(await loadAllowedEmails()).toEqual([])
   })
 
-  it('returns an empty list when the emails field is blank, absent or not a string', async () => {
+  // The Firebase console puts "array" directly beside "string" in its type
+  // dropdown, and a list of addresses invites it. This locked the owner out
+  // of his own app on the day the gate shipped: the field was written the
+  // way the UI suggested, every address in it was right, and the app told
+  // him his own account wasn't on the guest list.
+  it('reads an array of addresses, which is how the console invites you to write a list', async () => {
+    await setAllowlist(['Hogestam@gmail.com', ' bim.nejdebring@gmail.com '])
+    expect(await loadAllowedEmails()).toEqual([
+      'hogestam@gmail.com',
+      'bim.nejdebring@gmail.com',
+    ])
+  })
+
+  it('reads addresses written one per line, or separated by semicolons', async () => {
+    await setAllowlist('hogestam@gmail.com\nbim.nejdebring@gmail.com')
+    expect(await loadAllowedEmails()).toEqual([
+      'hogestam@gmail.com',
+      'bim.nejdebring@gmail.com',
+    ])
+    await setAllowlist('hogestam@gmail.com; bim.nejdebring@gmail.com')
+    expect(await loadAllowedEmails()).toEqual([
+      'hogestam@gmail.com',
+      'bim.nejdebring@gmail.com',
+    ])
+  })
+
+  it('returns an empty list when the emails field is blank, absent or an unusable type', async () => {
     await setAllowlist('')
     expect(await loadAllowedEmails()).toEqual([])
     await setAllowlist('   ')
     expect(await loadAllowedEmails()).toEqual([])
     await allowlistRef().set({ somethingElse: 'hogestam@gmail.com' })
     expect(await loadAllowedEmails()).toEqual([])
-    await setAllowlist(['hogestam@gmail.com'])
+    // Tolerating arrays does not mean tolerating anything: a number, or an
+    // array with no strings in it, still matches nobody.
+    await setAllowlist(42)
+    expect(await loadAllowedEmails()).toEqual([])
+    await setAllowlist([{ email: 'hogestam@gmail.com' }])
     expect(await loadAllowedEmails()).toEqual([])
   })
 })

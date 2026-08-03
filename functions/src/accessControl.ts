@@ -4,11 +4,27 @@ import { HttpsError, type CallableRequest } from 'firebase-functions/https'
 export const ALLOWLIST_DOC_PATH = ['config', 'allowlist'] as const
 
 /**
- * The two people allowed to use this app, kept as a single comma-separated
- * string in one hand-edited Firestore document (`config/allowlist`, field
- * `emails`) rather than a collection or an env var: the owner maintains it
- * from the Firebase console in seconds, and firestore.rules denies every
- * client read of `config/**` so nobody but the Admin SDK ever sees it.
+ * Anything separating one hand-typed address from the next. The owner
+ * maintains this field in the Firebase console, so the list may plausibly
+ * arrive comma-separated, semicolon-separated, or one per line — none of
+ * which is a mistake worth locking someone out of their own app over.
+ */
+const EMAIL_SEPARATORS = /[,;\s]+/
+
+/**
+ * The people allowed to use this app, kept in one hand-edited Firestore
+ * document (`config/allowlist`, field `emails`) rather than a collection or
+ * an env var: the owner maintains it from the Firebase console in seconds,
+ * and firestore.rules denies every client read of `config/**` so nobody but
+ * the Admin SDK ever sees it.
+ *
+ * Accepts either a string or an array of strings, because the console's type
+ * dropdown offers "array" right beside "string" and a list of addresses
+ * invites it. This cost the owner a real lockout: the field was written the
+ * way the UI suggested, every address in it was correct, and the app told
+ * them their own account wasn't invited. Being liberal about the shape
+ * weakens nothing — each entry still has to match a verified address
+ * exactly.
  *
  * Never throws. A missing document, a missing field or a Firestore outage
  * all yield `[]`, which fails *closed* — an empty allowlist matches nobody,
@@ -36,17 +52,23 @@ export async function loadAllowedEmails(): Promise<string[]> {
     return []
   }
 
-  if (typeof raw !== 'string' || raw.trim() === '') {
+  const entries = Array.isArray(raw)
+    ? raw.filter((entry): entry is string => typeof entry === 'string')
+    : typeof raw === 'string'
+      ? [raw]
+      : []
+
+  const emails = entries
+    .flatMap((entry) => entry.split(EMAIL_SEPARATORS))
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email !== '')
+
+  if (emails.length === 0) {
     console.warn(
       'Access allowlist config/allowlist has no usable emails field — nobody can claim access',
     )
-    return []
   }
-
-  return raw
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter((email) => email !== '')
+  return emails
 }
 
 /**
