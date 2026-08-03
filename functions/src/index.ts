@@ -19,6 +19,8 @@ getFirestore().settings({ ignoreUndefinedProperties: true })
 // deliberately the one callable that does not require the access claim.
 export { claimAccess } from './claimAccessCallable.js'
 export { createTrip, joinTrip } from './trips.js'
+export { createTripShareLink, revokeTripShareLink } from './shareTokens.js'
+export { viewSharedTrip } from './viewSharedTrip.js'
 export { mergeTrips } from './mergeTrips.js'
 export { deleteTrip } from './deleteTrip.js'
 export { generatePlan } from './generatePlan.js'

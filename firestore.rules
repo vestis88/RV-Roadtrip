@@ -58,6 +58,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Family view links (createTripShareLink / viewSharedTrip). Server-only
+    // for the same reason shareCodes is, plus one of its own: a client read
+    // here would turn "knows a tripId" into "can mint or find that trip's
+    // public view link", and a client write would let anyone point an
+    // existing token at a trip that isn't theirs. The viewSharedTrip
+    // endpoint resolves tokens through the Admin SDK, which bypasses these
+    // rules — nothing else ever needs to touch this collection.
+    match /shareTokens/{token} {
+      allow read, write: if false;
+    }
+
     // The access allowlist itself. Owner-maintained from the Firebase
     // console (the Admin SDK ignores these rules); denied to every client
     // both ways, because reading it would expose the trusted addresses and
