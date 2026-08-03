@@ -50,10 +50,11 @@ test('a relative opens the view-only link with no account and sees the plan and 
     'Kids loved the Viking exhibit.',
   )
   // The map is part of what family are here for — following where the
-  // travelers are, not reading a list of place names. Google Maps JS is
-  // network-blocked in this sandbox (the same limitation the in-app map
-  // specs carry), so this asserts the map is mounted and sized, which is
-  // what the app controls; the tiles inside it are Google's.
+  // travelers are, not reading a list of place names. What this can assert
+  // is that the guest page gives the route a map of its own; whether tiles
+  // draw inside it depends on a Maps key and a reachable Google, neither of
+  // which is true in every environment this suite runs in. The route the
+  // map is handed is covered by SharedTripMap.test.ts instead.
   await expect(guest.getByTestId('shared-map')).toBeVisible()
 
   // Nothing the guest can press, type into, or navigate the app with. The
