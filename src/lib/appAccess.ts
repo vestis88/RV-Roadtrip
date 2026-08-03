@@ -23,19 +23,39 @@ import { linkGoogleAccount } from './accountBackup'
  * - `checking` — Firebase hasn't reported an auth state yet.
  * - `signed-out` — nobody is signed in, or the signed-in account is the
  *   old anonymous kind that predates the gate.
- * - `denied` — signed in with a real account that isn't on the allowlist.
+ * - `denied` — the server looked this account up and refused it: signed in
+ *   with a real account that isn't on the allowlist.
+ * - `unavailable` — the server could not be asked at all. NOT the same as
+ *   denied, and conflating the two cost hours: the first version treated
+ *   every failure of the claimAccess call as a refusal, so a missing
+ *   function, a network drop and a bug inside the callable all told the
+ *   owner his own address wasn't invited. That message is a claim about
+ *   the allowlist, and it must only be made when the allowlist actually
+ *   said so.
  * - `granted` — the account carries the `access` custom claim.
  *
  * The claim is the real boundary: firestore.rules and every callable check
  * it server-side. Nothing here is load-bearing on its own — this module
  * only decides what to render.
  */
-export type AccessState = 'checking' | 'signed-out' | 'denied' | 'granted'
+export type AccessState =
+  | 'checking'
+  | 'signed-out'
+  | 'denied'
+  | 'unavailable'
+  | 'granted'
 
 export interface AccessStatus {
   state: AccessState
   /** Set on `denied`, to say which account was refused. */
   email?: string | null
+  /**
+   * Set on `unavailable`: what actually went wrong, verbatim. Shown on
+   * screen rather than only logged, because the people who hit this are
+   * holding a phone with no developer console, and "something went wrong"
+   * is not a thing anyone can act on or report.
+   */
+  detail?: string
   /**
    * True when the signed-in account is still the anonymous one this
    * browser has been using. Linking (rather than signing in fresh) is then
@@ -75,10 +95,33 @@ async function statusFor(user: User | null): Promise<AccessStatus> {
     if (await requestAccessClaim(user)) {
       return { state: 'granted', email: user.email, hasAnonymousTrips: false }
     }
+    // The call succeeded and the claim still isn't on the refreshed token.
+    // Rare, and not a refusal — Firebase has minted the claim but this
+    // token hasn't caught up.
+    return {
+      state: 'unavailable',
+      email: user.email,
+      detail: 'Access was granted but has not arrived yet.',
+      hasAnonymousTrips: false,
+    }
   } catch (error) {
-    console.error('Access request refused', error)
+    const code = (error as { code?: string } | undefined)?.code
+    // Only the server's own "no" means no. permission-denied is what
+    // claimAccess throws for an address that is genuinely not on the
+    // allowlist; everything else — unauthenticated, unavailable, internal,
+    // not-found, a network failure — means the question never got answered.
+    if (code === 'functions/permission-denied') {
+      return { state: 'denied', email: user.email, hasAnonymousTrips: false }
+    }
+    console.error('Could not check access', error)
+    const message = (error as { message?: string } | undefined)?.message
+    return {
+      state: 'unavailable',
+      email: user.email,
+      detail: [code, message].filter(Boolean).join(': ') || String(error),
+      hasAnonymousTrips: false,
+    }
   }
-  return { state: 'denied', email: user.email, hasAnonymousTrips: false }
 }
 
 /**

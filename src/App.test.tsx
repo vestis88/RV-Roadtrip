@@ -49,6 +49,27 @@ describe('App', () => {
     expect(screen.queryByTestId('access-sign-in')).not.toBeInTheDocument()
   })
 
+  // The distinction this asserts is the whole point: a server that cannot be
+  // reached must never be reported as the allowlist saying no. Telling the
+  // owner his own address wasn't invited, when the truth was that the check
+  // never completed, sent us looking in the wrong place for an evening.
+  it('says it could not check, not that the account was refused, when the call fails', () => {
+    accessStatus.current = {
+      state: 'unavailable',
+      email: 'owner@example.com',
+      detail: 'functions/internal: boom',
+      hasAnonymousTrips: false,
+    }
+    render(<App />)
+
+    expect(screen.getByTestId('access-unavailable')).toBeInTheDocument()
+    expect(screen.getByTestId('access-unavailable-detail')).toHaveTextContent(
+      'functions/internal: boom',
+    )
+    expect(screen.queryByTestId('access-denied')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('trip-name-input')).not.toBeInTheDocument()
+  })
+
   it('renders the app itself once access is granted', () => {
     accessStatus.current = {
       state: 'granted',

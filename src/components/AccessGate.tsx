@@ -71,6 +71,46 @@ export function AccessGate({ children }: { children: React.ReactNode }) {
         </>
       )}
 
+      {status.state === 'unavailable' && (
+        <>
+          <p
+            className="text-sm text-neutral-600 dark:text-neutral-300"
+            data-testid="access-unavailable"
+          >
+            Couldn’t check whether {status.email ?? 'this account'} has access.
+            This is a problem reaching the server, not an answer about the
+            account — try again in a moment.
+          </p>
+          {status.detail && (
+            // Verbatim, on screen: whoever hits this is holding a phone with
+            // no console, and the exact code is the difference between a
+            // reportable fault and "it doesn't work".
+            <p
+              className="rounded-lg bg-neutral-100 px-3 py-2 font-mono text-xs break-all text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+              data-testid="access-unavailable-detail"
+            >
+              {status.detail}
+            </p>
+          )}
+          <button
+            type="button"
+            data-testid="access-retry"
+            onClick={() => window.location.reload()}
+            className="btn btn-primary"
+          >
+            Try again
+          </button>
+          <button
+            type="button"
+            data-testid="access-sign-out"
+            onClick={() => void signOutOfApp()}
+            className="btn btn-secondary"
+          >
+            Sign in with a different account
+          </button>
+        </>
+      )}
+
       {status.state === 'denied' && (
         <>
           <p
