@@ -58,17 +58,31 @@ test('a visitor who is not signed in gets the gate, and costs nothing', async ({
   expect(await evaluateWithRetry(page, () => localStorage.getItem('tripId'))).toBeNull()
 })
 
-// The button itself opens Firebase's OAuth flow, which needs
-// apis.google.com — blocked by this sandbox's network policy, the same
-// limitation that has always kept Google Maps JS and the account-linking
-// popup out of this suite. So the successful path through that button
-// cannot be driven here; what CAN be, and matters more, is what the gate
-// does when the flow doesn't complete.
+// The successful path through the button cannot be driven anywhere this
+// suite runs — it opens Google's real OAuth flow. What matters more, and is
+// testable, is what the gate does when that flow doesn't complete.
+//
+// The failure is forced rather than borrowed from the environment. This
+// first passed by accident: the sandbox blocks apis.google.com, so the flow
+// failed on its own, and on CI — where it isn't blocked — the popup opened
+// instead and the test found no error to assert. Blocking the gapi loader
+// explicitly makes the test mean the same thing in both places, which is
+// the only version of it worth keeping.
 test('a sign-in that fails says so and grants nothing', async ({ page }) => {
+  let blockedTheLoader = false
+  await page.route('**://apis.google.com/**', (route) => {
+    blockedTheLoader = true
+    return route.abort()
+  })
   await page.goto('/')
   await page.getByTestId('access-sign-in').click()
 
   await expect(page.getByTestId('access-error')).toBeVisible()
+  // Proves the interception above is what broke the flow. Without this, a
+  // sandbox that happens to block apis.google.com anyway would pass this
+  // test for a reason that doesn't exist on CI — which is precisely how the
+  // first version of it went green here and red there.
+  expect(blockedTheLoader).toBe(true)
   // Still outside. A failed attempt must not fall through to the app, and
   // must leave the button usable for a second try rather than stuck on
   // "Opening Google…".
