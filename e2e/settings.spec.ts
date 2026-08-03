@@ -2,6 +2,7 @@ import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { expect, test } from './fixtures.js'
 import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -73,7 +74,7 @@ async function waitForSeededRoute(page: import('@playwright/test').Page) {
 test('settings form fills and persists across reload, without falsely marking an idle trip stale', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   await expect(page.getByTestId('plan-status')).toHaveText('idle')
 
@@ -155,7 +156,7 @@ test('settings form fills and persists across reload, without falsely marking an
 test('editing settings on a trip with a ready plan marks it stale', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
@@ -180,7 +181,7 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
   // cold start, which can outrun the default 30s per-test budget on its own
   // — leaving the assertion's own 30s timeout unreachable.
   test.setTimeout(90_000)
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   await expect(page.getByTestId('plan-status')).toHaveText('idle')
 
@@ -217,7 +218,7 @@ test('Trip Setup offers both "Generate overview" and "Generate full plan" for an
 test('"Generate overview" and "Generate full plan" both require a start and finish point first', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   // A brand-new trip starts with both points blank — reported as
   // "Generate overview" silently returning 0 stops with no explanation,
@@ -281,7 +282,7 @@ test('"Generate overview" and "Generate full plan" both require a start and fini
 test('a generation already running server-side shows as in-progress on both Trip Setup and Map, even on a fresh mount', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')

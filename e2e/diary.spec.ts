@@ -4,6 +4,7 @@ import {
   getDayIdByDate,
   seedFixturePlan,
 } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 test('marking cards done with notes logs them to the diary, synced live to a second device', async ({
   browser,
@@ -13,7 +14,7 @@ test('marking cards done with notes logs them to the diary, synced live to a sec
   const pageA = await contextA.newPage()
   const pageB = await contextB.newPage()
 
-  await pageA.goto('/')
+  await signIn(pageA)
   await pageA.getByTestId('trip-name-input').waitFor()
   const shareCodeText = await pageA.getByTestId('share-code').textContent()
   const code = shareCodeText?.replace('Share code:', '').trim()
@@ -23,7 +24,7 @@ test('marking cards done with notes logs them to the diary, synced live to a sec
   if (!tripId) throw new Error('tripId missing from localStorage')
   await seedFixturePlan(tripId)
 
-  await pageB.goto(`/?join=${code}`)
+  await signIn(pageB, { path: `/?join=${code}` })
   await pageB.getByTestId('nav-diary').waitFor()
 
   const dayId = await getDayIdByDate(tripId, '2026-07-10')

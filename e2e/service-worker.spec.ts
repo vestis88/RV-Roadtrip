@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures.js'
 import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 // Regression test for src/main.tsx's controllerchange reload: it used to
 // fire (and reload the page) on the very first-ever visit, not just a
@@ -17,7 +18,7 @@ test('a first-ever visit does not reload itself once the service worker claims i
     loadCount++
   })
 
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   expect(loadCount).toBe(1)
 

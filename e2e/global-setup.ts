@@ -1,4 +1,6 @@
 import { execSync, spawn } from 'node:child_process'
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 
 function killStrayEmulators() {
   for (const pattern of [
@@ -11,6 +13,21 @@ function killStrayEmulators() {
       // nothing matched, that's fine
     }
   }
+}
+
+/**
+ * Starts the run from an empty allowlist, so the gate's "this account is not
+ * invited" cases mean something.
+ *
+ * Each spec adds its own throwaway address (see helpers/signIn.ts) — this
+ * only guarantees nothing is left over from a previous run against a
+ * still-warm emulator, which is the one way an unlisted-account assertion
+ * could pass for the wrong reason.
+ */
+async function resetAllowlist() {
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+  if (getApps().length === 0) initializeApp({ projectId: 'demo-rv-trip-planner' })
+  await getFirestore().collection('config').doc('allowlist').set({ emails: '' })
 }
 
 export default async function globalSetup() {
@@ -54,6 +71,8 @@ export default async function globalSetup() {
       }
     })
   })
+
+  await resetAllowlist()
 
   return async () => {
     if (child.pid) {

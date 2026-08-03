@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures.js'
 import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 test('two devices stay in sync in real time, and offline reload still shows cached data', async ({
   browser,
@@ -9,14 +10,14 @@ test('two devices stay in sync in real time, and offline reload still shows cach
   const pageA = await contextA.newPage()
   const pageB = await contextB.newPage()
 
-  await pageA.goto('/')
+  await signIn(pageA)
   await pageA.getByTestId('trip-name-input').waitFor()
   await evaluateWithRetry(pageA, () => navigator.serviceWorker.ready)
   const shareCodeText = await pageA.getByTestId('share-code').textContent()
   const code = shareCodeText?.replace('Share code:', '').trim()
   expect(code).toBeTruthy()
 
-  await pageB.goto(`/?join=${code}`)
+  await signIn(pageB, { path: `/?join=${code}` })
   await pageB.getByTestId('trip-name-input').waitFor()
 
   const inputA = pageA.getByTestId('trip-name-input')

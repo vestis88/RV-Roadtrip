@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures.js'
+import { signIn } from './helpers/signIn.js'
 
 test('notes autosave, persist across reload, and sync live to a second device', async ({
   browser,
@@ -8,13 +9,13 @@ test('notes autosave, persist across reload, and sync live to a second device', 
   const pageA = await contextA.newPage()
   const pageB = await contextB.newPage()
 
-  await pageA.goto('/')
+  await signIn(pageA)
   await pageA.getByTestId('trip-name-input').waitFor()
   const shareCodeText = await pageA.getByTestId('share-code').textContent()
   const code = shareCodeText?.replace('Share code:', '').trim()
   expect(code).toBeTruthy()
 
-  await pageB.goto(`/?join=${code}`)
+  await signIn(pageB, { path: `/?join=${code}` })
   await pageB.getByTestId('notes-textarea').waitFor()
 
   const notesA = pageA.getByTestId('notes-textarea')

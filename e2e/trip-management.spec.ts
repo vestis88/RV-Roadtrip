@@ -2,6 +2,7 @@ import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { expect, test } from './fixtures.js'
 import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -11,7 +12,7 @@ const adminDb = getFirestore()
 test('the New trip button creates a fresh trip with an empty name, distinct from the one it started on', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   await page.getByTestId('trip-name-input').fill('Norway Loop')
   await page.keyboard.press('Tab')
@@ -42,7 +43,7 @@ test('the New trip button creates a fresh trip with an empty name, distinct from
 test('switching trips shows each one\'s own diary, and a new trip starts with an empty one', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!firstTripId) throw new Error('tripId missing from localStorage')
@@ -90,7 +91,7 @@ test('switching trips shows each one\'s own diary, and a new trip starts with an
 test('joining a trip by share code adds it to the trip switcher without losing the original', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   const shareCodeText = await page.getByTestId('share-code').textContent()
@@ -128,7 +129,7 @@ test('joining a trip by share code adds it to the trip switcher without losing t
 test('a new trip inherits the previous trip\'s settings and notes, except start/finish points', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!firstTripId) throw new Error('tripId missing from localStorage')
@@ -169,7 +170,7 @@ test('a new trip inherits the previous trip\'s settings and notes, except start/
 test('deleting a trip removes it from the switcher; deleting the active trip switches away', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
 
@@ -213,7 +214,7 @@ test('deleting a trip removes it from the switcher; deleting the active trip swi
 test('a trip created before the reverse index existed still shows up in "My trips"', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
@@ -242,7 +243,7 @@ test('a trip created before the reverse index existed still shows up in "My trip
 test('switching back to a previously-viewed trip shows its own settings again, not the other trip\'s stale ones', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const firstTripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!firstTripId) throw new Error('tripId missing from localStorage')
@@ -296,7 +297,7 @@ test('switching back to a previously-viewed trip shows its own settings again, n
 test('the browser tab title tracks the active trip\'s name, including across a trip switch', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   await expect(page).toHaveTitle('RV Road Trip Planner')
 

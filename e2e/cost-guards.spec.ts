@@ -2,6 +2,7 @@ import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { evaluateWithRetry } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -26,7 +27,7 @@ const SEEDED_TRIP_NAME = 'Routed trip'
 test('hammering the Generate button creates exactly one plan request', async ({
   page,
 }) => {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   await page.getByTestId('nav-setup').click()
 

@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { signIn } from './signIn.js'
 
 /**
  * `page.evaluate()` binds to one execution context and throws "Execution
@@ -256,7 +257,7 @@ export async function seedFixturePlan(tripId: string): Promise<void> {
 
 /** Creates a trip via the real app UI, then seeds the fixture plan directly. */
 export async function createTripWithPlan(page: Page): Promise<string> {
-  await page.goto('/')
+  await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
   const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
   if (!tripId) throw new Error('tripId missing from localStorage')
