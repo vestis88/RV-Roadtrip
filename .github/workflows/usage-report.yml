@@ -1,0 +1,60 @@
+name: Claude usage report
+
+# Manual only. Reads the app's own `claude_usage` log entries out of Cloud
+# Logging and prints a spend report into the run summary.
+#
+# It exists because the logs are the answer to "what is this costing me" and
+# they live somewhere awkward to read from a phone. This reuses the workload
+# identity federation the deploy job already has, so no key is created,
+# copied or pasted anywhere — the only new thing the service account needs is
+# permission to READ logs (roles/logging.viewer).
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: How many days back to look (Cloud Logging keeps 30 by default)
+        required: false
+        default: '30'
+
+jobs:
+  report:
+    name: Claude usage report
+    runs-on: ubuntu-latest
+    if: vars.FIREBASE_PROJECT_ID != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT != ''
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Read claude_usage entries from Cloud Logging
+        run: |
+          gcloud logging read 'jsonPayload.event="claude_usage"' \
+            --project "${{ vars.FIREBASE_PROJECT_ID }}" \
+            --freshness "${{ inputs.days }}d" \
+            --limit 10000 \
+            --format json > usage.json
+          echo "Fetched $(jq length usage.json) entries."
+
+      - name: Summarize
+        run: |
+          node scripts/analyzeClaudeUsage.mjs < usage.json | tee report.md
+          # Both to the run summary (readable in the browser) and to stdout
+          # above (readable through the API, which is how this gets analysed
+          # without anyone re-typing it).
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-usage
+          path: |
+            usage.json
+            report.md
+          if-no-files-found: warn
