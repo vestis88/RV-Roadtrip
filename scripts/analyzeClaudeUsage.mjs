@@ -57,7 +57,10 @@ const usd = (n) => (n == null ? 'n/a' : `$${n.toFixed(4)}`)
 const num = (n) => n.toLocaleString('en-US')
 
 function percentile(sorted, p) {
-  if (sorted.length === 0) return 0
+  // Null, not 0, on an empty set. A latency of zero is a measurement; "we
+  // have no measurements" is not, and printing the two the same way is how a
+  // gap in the data gets read as a finding about the app.
+  if (sorted.length === 0) return null
   const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))
   return sorted[index]
 }
@@ -85,7 +88,7 @@ function add(totals, row) {
   totals.cacheReadTokens += row.cacheReadTokens
   totals.webSearchRequests += row.webSearchRequests
   if (row.attempt > 1) totals.retries += 1
-  totals.elapsed.push(row.elapsedMs)
+  if (row.elapsedMs != null) totals.elapsed.push(row.elapsedMs)
   const cost = costOf(row)
   if (cost == null) totals.unpriced += 1
   else totals.cost += cost
@@ -124,7 +127,11 @@ const rows = entries
       tripId: p.tripId ?? null,
       model: p.model ?? '(unknown)',
       attempt: Number(p.attempt ?? 1),
-      elapsedMs: Number(p.elapsedMs ?? 0),
+      // Null, not 0, when the field is absent. `elapsedMs` was added to the
+      // logger partway through, so older entries simply don't have it —
+      // reporting those as "0.0s" invents a measurement, and a latency table
+      // reading zero across the board looks like a finding rather than a gap.
+      elapsedMs: typeof p.elapsedMs === 'number' ? p.elapsedMs : null,
       inputTokens: Number(p.inputTokens ?? 0),
       outputTokens: Number(p.outputTokens ?? 0),
       cacheCreationTokens: Number(p.cacheCreationTokens ?? 0),
@@ -232,17 +239,29 @@ out.push(
     `between calls.`,
 )
 out.push('')
-out.push('| Call type | Median | p95 | Slowest |')
-out.push('| --- | ---: | ---: | ---: |')
-for (const [name, t] of groupBy(rows, (r) => r.callType)) {
-  const sorted = [...t.elapsed].sort((a, b) => a - b)
-  const s = (ms) => `${(ms / 1000).toFixed(1)}s`
-  out.push(
-    `| ${name} | ${s(percentile(sorted, 50))} | ${s(percentile(sorted, 95))} ` +
-      `| ${s(sorted[sorted.length - 1] ?? 0)} |`,
-  )
+const byTypeForLatency = groupBy(rows, (r) => r.callType)
+const timedCalls = [...byTypeForLatency.values()].reduce((n, t) => n + t.elapsed.length, 0)
+
+if (timedCalls === 0) {
+  // `elapsedMs` was added to the logger after some of these entries were
+  // written, so a window that predates it has nothing to time. Say that,
+  // rather than printing a table of zeroes that reads like the app is
+  // answering instantly.
+  out.push('**Latency:** not recorded for any call in this window.')
+  out.push('')
+} else {
+  out.push('| Call type | Median | p95 | Slowest | Timed |')
+  out.push('| --- | ---: | ---: | ---: | ---: |')
+  for (const [name, t] of byTypeForLatency) {
+    const sorted = [...t.elapsed].sort((a, b) => a - b)
+    const s = (ms) => (ms == null ? 'n/a' : `${(ms / 1000).toFixed(1)}s`)
+    out.push(
+      `| ${name} | ${s(percentile(sorted, 50))} | ${s(percentile(sorted, 95))} ` +
+        `| ${s(sorted[sorted.length - 1] ?? null)} | ${num(sorted.length)} of ${num(t.calls)} |`,
+    )
+  }
+  out.push('')
 }
-out.push('')
 out.push(
   '---\n\nEstimated from the app\'s own logs using the rates in ' +
     '`scripts/analyzeClaudeUsage.mjs`. The Anthropic Console\'s usage page is ' +
