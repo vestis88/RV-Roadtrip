@@ -231,13 +231,39 @@ out.push(
 out.push('')
 const billableInput = overall.inputTokens + overall.cacheCreationTokens
 const cacheTotal = billableInput + overall.cacheReadTokens
-out.push(
-  `**Cache:** ${
+// Two different situations produce a 0% cache rate, and they call for
+// opposite responses, so the report has to tell them apart rather than
+// printing one sentence that guesses.
+//
+// Nothing written AND nothing read means no call in the window asked to
+// cache anything — only one call site in this app attaches a cache_control
+// breakpoint (the multi-chunk detail loop), so a window of rescans and
+// highlights reports 0% while behaving exactly as designed. Saying "the
+// prefix is being invalidated" there names a cause that never applied, and
+// sends someone hunting a bug in code that is doing what it says.
+//
+// Tokens written but few read is the real symptom: caching was requested
+// and isn't paying off. Even then the cause is not in this data — an
+// invalidated prefix, a prefix under the model's minimum cacheable size,
+// and calls spaced beyond the TTL all look identical here — so this states
+// what happened and leaves the diagnosis to someone reading the call site.
+if (overall.cacheCreationTokens === 0 && overall.cacheReadTokens === 0) {
+  out.push(
+    '**Cache:** no call in this window attached a cache breakpoint, so ' +
+      'nothing was written or read. That is a fact about which call types ' +
+      'ran, not evidence that caching is broken.',
+  )
+} else {
+  const hitRate =
     cacheTotal > 0 ? ((overall.cacheReadTokens / cacheTotal) * 100).toFixed(1) : '0.0'
-  }% of prompt tokens were served from cache at a tenth of the price. ` +
-    `Higher is better; near zero means the cached prefix is being invalidated ` +
-    `between calls.`,
-)
+  out.push(
+    `**Cache:** ${hitRate}% of prompt tokens were served from cache at a ` +
+      `tenth of the price, against ${num(overall.cacheCreationTokens)} tokens ` +
+      `written at 1.25x. Higher is better — a write with little read back ` +
+      `means the cached prefix is not being reused, which the call site will ` +
+      `explain and this report cannot.`,
+  )
+}
 out.push('')
 const byTypeForLatency = groupBy(rows, (r) => r.callType)
 const timedCalls = [...byTypeForLatency.values()].reduce((n, t) => n + t.elapsed.length, 0)
