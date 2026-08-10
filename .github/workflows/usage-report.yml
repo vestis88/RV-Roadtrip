@@ -15,6 +15,13 @@ on:
         description: How many days back to look (Cloud Logging keeps 30 by default)
         required: false
         default: '30'
+      filter:
+        # Escape hatch for the other reason to want production logs: something
+        # is broken and the stack trace is in GCP. Defaults to the spend
+        # report's own filter, so leaving it alone behaves exactly as before.
+        description: 'Cloud Logging filter (default: the Claude spend report)'
+        required: false
+        default: 'jsonPayload.event="claude_usage"'
 
 jobs:
   report:
@@ -34,9 +41,11 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Read claude_usage entries from Cloud Logging
+      - name: Read matching entries from Cloud Logging
+        env:
+          LOG_FILTER: ${{ inputs.filter }}
         run: |
-          gcloud logging read 'jsonPayload.event="claude_usage"' \
+          gcloud logging read "$LOG_FILTER" \
             --project "${{ vars.FIREBASE_PROJECT_ID }}" \
             --freshness "${{ inputs.days }}d" \
             --limit 10000 \
@@ -44,8 +53,23 @@ jobs:
           echo "Fetched $(jq length usage.json) entries."
 
       - name: Summarize
+        env:
+          LOG_FILTER: ${{ inputs.filter }}
         run: |
-          node scripts/analyzeClaudeUsage.mjs < usage.json | tee report.md
+          # The spend analyser only means anything for claude_usage entries.
+          # Any other filter is a debugging query, so print the raw entries
+          # instead of pretending a cost report applies to them.
+          if [ "$LOG_FILTER" = 'jsonPayload.event="claude_usage"' ]; then
+            node scripts/analyzeClaudeUsage.mjs < usage.json | tee report.md
+          else
+            {
+              echo "## Log entries for \`$LOG_FILTER\`"
+              echo
+              echo '```'
+              jq -r '.[] | "\(.timestamp) [\(.severity // "-")] \(.jsonPayload.message // .textPayload // (.jsonPayload | tostring))"' usage.json | head -200
+              echo '```'
+            } | tee report.md
+          fi
           # Both to the run summary (readable in the browser) and to stdout
           # above (readable through the API, which is how this gets analysed
           # without anyone re-typing it).

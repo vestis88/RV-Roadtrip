@@ -1,4 +1,5 @@
 import { defineSecret } from 'firebase-functions/params'
+import { haversineDistanceKm } from '@rv/shared'
 import type {
   Activity,
   ActivityCategory,
@@ -109,6 +110,115 @@ function meetsQualityBar(candidate: PlaceCandidate): boolean {
   )
 }
 
+/**
+ * How far from the day's anchor a text-search result is still allowed to be.
+ *
+ * Places' `locationBias` (what textSearch sends) is a *preference*, not a
+ * bound — with nothing matching nearby it will happily answer with the best
+ * match on another continent, and nothing downstream was checking. That is
+ * how a dinner stop for a night in Helsingør ended up being a hotel in
+ * Greece: Claude proposed a name, no such place existed in Denmark, and a
+ * well-rated Greek namesake cleared the quality bar unopposed.
+ *
+ * Same figure as the bias radius, now enforced rather than merely requested.
+ */
+const MAX_MATCH_DISTANCE_KM = SEARCH_RADIUS_METERS / 1000
+
+/** Words that carry no identifying signal when comparing two place names. */
+const NAME_STOPWORDS = new Set([
+  'the', 'a', 'an', 'de', 'den', 'det', 'der', 'die', 'das', 'la', 'le', 'les',
+  'el', 'il', 'restaurant', 'restaurang', 'cafe', 'café', 'kafe', 'bar',
+  'hotel', 'hotell', 'museum', 'museet', 'park', 'parken', 'and', 'og', 'och',
+  'und', 'et', 'y', 'i', 'in', 'at', 'of', 'på',
+])
+
+/**
+ * Tokenises a place name for comparison: case-folded, diacritics stripped
+ * (so "Møns" and "Mons" agree), punctuation dropped, and the generic nouns
+ * above removed — "Restaurant Sletten" and "Sletten" are the same place, and
+ * matching on the word "restaurant" would let any restaurant satisfy any
+ * other.
+ */
+function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    // Letters that NFD does NOT decompose, because they are letters in their
+    // own right rather than a base plus an accent. Unhandled, the strip below
+    // deletes them outright and "M\u00f8ns Klint" tokenises to ["ns", "klint"] \u2014
+    // which then fails to match Places' own "Mons Klint". Very much not an
+    // edge case for a trip planner whose corridor is Scandinavia.
+    .replace(/\u00f8/g, 'o')
+    .replace(/\u00e6/g, 'ae')
+    .replace(/\u00f0/g, 'd')
+    .replace(/\u00fe/g, 'th')
+    .replace(/\u00df/g, 'ss')
+    .replace(/\u0142/g, 'l')
+    .replace(/\u0111/g, 'd')
+    // Everything else (\u00e5, \u00e4, \u00f6, \u00e9, \u00fc, \u2026) is a base letter plus a combining
+    // mark once decomposed, so dropping the marks leaves the letter behind.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((token) => token.length > 1 && !NAME_STOPWORDS.has(token))
+}
+
+/**
+ * Whether a Places result is plausibly the place that was asked for.
+ *
+ * Distance alone does not catch every wrong match, because the worst ones are
+ * local: asked for a small café near Berlin, Places returned "Designer Outlet
+ * Berlin" — 30,000 ratings, comfortably inside the radius, and nothing like
+ * what was requested. The quality bar actively causes this, since it prefers
+ * exactly the famous places that outrank the modest one that was meant.
+ *
+ * Half of the requested name's identifying words must appear in the result's,
+ * with a floor of one — forgiving enough that Places' fuller listing name
+ * ("Kronborg Castle" for "Kronborg") still matches, strict enough that an
+ * unrelated landmark does not. Requesting nothing identifiable (a bare
+ * category, as the backfill paths do) skips the check rather than failing it:
+ * those callers are asking for "a good museum near here", where any museum is
+ * a correct answer.
+ */
+function nameLooksRight(expectedName: string | undefined, actual: string): boolean {
+  if (!expectedName) return true
+  const expected = nameTokens(expectedName)
+  if (expected.length === 0) return true
+  const found = new Set(nameTokens(actual))
+  const hits = expected.filter((token) => found.has(token)).length
+  return hits >= Math.max(1, Math.ceil(expected.length / 2))
+}
+
+/**
+ * The single gate every text-search result must pass before it is accepted as
+ * the place a plan asked for. Nearby-search results skip the distance and
+ * name checks by construction: that path uses `locationRestriction` (a real
+ * bound) and asks by category rather than by name.
+ */
+function isUsableMatch(
+  candidate: PlaceCandidate,
+  near: LatLng,
+  expectedName: string | undefined,
+  excludeIds: Set<string>,
+): boolean {
+  return (
+    meetsQualityBar(candidate) &&
+    !excludeIds.has(candidate.id) &&
+    haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
+      MAX_MATCH_DISTANCE_KM &&
+    nameLooksRight(expectedName, candidate.name)
+  )
+}
+
+/**
+ * Exported for unit tests only. The matching gate is pure string/geometry
+ * work with no network in it, which is exactly the part worth testing
+ * directly — the wrong-place bugs it exists to stop were reported from
+ * production, where reproducing them means a real Places round trip.
+ */
+export const __testing = { nameTokens, nameLooksRight }
+
 const FIELD_MASK =
   'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel'
 
@@ -189,10 +299,11 @@ async function resolveOne(
   near: LatLng,
   excludeIds: Set<string>,
   apiKey: string,
+  expectedName?: string,
 ): Promise<PlaceCandidate | null> {
   const textResults = await textSearch(query, near, apiKey)
-  let match = textResults.find(
-    (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
+  let match = textResults.find((candidate) =>
+    isUsableMatch(candidate, near, expectedName, excludeIds),
   )
 
   if (!match) {
@@ -221,7 +332,16 @@ async function resolveOne(
  * calls overlapped.
  */
 async function resolveBatch(
-  items: { query: string; fallbackType: string | undefined }[],
+  items: {
+    query: string
+    fallbackType: string | undefined
+    /**
+     * The place name this item actually asked for, when it asked for one.
+     * `query` carries the town too, so it cannot be compared against a
+     * result's name directly.
+     */
+    expectedName?: string
+  }[],
   near: LatLng,
   excludeIds: Set<string>,
   apiKey: string,
@@ -232,8 +352,8 @@ async function resolveBatch(
 
   const picks: (PlaceCandidate | null)[] = new Array(items.length).fill(null)
   for (let i = 0; i < items.length; i++) {
-    const match = textResultsByIndex[i].find(
-      (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
+    const match = textResultsByIndex[i].find((candidate) =>
+      isUsableMatch(candidate, near, items[i].expectedName, excludeIds),
     )
     if (match) {
       excludeIds.add(match.id)
@@ -471,6 +591,9 @@ export async function enrichActivities(
   const matches = await resolveBatch(
     proposed.map((item) => ({
       query: `${item.name}, ${item.town}`,
+      // What was actually asked for, so a famous unrelated landmark cannot
+      // answer for a small named place — see nameLooksRight.
+      expectedName: item.name,
       fallbackType: ACTIVITY_PLACE_TYPE[item.category],
     })),
     near,
@@ -598,6 +721,9 @@ export async function enrichRestaurantsForMeal(
   const matches = await resolveBatch(
     proposed.map((item) => ({
       query: `${item.name}, ${item.town}`,
+      // What was actually asked for, so a famous unrelated landmark cannot
+      // answer for a small named place — see nameLooksRight.
+      expectedName: item.name,
       fallbackType: MEAL_PLACE_TYPE[meal],
     })),
     near,
