@@ -66,7 +66,15 @@ jobs:
               echo "## Log entries for \`$LOG_FILTER\`"
               echo
               echo '```'
-              jq -r '.[] | "\(.timestamp) [\(.severity // "-")] \(.jsonPayload.message // .textPayload // (.jsonPayload | tostring))"' usage.json | head -200
+              # Falls back to the WHOLE entry rather than to null. Cloud Run
+              # request logs carry no jsonPayload at all, so the first pass at
+              # this printed "[ERROR] null" for exactly the entries worth
+              # reading — an error the report rendered as having no content.
+              jq -r '.[] | "\(.timestamp) [\(.severity // "-")] " +
+                     (.jsonPayload.message // .textPayload //
+                      (.jsonPayload | if . == null then empty else tostring end) //
+                      (del(.timestamp, .severity, .receiveTimestamp, .insertId, .labels) | tostring))' \
+                usage.json | head -200
               echo '```'
             } | tee report.md
           fi
