@@ -1,0 +1,103 @@
+name: Deploy to production
+
+# Manual only, deliberately. Deploys change what travelers are using mid-trip,
+# so this is a decision someone makes, not a side effect of merging.
+#
+# It exists because there was no deploy path in the repo at all: every release
+# was a `firebase deploy` from one laptop. That is why five fixes sat on main
+# while the bugs they fixed were still being re-reported from the phone.
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: What to deploy
+        required: true
+        default: hosting,functions,firestore:rules
+        type: choice
+        options:
+          - hosting,functions,firestore:rules
+          - hosting
+          - functions
+          - firestore:rules
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.targets }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The web config is baked into the client bundle at build time. Shipping
+      # a bundle built with the wrong values is worse than not deploying: the
+      # app would load and then fail to authenticate anyone, which looks like
+      # an outage rather than a misconfiguration. Fail here instead, before
+      # anything is built, and say exactly what is missing.
+      - name: Require the production web config
+        env:
+          API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+          MAPS_KEY: ${{ vars.VITE_GOOGLE_MAPS_API_KEY }}
+        run: |
+          missing=()
+          for name in API_KEY AUTH_DOMAIN PROJECT_ID STORAGE_BUCKET APP_ID MAPS_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository variables: ${missing[*]}"
+            echo "Set them under Settings → Secrets and variables → Actions → Variables."
+            echo "These are the production Firebase web config and Maps key. They are"
+            echo "public values (they ship inside the client bundle), so repository"
+            echo "*variables* are the right home for them, not secrets."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Write the production .env for the client build
+        run: |
+          cat <<EOF > .env
+          VITE_FIREBASE_API_KEY=${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN=${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID=${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET=${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_APP_ID=${{ vars.VITE_FIREBASE_APP_ID }}
+          VITE_GOOGLE_MAPS_API_KEY=${{ vars.VITE_GOOGLE_MAPS_API_KEY }}
+          EOF
+          # VITE_USE_FIREBASE_EMULATORS is deliberately absent. Vite strips the
+          # emulator branch — including the e2e sign-in hook — from a build
+          # where it is not 'true', and a production bundle must never carry it.
+
+      - run: npm run build
+      - run: npm run build -w functions
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy
+        run: |
+          npx firebase-tools deploy \
+            --project "${{ vars.FIREBASE_PROJECT_ID }}" \
+            --only "${{ inputs.targets }}" \
+            --non-interactive \
+            --force
+
+      - name: Where it went
+        run: |
+          {
+            echo "Deployed **${{ inputs.targets }}** to \`${{ vars.FIREBASE_PROJECT_ID }}\`"
+            echo
+            echo "https://${{ vars.FIREBASE_PROJECT_ID }}.web.app"
+          } >> "$GITHUB_STEP_SUMMARY"
