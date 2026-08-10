@@ -8,6 +8,9 @@ interface RequestChangesForDayProps {
   dayId: string
   dayNumber: number
   allDayIds: string[]
+  /** See AddRestDay — same busy state, same reason. */
+  planBusy: boolean
+  onSubmitted: () => void
 }
 
 /**
@@ -22,6 +25,8 @@ export function RequestChangesForDay({
   dayId,
   dayNumber,
   allDayIds,
+  planBusy,
+  onSubmitted,
 }: RequestChangesForDayProps) {
   const [open, setOpen] = useState(false)
   const [changeText, setChangeText] = useState('')
@@ -41,6 +46,10 @@ export function RequestChangesForDay({
     try {
       const lockedDayIds = allDayIds.filter((id) => id !== dayId)
       await submitPlanChangeRequest(tripId, trip, changeText, lockedDayIds)
+      // Raise the busy banner before the form closes — a form that vanishes
+      // into an unchanged screen is exactly what "nothing happens" looked
+      // like, and a replan is far slower than a rest-day insert.
+      onSubmitted()
       setChangeText('')
       setOpen(false)
     } catch (err) {
@@ -57,10 +66,11 @@ export function RequestChangesForDay({
         <button
           type="button"
           data-testid="request-changes-for-day-button"
+          disabled={planBusy}
           onClick={() => setOpen(true)}
-          className="btn btn-sm btn-ghost -ml-3"
+          className="btn btn-sm btn-ghost -ml-3 disabled:opacity-40"
         >
-          Request changes for this day
+          {planBusy ? 'Updating the plan…' : 'Request changes for this day'}
         </button>
       </div>
     )
@@ -86,7 +96,7 @@ export function RequestChangesForDay({
         <button
           type="button"
           data-testid="submit-change-request-for-day"
-          disabled={submitting}
+          disabled={submitting || planBusy}
           onClick={submit}
           className="btn btn-sm btn-primary"
         >

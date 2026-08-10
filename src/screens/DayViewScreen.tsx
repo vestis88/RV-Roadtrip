@@ -17,6 +17,8 @@ import { PlaceCard } from '../components/PlaceCard'
 import { AddCustomStopForm } from '../components/AddCustomStopForm'
 import { RequestChangesForDay } from '../components/RequestChangesForDay'
 import { AddRestDay } from '../components/AddRestDay'
+import { PlanBusyBanner } from '../components/PlanBusyBanner'
+import { usePlanBusy } from '../lib/planBusy'
 import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
@@ -223,6 +225,9 @@ export function DayViewScreen() {
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
+  // Day View is where both structural actions live, and it was the one
+  // screen that never showed whether the plan was being rewritten.
+  const { busy: planBusy, markSubmitted } = usePlanBusy(trip.planMeta.status)
 
   // The map doesn't remount just because the /map/day/:dayId route param
   // changed (same route element, reused across Prev/Next) — without this, a
@@ -433,18 +438,24 @@ export function DayViewScreen() {
           </p>
         )}
 
+        <PlanBusyBanner planMeta={trip.planMeta} busy={planBusy} />
+
         <RequestChangesForDay
           tripId={tripId}
           trip={trip}
           dayId={dayId}
           dayNumber={day.index + 1}
           allDayIds={days.map((d) => d.id)}
+          planBusy={planBusy}
+          onSubmitted={markSubmitted}
         />
 
         <AddRestDay
           tripId={tripId}
           dayId={dayId}
           overnightName={day.overnight.name}
+          planBusy={planBusy}
+          onSubmitted={markSubmitted}
         />
 
         <OvernightCandidatesPicker

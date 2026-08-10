@@ -22,6 +22,7 @@ import {
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
+import { usePlanBusy } from '../lib/planBusy'
 import {
   deleteCorridorStop,
   setCorridorStopStatus,
@@ -113,6 +114,10 @@ export function OverviewMapScreen() {
     .map((stop) => ({ id: stop.id, name: stop.name }))
 
   const planStatus = trip.planMeta.status
+  // Same guard Day View now uses: a replan already in flight makes a second
+  // request meaningless, and this button was tappable throughout one.
+  const { busy: planBusy, markSubmitted: markPlanSubmitted } =
+    usePlanBusy(planStatus)
   // Only a ready-ish plan has anything for the header stats/route/"Request
   // changes" to report on or act against — everything else (no plan yet,
   // mid-generation, failed) gets a status banner instead further down.
@@ -143,6 +148,7 @@ export function OverviewMapScreen() {
         changeText,
         Array.from(lockedDayIds),
       )
+      markPlanSubmitted()
       setChangeRequestOpen(false)
     } catch (error) {
       console.error('Failed to submit change request', error)
@@ -208,10 +214,11 @@ export function OverviewMapScreen() {
           <button
             type="button"
             data-testid="request-changes-button"
-            className="btn btn-ghost"
+            className="btn btn-ghost disabled:opacity-40"
+            disabled={planBusy}
             onClick={() => setChangeRequestOpen(true)}
           >
-            Request changes
+            {planBusy ? 'Updating…' : 'Request changes'}
           </button>
           {(committedCorridorStops.length > 1 ||
             addableCorridorStops.length > 0) && (

@@ -129,6 +129,49 @@ test('swiping over the day view does not change day — that gesture is reserved
   expect(page.url()).toContain(`/map/day/${dayId}`)
 })
 
+// Regression for the incident that turned a three-day trip into eleven days.
+// Both structural actions on this screen wrote a planRequest and then showed
+// nothing at all — Day View never rendered planMeta.status, unlike Overview
+// and Settings. runInsertRestDay is mechanical and sub-second, so the trip
+// was 'ready' again almost immediately and the button was live: tapping it
+// again, which is what anyone does when a button seems dead, inserted
+// another day. generatePlan's claim lock never objected, because nothing
+// ever overlapped — it guards concurrency, and this was repetition.
+test('a submitted rest day is acknowledged, and blocks a second submission', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('add-rest-day-button').click()
+  await page.getByTestId('add-rest-day-confirm').click()
+
+  // The acknowledgement the screen never had. Raised before the form closes,
+  // so there is no frame in which the tap appears to have done nothing.
+  await expect(page.getByTestId('plan-busy-banner')).toBeVisible()
+
+  // And the way back in is shut while that is true — the second tap simply
+  // cannot happen.
+  await expect(page.getByTestId('add-rest-day-button')).toBeDisabled()
+  await expect(page.getByTestId('request-changes-for-day-button')).toBeDisabled()
+
+  // Exactly one day added, and the controls come back once it lands.
+  await expect
+    .poll(
+      async () =>
+        (
+          await adminDb.collection('trips').doc(tripId).collection('days').get()
+        ).size,
+      { timeout: 20_000 },
+    )
+    .toBe(4)
+  await expect(page.getByTestId('add-rest-day-button')).toBeEnabled({
+    timeout: 20_000,
+  })
+})
+
 // "Add a rest day" is the one plan operation that runs entirely in the
 // backend without Claude/Places/Routes, so — unlike the other planRequest
 // flows — it completes for real in this credential-less emulator and can be

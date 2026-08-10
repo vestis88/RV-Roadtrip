@@ -5,6 +5,13 @@ interface AddRestDayProps {
   tripId: string
   dayId: string
   overnightName: string
+  /**
+   * True while the plan is already being rewritten — including a submission
+   * this client just made that the backend has not acknowledged yet.
+   */
+  planBusy: boolean
+  /** Called once the planRequest write lands, so the busy state starts. */
+  onSubmitted: () => void
 }
 
 /**
@@ -13,11 +20,22 @@ interface AddRestDayProps {
  * cancel pattern as RequestChangesForDay and AddCustomStopForm) because the
  * effect reaches well past this screen — every later day moves.
  *
- * The request rides the normal planRequests flow, so the existing
- * planMeta.status === 'generating' busy state covers the wait; there's no
- * separate loading UI here beyond disabling the confirm button.
+ * This used to assume "the existing planMeta.status === 'generating' busy
+ * state covers the wait" and render no loading UI of its own. That was true
+ * of Overview and Settings and false of Day View, which is the only screen
+ * this component appears on — so a confirmed rest day produced no visible
+ * change whatsoever. Since runInsertRestDay is mechanical and sub-second,
+ * the button was live again immediately, and repeated taps each inserted
+ * another day: a three-day trip became eleven. The busy state is now passed
+ * in explicitly rather than assumed to exist somewhere up the tree.
  */
-export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
+export function AddRestDay({
+  tripId,
+  dayId,
+  overnightName,
+  planBusy,
+  onSubmitted,
+}: AddRestDayProps) {
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,6 +45,10 @@ export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
     setError(null)
     try {
       await submitInsertRestDay(tripId, dayId)
+      // Before closing the form, so the busy banner is already up by the time
+      // the controls disappear — closing into an unchanged screen is what
+      // made this look like nothing had happened.
+      onSubmitted()
       setOpen(false)
     } catch (err) {
       // Previously console-only: the button simply returned to normal and
@@ -44,10 +66,14 @@ export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
         <button
           type="button"
           data-testid="add-rest-day-button"
+          // Structural changes stack: each one shifts every later day, and
+          // they are not idempotent. While one is in flight there is nothing
+          // sensible a second can mean.
+          disabled={planBusy}
           onClick={() => setOpen(true)}
-          className="btn btn-sm btn-ghost -ml-3"
+          className="btn btn-sm btn-ghost -ml-3 disabled:opacity-40"
         >
-          Add a rest day here
+          {planBusy ? 'Updating the plan…' : 'Add a rest day here'}
         </button>
       </div>
     )
@@ -63,11 +89,11 @@ export function AddRestDay({ tripId, dayId, overnightName }: AddRestDayProps) {
         <button
           type="button"
           data-testid="add-rest-day-confirm"
-          disabled={submitting}
+          disabled={submitting || planBusy}
           onClick={confirm}
-          className="btn btn-sm btn-primary"
+          className="btn btn-sm btn-primary disabled:opacity-40"
         >
-          Add rest day
+          {submitting ? 'Adding…' : 'Add rest day'}
         </button>
         <button
           type="button"
