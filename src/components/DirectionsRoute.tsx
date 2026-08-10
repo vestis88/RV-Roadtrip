@@ -46,12 +46,52 @@ function describeDirectionsError(error: unknown): string {
  * offline) it is simply never replaced. A partially-routed map with a gap
  * where one request 403'd would be worse than a consistently approximate one.
  */
+/** Real driving totals for the whole point sequence, summed across chunks. */
+export interface RouteTotals {
+  distanceKm: number
+  durationMin: number
+}
+
+/**
+ * Adds up every leg of every chunk. `routes[0]` is the route Directions
+ * chose and the one being drawn, so these totals always describe the line
+ * actually on screen. A leg missing distance/duration contributes nothing
+ * rather than NaN — one malformed leg should cost its own contribution, not
+ * poison the entire total into unreadability.
+ */
+function sumRouteTotals(results: google.maps.DirectionsResult[]): RouteTotals {
+  let meters = 0
+  let seconds = 0
+  for (const result of results) {
+    for (const leg of result.routes[0]?.legs ?? []) {
+      meters += leg.distance?.value ?? 0
+      seconds += leg.duration?.value ?? 0
+    }
+  }
+  return { distanceKm: meters / 1000, durationMin: seconds / 60 }
+}
+
 export function DirectionsRoute({
   points,
   onError,
+  onTotals,
 }: {
   points: LatLng[]
   onError: (message: string | null) => void
+  /**
+   * Real driving distance and time for `points`, or null while unknown —
+   * before the requests land, and after any of them fails.
+   *
+   * These come free: the Directions results were already being fetched to
+   * draw the route and every field except the geometry was thrown away.
+   *
+   * Null rather than a partial sum on failure, deliberately. Chunks are
+   * awaited in sequence and a rejection aborts the rest, so a "total" built
+   * from what arrived would be a real number describing a fraction of the
+   * trip — indistinguishable, on screen, from an honest one. An unknown
+   * total shows as unknown.
+   */
+  onTotals?: (totals: RouteTotals | null) => void
 }) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
@@ -63,6 +103,7 @@ export function DirectionsRoute({
   useEffect(() => {
     if (!map || !routesLibrary || points.length < 2) return
     onError(null)
+    onTotals?.(null)
 
     const segments = chunkRouteSegments(points)
     const renderers: google.maps.DirectionsRenderer[] = []
@@ -107,18 +148,22 @@ export function DirectionsRoute({
         renderers.push(renderer)
       }
       setRoutedPoints(points)
+      onTotals?.(sumRouteTotals(results))
     }
 
     run().catch((error: unknown) => {
       console.warn('Directions route failed', error)
-      if (!cancelled) onError(describeDirectionsError(error))
+      if (!cancelled) {
+        onError(describeDirectionsError(error))
+        onTotals?.(null)
+      }
     })
 
     return () => {
       cancelled = true
       for (const renderer of renderers) renderer.setMap(null)
     }
-  }, [map, routesLibrary, points, onError])
+  }, [map, routesLibrary, points, onError, onTotals])
 
   if (routedPoints === points || points.length < 2) return null
   return <Polyline path={points} {...ROUTE_STROKE} />

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ASSUMED_AVG_SPEED_KMH,
   buildRouteBackbone,
   estimateDetourKm,
+  estimateDriveMinutes,
   haversineDistanceKm,
 } from './geo.js'
 
@@ -187,5 +189,34 @@ describe('estimateDetourKm', () => {
       { lat: 54, lng: 10 },
     ]
     expect(estimateDetourKm({ lat: 50, lng: 10 }, backbone)).toBe(0)
+  })
+})
+
+describe('estimateDriveMinutes', () => {
+  it('converts at exactly the assumed average speed', () => {
+    expect(estimateDriveMinutes(ASSUMED_AVG_SPEED_KMH)).toBeCloseTo(60, 6)
+    expect(estimateDriveMinutes(ASSUMED_AVG_SPEED_KMH / 2)).toBeCloseTo(30, 6)
+  })
+
+  // The whole reason this doesn't apply ROAD_DISTANCE_FACTOR: it is rendered
+  // beside the very kilometres it was derived from, and a traveler who
+  // divides one by the other must land back on the assumed speed rather than
+  // on some third number that makes the app look broken.
+  it('stays consistent with the kilometres it is shown next to', () => {
+    const km = 42
+    const impliedSpeed = km / (estimateDriveMinutes(km) / 60)
+    expect(impliedSpeed).toBeCloseTo(ASSUMED_AVG_SPEED_KMH, 6)
+  })
+
+  it('scales linearly, so it never reorders candidates ranked by distance', () => {
+    expect(estimateDriveMinutes(20)).toBeGreaterThan(estimateDriveMinutes(10))
+    expect(estimateDriveMinutes(20)).toBeCloseTo(estimateDriveMinutes(10) * 2, 6)
+  })
+
+  it('returns 0 rather than NaN or a negative for degenerate input', () => {
+    expect(estimateDriveMinutes(0)).toBe(0)
+    expect(estimateDriveMinutes(-5)).toBe(0)
+    expect(estimateDriveMinutes(NaN)).toBe(0)
+    expect(estimateDriveMinutes(Infinity)).toBe(0)
   })
 })

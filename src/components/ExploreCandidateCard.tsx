@@ -1,5 +1,8 @@
+import { estimateDriveMinutes } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { isoCountryFlag } from '../lib/countryFlag'
+import { googleMapsSearchUrl } from '../lib/mapLinks'
+import { formatDriveTime } from '../lib/formatDuration'
 
 interface ExploreCandidateCardProps {
   stop: CorridorStopWithId
@@ -59,10 +62,9 @@ export function ExploreCandidateCard({
       }}
       // The same two states PlaceCard and MarkerBadge already draw, in the
       // same colours: orange for "I just tapped this to look at it", sky for
-      // "this one is in my route". `onRoute` — locked OR must-see — is that
-      // set, and it's the same one the route line is drawn through, so the
-      // card, the pin and the drawn route always agree about which stops
-      // are in.
+      // "this one is in my route". `onRoute` is the kept (`locked`) set,
+      // the same one the route line is drawn through, so the card, the pin
+      // and the drawn route always agree about which stops are in.
       className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
         highlighted
           ? 'border-orange-600 ring-2 ring-orange-500'
@@ -117,11 +119,18 @@ export function ExploreCandidateCard({
             </span>
           ) : (
             detourKm !== null && (
+              // Distance and time in one chip, both derived from the same
+              // straight-line estimate so they stay consistent with each
+              // other (see estimateDriveMinutes on why no road factor is
+              // applied). Two chips read as two independent measurements;
+              // this is one measurement expressed two ways.
               <span
                 data-testid={`explore-candidate-detour-${stop.id}`}
                 className="chip chip-neutral px-2 py-0.5 text-xs"
+                title="Rough estimate from straight-line distance — real roads are longer"
               >
-                ≈+{Math.round(detourKm)} km
+                ≈+{Math.round(detourKm)} km · +
+                {formatDriveTime(estimateDriveMinutes(detourKm))}
               </span>
             )
           )}
@@ -134,7 +143,24 @@ export function ExploreCandidateCard({
             {stop.why}
           </p>
         )}
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          {/* Photos, reviews and opening hours, without this app paying to
+            * mirror any of them: Places photo media is billed per load and
+            * puts the API key in a scrapeable <img src>, whereas a link
+            * costs nothing and lands the traveler somewhere strictly richer
+            * than a thumbnail. Coordinates rather than a place ID, so it
+            * works for every stop already in Firestore — see
+            * googleMapsSearchUrl's own note on the precision tradeoff. */}
+          <a
+            href={googleMapsSearchUrl(stop.lat, stop.lng)}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid={`explore-candidate-maps-${stop.id}`}
+            onClick={(event) => event.stopPropagation()}
+            className="text-xs font-medium text-orange-600 underline underline-offset-2 hover:text-orange-500 dark:text-orange-400"
+          >
+            Photos &amp; details
+          </a>
           {stop.status === 'candidate' && (
             <button
               type="button"

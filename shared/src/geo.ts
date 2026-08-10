@@ -3,6 +3,25 @@ import type { LatLng } from './schemas.js'
 const EARTH_RADIUS_KM = 6371
 
 /**
+ * Real driving distance is longer than the great-circle distance because
+ * roads bend around terrain and borders; 1.35x is a reasonable average for
+ * long-distance European routes.
+ *
+ * Assumed average speed is for a 3,500 kg RV mixing motorway and other
+ * roads — deliberately below a car's, because the whole app is about
+ * pacing an RV.
+ *
+ * Both live here rather than in the backend (where they started, in
+ * functions/src/routesApi.ts) for the same reason haversineDistanceKm does:
+ * the client now estimates drive time too, and two copies of "how fast does
+ * this thing go" is exactly the sort of pair that drifts apart and leaves
+ * the traveler reading one number in the candidate list and a different one
+ * on the generated plan.
+ */
+export const ROAD_DISTANCE_FACTOR = 1.35
+export const ASSUMED_AVG_SPEED_KMH = 75
+
+/**
  * Great-circle distance between two points, in kilometres.
  *
  * Lives here rather than in either app because both need it: the frontend
@@ -153,4 +172,26 @@ export function estimateDetourKm(
   // Floating-point noise can push an exactly-on-the-line point microscopically
   // negative; a negative detour is meaningless either way.
   return Math.max(0, detour)
+}
+
+/**
+ * Roughly how many minutes of driving a straight-line distance costs, at the
+ * RV's assumed average speed.
+ *
+ * Deliberately does NOT apply ROAD_DISTANCE_FACTOR, even though the roads
+ * really are ~1.35x longer than the straight line. The only caller today
+ * displays this next to the same straight-line kilometres it was computed
+ * from (see ExploreCandidateCard's detour badge), and a traveler reading
+ * "+12 km · +16 min" will divide the two, get 45 km/h, and conclude the app
+ * is broken. Both figures being consistent lower bounds is more useful than
+ * one being adjusted and the other not — the pair understates together, and
+ * says so.
+ *
+ * If a caller ever needs a real driving figure rather than a comparable one,
+ * that is what computeRouteLeg (server) and the Directions legs (client)
+ * are for — this is an ordering hint, the same as estimateDetourKm.
+ */
+export function estimateDriveMinutes(straightLineKm: number): number {
+  if (!Number.isFinite(straightLineKm) || straightLineKm <= 0) return 0
+  return (straightLineKm / ASSUMED_AVG_SPEED_KMH) * 60
 }

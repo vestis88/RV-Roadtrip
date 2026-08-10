@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AdvancedMarker,
   Map as GoogleMap,
@@ -30,9 +30,10 @@ import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
-import { DirectionsRoute } from '../components/DirectionsRoute'
+import { DirectionsRoute, type RouteTotals } from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { hasRoute } from '../lib/validateRoute'
+import { formatDriveTime } from '../lib/formatDuration'
 
 const TIER_LABEL: Record<CorridorStopPriority, string> = {
   'must-see': 'Must-see',
@@ -69,6 +70,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
+  // Real driving totals for the kept-stop route, or null while unknown.
+  // Stable identity via useCallback because DirectionsRoute lists this in
+  // the dependency array of the effect that issues the requests — a fresh
+  // function each render would re-fire every Directions call on every
+  // render, which is both a bill and a rate limit.
+  const [routeTotals, setRouteTotals] = useState<RouteTotals | null>(null)
+  const handleRouteTotals = useCallback(
+    (totals: RouteTotals | null) => setRouteTotals(totals),
+    [],
+  )
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -112,15 +123,23 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const grouped = useMemo(() => groupCandidatesByPriority(candidates), [candidates])
 
   // What the route is actually built through: everything explicitly kept
-  // (`locked`) plus everything ranked must-see. Promoting a stop to must-see
-  // therefore redraws the route through it immediately, and every other
-  // candidate's detour is re-measured against that new shape — which is the
-  // point of the tiers: a "worth a detour" stop that's 5km off a route
-  // bending through the must-sees is a very different proposition from one
-  // 200km off the bare start→end line. buildRouteBackbone sorts these along
-  // the corridor itself, so promotion order never matters.
+  // (`locked`), and nothing else.
+  //
+  // This used to also include everything ranked must-see, which gave the
+  // traveler two unrelated controls that did the same thing — vote a stop up
+  // to the top tier, or press "Keep this", either one bent the route. They
+  // could also disagree, and the card only ever rendered one of them: a
+  // must-see stop sat on the route wearing the blue ring but showed no
+  // "Keeping" chip and still offered a "Keep this" button that changed
+  // nothing visible when pressed.
+  //
+  // The two now mean different things. Votes are triage — how much the
+  // traveler cares, which is what sorts the list. Keeping is the commitment,
+  // and it is the only thing that moves the route. buildRouteBackbone sorts
+  // these along the corridor itself, so the order they were kept in never
+  // matters.
   const routeStops = useMemo(
-    () => candidates.filter((c) => c.status === 'locked' || c.priority === 'must-see'),
+    () => candidates.filter((c) => c.status === 'locked'),
     [candidates],
   )
   const routeStopIds = useMemo(
@@ -291,6 +310,39 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         />
       )}
 
+      {/* The drive the traveler has actually committed to so far: start →
+        * every kept stop → finish. Real Directions figures, not the
+        * straight-line estimate the per-candidate badges use, because the
+        * Directions results were already being fetched to draw the route
+        * line and every field except the geometry was being discarded — so
+        * this costs no extra request.
+        *
+        * Hidden entirely rather than shown as zero when no stop is kept
+        * yet: "0 h" would read as a finding about the route rather than the
+        * absence of one. Shown as unknown when the requests failed, since a
+        * partial sum is indistinguishable on screen from a real one. */}
+      {routeStops.length > 0 && (
+        <p
+          data-testid="explore-route-totals"
+          className="border-b border-neutral-200 px-3 py-1.5 text-center text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+        >
+          {routeTotals ? (
+            <>
+              <span className="font-medium text-neutral-900 dark:text-white">
+                {formatDriveTime(routeTotals.durationMin)}
+              </span>{' '}
+              driving · {Math.round(routeTotals.distanceKm)} km
+            </>
+          ) : (
+            <span className="text-neutral-500 dark:text-neutral-400">
+              Driving time unavailable
+            </span>
+          )}{' '}
+          through {routeStops.length} kept stop
+          {routeStops.length === 1 ? '' : 's'}
+        </p>
+      )}
+
       {routeError && (
         <p
           data-testid="explore-route-error-banner"
@@ -326,7 +378,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               )
             }}
           >
-            <DirectionsRoute points={backbone} onError={setRouteError} />
+            <DirectionsRoute
+              points={backbone}
+              onError={setRouteError}
+              onTotals={handleRouteTotals}
+            />
             <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
             <AdvancedMarker
               position={{ lat: trip.settings.startPoint.lat, lng: trip.settings.startPoint.lng }}
@@ -346,12 +402,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               >
                 <MarkerBadge
                   icon={CORRIDOR_CANDIDATE_ICON}
-                  // Blue = "this one is in my route", which here means
-                  // locked OR must-see — the same set buildRouteBackbone is
-                  // drawn through (routeStopIds). Keyed on `locked` alone,
-                  // promoting a stop to must-see bent the route through it
-                  // while its pin still looked like an unconsidered
-                  // candidate.
+                  // Blue = "this one is in my route" — exactly the kept
+                  // (`locked`) stops buildRouteBackbone is drawn through
+                  // (routeStopIds), so the pin, the card and the route line
+                  // can never disagree about which stops are in.
                   selected={routeStopIds.has(stop.id)}
                   highlighted={selectedId === stop.id}
                 />

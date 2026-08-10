@@ -195,12 +195,14 @@ test('voting moves a stop a whole category, and lock/reject change status', asyn
     .toBe(false)
 })
 
-// Blue means "this stop is in my route" — the same border-sky-600 that
-// manual-editing.spec.ts asserts on a selected activity card, and the same
-// sky the map pin uses (asked for 2026-08-02). Two ways in: keeping a stop,
-// or promoting it to must-see. Both must look the same, because the route
-// line is already drawn through both.
-test('a stop that is in the route wears the same blue as a selected place', async ({
+// Voting and keeping are different decisions, and only keeping moves the
+// route. Both used to: a stop voted to must-see was silently added to the
+// backbone, which meant two unrelated controls did the same thing and the
+// card only ever admitted to one of them — a must-see stop wore the blue
+// ring but showed no "Keeping" chip and still offered a "Keep this" button
+// that changed nothing visible. Votes are triage now; keeping is the
+// commitment.
+test('voting a stop to the top tier does not put it in the route', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
@@ -221,16 +223,105 @@ test('a stop that is in the route wears the same blue as a selected place', asyn
   await expect(card).not.toHaveClass(/border-sky-600/)
   await expect(card).not.toHaveClass(/border-orange-600/)
 
-  // Promoting to must-see puts it on the route, so it turns blue — this is
-  // the case that used to leave the route bending through a stop whose pin
-  // and card still looked unconsidered.
   await page.getByTestId(`explore-candidate-up-${ottaId}`).click()
+  await expect
+    .poll(async () => (await stops.doc(ottaId).get()).data()?.priority)
+    .toBe('must-see')
+
+  // Top of the list, still not in the route: no blue, and it still reports a
+  // detour because the route it would detour from hasn't changed.
+  await expect(card).not.toHaveClass(/border-sky-600/)
+  await expect(
+    page.getByTestId(`explore-candidate-detour-${ottaId}`),
+  ).toBeVisible()
+  await expect(
+    page.getByTestId(`explore-candidate-onroute-${ottaId}`),
+  ).toBeHidden()
+
+  // Keeping it is what commits it — and only then does it turn blue.
+  await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
   await expect(card).toHaveClass(/border-sky-600/)
 
   // Tap-to-view stays a separate, orange highlight that takes priority.
   await expect(card).not.toHaveClass(/border-orange-600/)
   await card.click()
   await expect(card).toHaveClass(/border-orange-600/)
+})
+
+// Both figures come from the same straight-line estimate, so they are shown
+// together in one chip — see estimateDriveMinutes on why no road factor is
+// applied to the minutes.
+test('a candidate reports its detour in both distance and time', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    priority: 'worth-a-detour',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+
+  const detour = page.getByTestId(`explore-candidate-detour-${ottaId}`)
+  await expect(detour).toContainText('km')
+  await expect(detour).toHaveText(/\+\d+\s*(min|h)/)
+})
+
+// The original ask was photos from Google Maps. A link gets the traveler
+// photos, reviews and opening hours without this app paying per photo load
+// or putting its Places key in a scrapeable <img src> — and it works for
+// stops already in Firestore, which a stored photo URL would not.
+test('every candidate links out to Google Maps', async ({ page }) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaDoc = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0]
+  const { lat, lng } = ottaDoc.data() as { lat: number; lng: number }
+
+  const link = page.getByTestId(`explore-candidate-maps-${ottaDoc.id}`)
+  await expect(link).toHaveAttribute(
+    'href',
+    `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+  )
+  await expect(link).toHaveAttribute('target', '_blank')
+  // Without noopener the opened tab gets a handle back to this one.
+  await expect(link).toHaveAttribute('rel', /noopener/)
+})
+
+// Totals describe the committed route, so with nothing kept there is no
+// route to describe — and "0 h" would read as a finding rather than an
+// absence. The figures themselves need real Directions results, which the
+// e2e environment has no key for; this asserts the gating, not the numbers.
+test('route totals appear only once a stop is kept', async ({ page }) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    priority: 'must-see',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  // Must-see but not kept: nothing is committed, so no totals bar.
+  await expect(page.getByTestId('explore-route-totals')).toBeHidden()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
+
+  const totals = page.getByTestId('explore-route-totals')
+  await expect(totals).toBeVisible()
+  await expect(totals).toContainText('1 kept stop')
 })
 
 test('keeping a stop turns it blue too, from any category', async ({ page }) => {
@@ -285,10 +376,11 @@ test('promoting a stop moves it into the category above', async ({
     .poll(async () => (await stops.doc(lillehammerId).get()).data()?.priority)
     .toBe('must-see')
 
-  // Now must-see, it defines the route — so it reports as on-route rather
-  // than carrying a detour estimate.
+  // Promotion changes where it sits in the list, not whether it is in the
+  // route — so it still carries a detour estimate rather than the on-route
+  // chip. Keeping is what commits a stop; see the voting/keeping test above.
   await expect(
-    page.getByTestId(`explore-candidate-onroute-${lillehammerId}`),
+    page.getByTestId(`explore-candidate-detour-${lillehammerId}`),
   ).toBeVisible()
 
   // ...and demoting puts it back.

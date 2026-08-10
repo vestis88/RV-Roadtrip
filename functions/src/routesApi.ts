@@ -1,5 +1,9 @@
 import { defineSecret } from 'firebase-functions/params'
-import type { LatLng } from '@rv/shared'
+import {
+  ASSUMED_AVG_SPEED_KMH,
+  ROAD_DISTANCE_FACTOR,
+  type LatLng,
+} from '@rv/shared'
 
 export const googleRoutesApiKey = defineSecret('GOOGLE_ROUTES_API_KEY')
 
@@ -10,12 +14,10 @@ export interface RouteLeg {
 }
 
 const EARTH_RADIUS_KM = 6371
-// Real driving distance is longer than the great-circle distance because
-// roads bend around terrain/borders; 1.35x is a reasonable average for
-// long-distance European highway routes.
-const ROAD_DISTANCE_FACTOR = 1.35
-// Assumed average speed for a 3,500kg RV mixing motorway and other roads.
-const ASSUMED_AVG_SPEED_KMH = 75
+// ROAD_DISTANCE_FACTOR and ASSUMED_AVG_SPEED_KMH moved to @rv/shared when
+// the explore-mode candidate list started estimating drive time client-side
+// — same figures, one definition, so the estimate a traveler compares
+// candidates by and the one a generated plan is paced by cannot drift.
 
 function haversineKm(a: LatLng, b: LatLng): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180
