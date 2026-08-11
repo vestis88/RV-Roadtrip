@@ -17,30 +17,78 @@ const STELLPLATZ_CANDIDATE_COUNT = 2
 const WILD_CANDIDATE_COUNT = 2
 
 /**
- * Runs one of the three independent lookups fetchOvernightCandidates
- * combines, swallowing its failure to an empty list rather than letting it
- * sink the whole picker. Reported as "Could not load overnight options right
- * now" even though (per the emulator logs) only Overpass had failed —
- * Promise.all rejects as soon as any one of its promises does, so a single
- * flaky third-party source (Overpass has no SLA; Places/Claude can rate-limit
- * or time out too) took campsite and wild-camping results down with it even
- * though those had already succeeded. Each source degrading on its own is
- * the same tradeoff the rest of this app already makes — a haversine
- * fallback when Directions fails, a candidate kept without coordinates when
- * geocoding fails — showing what's actually available beats an all-or-
- * nothing error for a panel whose only job is "here are some options".
+ * How long any one source gets before the picker stops waiting for it.
+ *
+ * `safe` above converts a source that *fails* into an empty list. It does
+ * nothing about a source that never settles, and Promise.all waits for the
+ * slowest — so one stalled source took the whole callable to its 180s ceiling
+ * and Cloud Run killed the request. That is what "Could not load overnight
+ * options right now" actually was, every time: not an exception, a 504.
+ * Production logs for 2026-08-10 show two of them at latency 179.9999s
+ * against `timeoutSeconds: 180`.
+ *
+ * Overpass has no SLA and is the usual culprit, but the Claude calls use web
+ * search, which routinely runs to minutes — rescanCorridor.ts carries its own
+ * RETRY_DEADLINE_MS for exactly that reason.
+ *
+ * Budgeted so the worst case (parallel phase, then the conditional
+ * stellplatz fallback) lands comfortably inside the callable's own ceiling
+ * with room for the Firestore reads either side.
  */
-async function safe(
+const SOURCE_TIMEOUT_MS = 60_000
+const FALLBACK_TIMEOUT_MS = 45_000
+
+/**
+ * Runs one of the independent lookups fetchOvernightCandidates combines,
+ * degrading it to an empty list if it fails OR if it takes too long — slow
+ * and broken are the same thing to a traveler looking at a spinner.
+ *
+ * This replaces an earlier `safe` helper that handled only failure. That one
+ * was written after Promise.all's reject-on-first-failure let a single
+ * Overpass 406 sink results the other two sources had already produced; the
+ * principle it established — each source degrades on its own, showing what
+ * is actually available beats an all-or-nothing error — is the same one
+ * extended here to cover a source that never answers at all.
+ *
+ * The abandoned promise is deliberately not cancelled: the sources have no
+ * abort plumbing today, and adding it is a bigger change than this fix
+ * needs. Its result is simply discarded. `.catch` is attached so a rejection
+ * arriving after we stopped listening cannot surface as an unhandled
+ * rejection and take the instance down.
+ */
+async function withDeadline(
   promise: Promise<OvernightStopCandidate[]>,
   label: string,
+  timeoutMs: number,
 ): Promise<OvernightStopCandidate[]> {
-  try {
-    return await promise
-  } catch (error) {
+  let timer: NodeJS.Timeout | undefined
+  const guarded = promise.catch((error) => {
     console.warn(`Overnight candidates: ${label} failed`, error)
-    return []
+    return [] as OvernightStopCandidate[]
+  })
+  try {
+    return await Promise.race([
+      guarded,
+      new Promise<OvernightStopCandidate[]>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `Overnight candidates: ${label} exceeded ${timeoutMs}ms — continuing without it`,
+          )
+          resolve([])
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
+
+/**
+ * Exported for unit tests only. The deadline is the whole fix and it is pure
+ * timing logic with no network in it — the production failure it addresses
+ * takes three minutes to reproduce for real.
+ */
+export const __testing = { withDeadline }
 
 /**
  * Overnight-stop candidates (implemented 2026-07-27): resolved lazily, only
@@ -87,18 +135,28 @@ export async function fetchOvernightCandidates(
   // across trips: free-camping rules are cached per country, not per vehicle,
   // so the wild-camping prompt can read whichever entry exists for this
   // country without needing this trip's own vehicle to match.
-  const freeCampingRules = await loadFreeCampingRules(country)
+  // Best-effort by its own definition (see above), so a Firestore hiccup here
+  // must not be the thing that fails the picker — it was the only await in
+  // this function with no guard on it at all.
+  const freeCampingRules = await loadFreeCampingRules(country).catch(
+    (error: unknown) => {
+      console.warn('Overnight candidates: free-camping rules lookup failed', error)
+      return undefined
+    },
+  )
 
   const [campsites, stellplatzFromOsm, wild] = await Promise.all([
-    safe(
+    withDeadline(
       searchCampsiteCandidates(near, country, CAMPSITE_CANDIDATE_COUNT),
       'campsite search (Places)',
+      SOURCE_TIMEOUT_MS,
     ),
-    safe(
+    withDeadline(
       searchStellplatzCandidates(near, country, STELLPLATZ_CANDIDATE_COUNT),
       'stellplatz search (Overpass)',
+      SOURCE_TIMEOUT_MS,
     ),
-    safe(
+    withDeadline(
       generateClaudeOvernightCandidates({
         kind: 'wild',
         near,
@@ -107,6 +165,7 @@ export async function fetchOvernightCandidates(
         tripId,
       }),
       'wild camping generation (Claude)',
+      SOURCE_TIMEOUT_MS,
     ),
   ])
 
@@ -116,7 +175,7 @@ export async function fetchOvernightCandidates(
   const stellplatz =
     stellplatzFromOsm.length > 0
       ? stellplatzFromOsm
-      : await safe(
+      : await withDeadline(
           generateClaudeOvernightCandidates({
             kind: 'stellplatz',
             near,
@@ -125,6 +184,7 @@ export async function fetchOvernightCandidates(
             tripId,
           }).then((results) => results.slice(0, STELLPLATZ_CANDIDATE_COUNT)),
           'stellplatz fallback generation (Claude)',
+          FALLBACK_TIMEOUT_MS,
         )
 
   return [...campsites, ...stellplatz, ...wild.slice(0, WILD_CANDIDATE_COUNT)]
