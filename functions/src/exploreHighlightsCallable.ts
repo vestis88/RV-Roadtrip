@@ -17,6 +17,20 @@ import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
 // this only ever kicks in for an actually-abandoned lock, not a slow one.
 const STALE_EXPLORE_LOCK_MS = 5 * 60 * 1000
 
+// Long enough to name the fault, short enough to read on a phone. The
+// underlying messages are not sized for a UI at all — a Claude parse
+// failure carries a 300-character excerpt of the raw response — and the
+// full text is in the logs either way.
+const CAUSE_PREVIEW_LENGTH = 160
+
+function describeCause(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const collapsed = message.replace(/\s+/g, ' ').trim()
+  return collapsed.length > CAUSE_PREVIEW_LENGTH
+    ? `${collapsed.slice(0, CAUSE_PREVIEW_LENGTH)}…`
+    : collapsed
+}
+
 /**
  * Explore mode's own generation entry point (2026-07-30) — deliberately NOT
  * routed through the planRequests/generatePlan.ts pipeline the full/replan
@@ -111,6 +125,22 @@ export async function generateExploreHighlightsForTrip(
     // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
     await tripRef.update({ 'planMeta.exploreLastRunAt': new Date().toISOString() })
     return { candidateCount }
+  } catch (error) {
+    // firebase-functions only forwards the message of an HttpsError;
+    // anything else reaches the browser as the bare code 'internal' with the
+    // message "INTERNAL". That is how the 2026-08-12 failure was reported:
+    // Claude returned unparseable JSON twice, the run threw a plain Error,
+    // and the traveler was told "please try again" — advice that cannot
+    // work for a deterministic fault and costs two more Claude calls each
+    // time it is followed. Re-thrown with the cause attached so the screen
+    // can say what actually broke; the full error still goes to the logs,
+    // which the truncated preview is no substitute for.
+    if (error instanceof HttpsError) throw error
+    console.error(`generateExploreHighlights failed for trip ${tripId}`, error)
+    throw new HttpsError(
+      'internal',
+      `Could not find stops: ${describeCause(error)}`,
+    )
   } finally {
     await tripRef.update({ 'planMeta.exploreStatus': 'idle' })
   }

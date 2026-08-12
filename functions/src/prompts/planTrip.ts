@@ -51,6 +51,93 @@ export function parseRegionHighlights(text: string): RegionHighlightsResponse {
   return regionHighlightsResponseSchema.parse(JSON.parse(stripCodeFences(text)))
 }
 
+/**
+ * Cuts a syntactically broken response back to the longest prefix that IS
+ * valid JSON, closing whatever containers are still open at that point.
+ * Returns null when nothing parses.
+ *
+ * Exists because of a production failure on 2026-08-12 (explore highlights,
+ * trip "Luxemburg"): Claude returned 5,609 characters of otherwise-complete
+ * curation whose very last candidate was `{"town": "Bouillon", "country":
+ * "BE", "why "}` — a key with no value. `JSON.parse` is all-or-nothing, so
+ * one malformed field at the tail threw away every complete candidate
+ * before it, both attempts failed the same way, and the whole callable
+ * 500'd after paying for two Claude calls. The 30-day usage log shows this
+ * is not a freak: 4 of 12 highlights runs needed their retry, so a run
+ * where BOTH attempts miss is simply the tail of a rate the code already
+ * lived with.
+ *
+ * Scans once, tracking string/escape state so a brace inside a `why`
+ * sentence is never mistaken for structure, and records every point where a
+ * container legitimately closed. Those points are then tried newest-first,
+ * so the salvage keeps as much of the answer as possible; a trailing
+ * sentence of prose after the closing brace (the other way a response
+ * stops being parseable) is cut by the same mechanism.
+ *
+ * Deliberately NOT a general "repair any JSON" pass: it only ever truncates
+ * at a boundary the model itself closed, so a salvaged document contains
+ * only values Claude actually finished writing. Nothing is invented, and
+ * the caller still validates the result against the real schema.
+ */
+export function salvageJsonPrefix(text: string): string | null {
+  const cuts: { end: number; closers: string }[] = []
+  const open: string[] = []
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === '{') open.push('}')
+    else if (char === '[') open.push(']')
+    else if (char === '}' || char === ']') {
+      // A mismatched closer means the damage is structural rather than a
+      // truncated tail, and every cut point recorded so far sits inside a
+      // container whose nesting we can no longer trust — nothing to salvage.
+      if (open.pop() !== char) return null
+      cuts.push({ end: i, closers: [...open].reverse().join('') })
+    }
+  }
+
+  for (let i = cuts.length - 1; i >= 0; i--) {
+    const candidate = text.slice(0, cuts[i].end + 1) + cuts[i].closers
+    try {
+      JSON.parse(candidate)
+      return candidate
+    } catch {
+      // This boundary sat inside the broken region; try an earlier one.
+    }
+  }
+  return null
+}
+
+/**
+ * Last-resort parse for the highlights call only — see callWithRetry's
+ * `salvage` parameter for when it runs, and salvageJsonPrefix for what it
+ * recovers.
+ *
+ * Safe for THIS call specifically because losing the truncated tail costs
+ * the traveler at most the last candidate town: regionHighlightsResponseSchema
+ * deliberately allows any number of regions and candidates (see its own
+ * comments), so a shortened list is a valid answer rather than a corrupted
+ * one. The outline and detail calls deliberately do NOT get this — dropping
+ * their last element would silently shorten the trip or lose a whole day's
+ * plan, which is worse than failing loudly.
+ */
+export function salvageRegionHighlights(text: string): RegionHighlightsResponse {
+  const repaired = salvageJsonPrefix(stripCodeFences(text))
+  if (repaired === null) {
+    throw new Error('No parseable JSON prefix to salvage')
+  }
+  return regionHighlightsResponseSchema.parse(JSON.parse(repaired))
+}
+
 export function parseRouteOutline(text: string): RouteOutline {
   return routeOutlineSchema.parse(JSON.parse(stripCodeFences(text)))
 }
@@ -115,12 +202,18 @@ async function callWithRetry<T>(
   maxTokens: number,
   parse: (text: string) => T,
   usageContext: { callType: ClaudeCallType; tripId?: string },
+  // Runs only once every attempt has been spent, on the last response
+  // received — the alternative at that point is throwing the whole run
+  // away. Given only where a partial answer is genuinely valid (see
+  // salvageRegionHighlights); omitted, the call fails exactly as before.
+  salvage?: (text: string) => T,
 ): Promise<T> {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: userContent },
   ]
 
   let lastError: unknown
+  let lastText: string | undefined
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let response: Anthropic.Message
     const attemptStartedAt = Date.now()
@@ -148,6 +241,10 @@ async function callWithRetry<T>(
       // was pushed onto `messages`), same as a schema-failure retry just
       // without the corrective follow-up message.
       lastError = error
+      console.warn(
+        `Claude ${usageContext.callType} call failed (attempt ${attempt}, trip ${usageContext.tripId ?? 'n/a'})`,
+        error,
+      )
       continue
     }
     logClaudeUsage({
@@ -157,12 +254,22 @@ async function callWithRetry<T>(
       response,
     })
     const text = textFromResponse(response)
+    lastText = text
 
     try {
       return parse(text)
     } catch (error) {
       lastError = new Error(
         `${String(error)} | ${describeResponse(response, text)}`,
+      )
+      // Logged per attempt, not just thrown at the end: only the FINAL
+      // attempt's error ever escapes this function, so an investigation
+      // into a failed run could see how the retry went wrong but never how
+      // the original response did — which is exactly the gap that made the
+      // 2026-08-12 explore failure take a log dig to characterise.
+      console.warn(
+        `Claude ${usageContext.callType} response failed validation (attempt ${attempt}, trip ${usageContext.tripId ?? 'n/a'})`,
+        lastError,
       )
       messages.push({ role: 'assistant', content: text })
       messages.push({
@@ -172,6 +279,21 @@ async function callWithRetry<T>(
     }
   }
 
+  if (salvage && lastText !== undefined) {
+    try {
+      const recovered = salvage(lastText)
+      console.warn(
+        `Claude ${usageContext.callType} exhausted ${MAX_ATTEMPTS} attempts; salvaged the valid prefix of the last response (trip ${usageContext.tripId ?? 'n/a'})`,
+        lastError,
+      )
+      return recovered
+    } catch (error) {
+      console.warn(
+        `Claude ${usageContext.callType} response could not be salvaged either (trip ${usageContext.tripId ?? 'n/a'})`,
+        error,
+      )
+    }
+  }
   throw lastError
 }
 
@@ -234,6 +356,10 @@ export async function generateRegionHighlights(input: {
     8000,
     parseRegionHighlights,
     { callType: 'highlights', tripId: input.tripId },
+    // The only call given a salvage path — a curation shortlist stays a
+    // valid answer with its last entry missing, unlike a route or a day's
+    // detail. See salvageRegionHighlights.
+    salvageRegionHighlights,
   )
   return geocodeHighlights(highlights, input.settings)
 }

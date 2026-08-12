@@ -151,6 +151,50 @@ describe('generateExploreHighlightsForTrip', () => {
     expect(snap.data()?.planMeta?.exploreLastRunAt).toBeUndefined()
   })
 
+  // Regression for 2026-08-12: Claude returned unparseable JSON on both
+  // attempts, generateRegionHighlights threw a plain Error, and
+  // firebase-functions handed the browser the bare code 'internal' with the
+  // message "INTERNAL" — so the screen could only offer "please try again",
+  // which for a deterministic fault is advice that cannot work and costs two
+  // more Claude calls every time it is followed.
+  it('reports the underlying cause instead of an opaque internal error', async () => {
+    const { tripId } = await createTripForUser('uidExploreGenCause')
+    generateRegionHighlightsMock
+      .mockReset()
+      .mockRejectedValue(
+        new Error('SyntaxError: Unexpected token \'}\' ... is not valid JSON'),
+      )
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toMatchObject({
+      code: 'internal',
+      message: expect.stringContaining('is not valid JSON'),
+    })
+  })
+
+  // The messages this file writes for the traveler ("hang tight", "could not
+  // locate any of them on the map") must reach them verbatim rather than
+  // being re-wrapped as a generic cause.
+  it('passes its own HttpsErrors through untouched', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenPassThrough')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreStatus': 'generating',
+      'planMeta.exploreStatusUpdatedAt': new Date().toISOString(),
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'Already finding great stops for this trip — hang tight.',
+    })
+  })
+
   it('clears planMeta.exploreStatus back to idle even after a failure', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidExploreGenFail')

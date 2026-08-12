@@ -17,6 +17,7 @@ import {
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
+  describeExploreHighlightsError,
   generateExploreHighlights,
   setCandidatePriority,
   sortCandidatesForList,
@@ -217,7 +218,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       await generateExploreHighlights(tripId)
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
-      setGenError('Could not find stops right now — please try again.')
+      setGenError(describeExploreHighlightsError(error))
     } finally {
       setGenerating(false)
     }
