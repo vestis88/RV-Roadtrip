@@ -54,57 +54,90 @@ export function validatePacing(
 }
 
 /**
- * A drive day covering less than this fraction of the route's own average
- * day is flagged. Half is deliberately generous: a 60%-of-average day is a
- * normal consequence of stops not being evenly spaced, while a day at 20%
- * of average has effectively not moved the trip along at all.
+ * How far above the trip's own average the required pace may drift before
+ * the remainder counts as a slog rather than a busy stretch. 1.4x mirrors
+ * the outline's own per-day ceiling (PACING_RULES rule 3): a trip that has
+ * to sustain, for days on end, what that rule allows as an occasional
+ * maximum is one that spent something earlier it could not afford.
  */
-const SHORT_DAY_FRACTION = 0.5
+const BACKLOG_PACE_FACTOR = 1.4
 
 /**
- * Below this there is no meaningful "average day" to compare against — on a
- * two-drive-day trip every split looks lopsided, and warning about it would
- * be noise on exactly the trips where the traveler can see the whole thing
- * at a glance anyway.
+ * Below this there is no distribution to speak of. On three drive days one
+ * stop legitimately IS a third of the trip, and no ratio can tell "wasteful"
+ * apart from "that is why we came" — the prompt is the only honest lever at
+ * that length.
  */
-const MIN_DRIVE_DAYS_FOR_WARNING = 3
+const MIN_DRIVE_DAYS_FOR_WARNING = 4
 
 /**
- * Non-blocking counterpart to validatePacing, added 2026-08-12 after a
- * 3-day Helsingborg→Berlin trip spent two of its days in Helsingør, 45km
- * from the start, because somewhere interesting sat just past the start
- * point. Nothing in the plan was invalid: every rule the generator is held
- * to is an upper bound (don't drive more than X), so a plan that barely
- * moves passes every one of them.
+ * How many drive days must remain for a raised pace to mean anything. One
+ * long final day is a long final day; validatePacing already bounds it by
+ * the traveler's own maxDriveHoursPerDay, and rule 3 by the target distance.
+ * A slog is a stretch, so this asks for one.
+ */
+const MIN_REMAINING_DRIVE_DAYS = 3
+
+/**
+ * Non-blocking counterpart to validatePacing. Reports the point at which
+ * the trip has fallen furthest behind its own schedule — where what is left
+ * to drive has got ahead of the days left to drive it.
  *
- * The trip-average targets that used to be enforced were removed for good
- * reason (see the comment on MAX_DRIVE_HOURS_TOLERANCE above) — a day that
- * legitimately needs to be unusual shouldn't kill the whole generation. So
- * this returns advice, not a verdict: the plan is written either way, and
- * the traveler decides whether the stop earned the day. The generator is
- * separately told to avoid this (PACING_RULES rule 6 in
- * prompts/planTripPrompt.ts); this catches the times it doesn't listen.
+ * Deliberately NOT a minimum distance per day. The first version of this
+ * flagged any day covering less than half the average, which is the wrong
+ * question and gets more wrong the longer the trip: on a two-month trip
+ * short days and long stays are the point, and there is no distance a day
+ * owes anybody. What actually went wrong on the trip that prompted this —
+ * Helsingborg to Berlin, two of three days spent 45km from the start — was
+ * not that a day was short. It was that the shortness was never paid for
+ * until the end, and then all at once.
  *
- * The trip's final drive day is exempt: it's the arrival at the endpoint,
- * and a short relaxed finish is intended, not a wasted day.
+ * So the measure is the trip's own remaining budget: after each day, how
+ * much distance is left against how many drive days are left, compared to
+ * what the trip needed to average from the outset. That ratio starts at
+ * exactly 1.0 by construction and only climbs when days come in under
+ * average, which makes it a direct read on back-loading and completely
+ * indifferent to how any individual day is spent. A slow first week
+ * balanced by a slow rest of the trip never trips it; a slow first week
+ * followed by a forced march does.
+ *
+ * One warning per trip, at the worst point, rather than one per day: the
+ * shape is a single fact about the trip, and listing every day that
+ * contributed to it would bury it.
+ *
+ * Advice, not a verdict — the plan is written either way. The trip-average
+ * targets that used to be hard-enforced were removed for good reason (see
+ * MAX_DRIVE_HOURS_TOLERANCE above), and the traveler is the one who knows
+ * whether the stop was worth what it cost the end of the trip.
  */
 export function pacingWarnings(days: TripDay[]): string[] {
   const driveDays = days.filter((day) => day.type === 'drive' && day.drive)
   if (driveDays.length < MIN_DRIVE_DAYS_FOR_WARNING) return []
 
-  const totalKm = driveDays.reduce(
-    (sum, day) => sum + (day.drive?.distanceKm ?? 0),
-    0,
-  )
+  const distances = driveDays.map((day) => day.drive?.distanceKm ?? 0)
+  const totalKm = distances.reduce((sum, km) => sum + km, 0)
   if (totalKm <= 0) return []
 
   const targetKm = totalKm / driveDays.length
-  const shortDays = driveDays
-    .slice(0, -1)
-    .filter((day) => (day.drive?.distanceKm ?? 0) < targetKm * SHORT_DAY_FRACTION)
 
-  return shortDays.map(
-    (day) =>
-      `Day ${day.index + 1} (${day.date}) only covers ${Math.round(day.drive?.distanceKm ?? 0)} km, to ${day.overnight.name} — under half the ${Math.round(targetKm)} km this route averages per driving day. Worth checking that the stop is worth a whole day of the trip.`,
-  )
+  let covered = 0
+  let worst: { day: TripDay; requiredKm: number; remainingDays: number } | null =
+    null
+  for (let i = 0; i < driveDays.length; i++) {
+    covered += distances[i]
+    const remainingDays = driveDays.length - 1 - i
+    if (remainingDays < MIN_REMAINING_DRIVE_DAYS) break
+
+    const requiredKm = (totalKm - covered) / remainingDays
+    if (requiredKm > targetKm * BACKLOG_PACE_FACTOR) {
+      if (!worst || requiredKm > worst.requiredKm) {
+        worst = { day: driveDays[i], requiredKm, remainingDays }
+      }
+    }
+  }
+  if (!worst) return []
+
+  return [
+    `By the end of day ${worst.day.index + 1} (${worst.day.date}) this trip still has ${Math.round(worst.requiredKm)} km a day left to drive across its remaining ${worst.remainingDays} driving days — well above the ${Math.round(targetKm)} km a day it needs on average. The early stops are worth what they cost only if you're happy with that finish; otherwise this is the point to drop one or add a day.`,
+  ]
 }

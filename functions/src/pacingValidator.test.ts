@@ -157,78 +157,102 @@ function driveDay(index: number, toName: string, distanceKm: number): TripDay {
   })
 }
 
+/** `count` drive days of `distanceKm` each, numbered from `from`. */
+function evenDays(from: number, count: number, distanceKm: number): TripDay[] {
+  return Array.from({ length: count }, (_, i) =>
+    driveDay(from + i, `Stop ${from + i}`, distanceKm),
+  )
+}
+
 describe('pacingWarnings', () => {
-  // The trip that prompted this: Helsingborg to Berlin, and two of its days
-  // went to Helsingør — 45km away, across the sound — because something
-  // interesting sat just past the start point. Nothing about it was invalid.
-  it('flags a day that barely moves the trip along', () => {
+  // The trip that prompted this: Helsingborg to Berlin, with the start of the
+  // trip spent near the start of the trip and the distance never made up
+  // until the end. The complaint was never that a day was short — it was
+  // that the shortness was paid for all at once, at the finish.
+  it('flags a trip that spends its start and then has to make it up', () => {
     const warnings = pacingWarnings([
-      driveDay(0, 'Helsingor', 45),
-      driveDay(1, 'Rostock', 250),
-      driveDay(2, 'Waren', 250),
-      driveDay(3, 'Berlin', 250),
+      driveDay(0, 'Helsingor', 30),
+      driveDay(1, 'Koge', 40),
+      driveDay(2, 'Rostock', 320),
+      driveDay(3, 'Waren', 320),
+      driveDay(4, 'Berlin', 320),
     ])
 
     expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('Day 1')
-    expect(warnings[0]).toContain('45 km')
-    expect(warnings[0]).toContain('Helsingor')
+    // Day 2 is where the required pace peaks — after day 1 the trip could
+    // still have absorbed it.
+    expect(warnings[0]).toContain('day 2')
+    expect(warnings[0]).toContain('km a day left to drive')
   })
 
-  it('says nothing about a route whose days are all roughly even', () => {
+  // The whole point of the rework. A two-month trip is mostly short days and
+  // long stays, and none of them owe anybody a distance.
+  it('says nothing about a long trip full of short days, as long as they stay balanced', () => {
+    expect(pacingWarnings(evenDays(0, 40, 60))).toEqual([])
+  })
+
+  // A day at a fifth of the average used to be flagged on its own. It is
+  // only a problem if the trip never recovers from it.
+  it('accepts a near-zero day that the rest of the trip absorbs', () => {
+    const warnings = pacingWarnings([
+      driveDay(0, 'Just up the road', 15),
+      ...evenDays(1, 9, 205),
+    ])
+
+    expect(warnings).toEqual([])
+  })
+
+  it('accepts several short days in a row when the trip can still afford them', () => {
+    const warnings = pacingWarnings([
+      driveDay(0, 'A', 40),
+      driveDay(1, 'B', 40),
+      driveDay(2, 'C', 40),
+      ...evenDays(3, 20, 212),
+    ])
+
+    expect(warnings).toEqual([])
+  })
+
+  // One long final day is a long final day, not a slog — validatePacing
+  // already bounds it by the traveler's own stated maximum.
+  it('does not call a single long finish a backlog', () => {
     expect(
-      pacingWarnings([
-        driveDay(0, 'A', 180),
-        driveDay(1, 'B', 220),
-        driveDay(2, 'C', 200),
-        driveDay(3, 'D', 210),
-      ]),
+      pacingWarnings([...evenDays(0, 6, 200), driveDay(6, 'Home', 600)]),
     ).toEqual([])
   })
 
-  // A short last day is the relaxed finish the generator is asked for, not a
-  // wasted one — the trip has arrived.
-  it('leaves the final arrival day alone', () => {
+  // On three drive days one stop legitimately is a third of the trip.
+  it('stays quiet on a trip too short to have a distribution', () => {
     expect(
       pacingWarnings([
-        driveDay(0, 'A', 250),
-        driveDay(1, 'B', 250),
-        driveDay(2, 'Home', 20),
+        driveDay(0, 'A', 20),
+        driveDay(1, 'B', 400),
+        driveDay(2, 'C', 400),
       ]),
     ).toEqual([])
-  })
-
-  // On two drive days every split looks lopsided, and the traveler can see
-  // the whole trip at a glance anyway.
-  it('stays quiet on a trip too short to have an average worth comparing to', () => {
-    expect(pacingWarnings([driveDay(0, 'A', 20), driveDay(1, 'B', 400)])).toEqual(
-      [],
-    )
   })
 
   // Rest days are supposed to stay put — counting them as zero-distance days
   // would drag the average down and make every real day look excessive.
   it('ignores rest days entirely', () => {
-    const warnings = pacingWarnings([
-      driveDay(0, 'A', 200),
-      day({ index: 1, type: 'rest', overnight: { name: 'A', lat: 0, lng: 0, country: 'SE' } }),
-      driveDay(2, 'B', 200),
-      driveDay(3, 'C', 200),
-      driveDay(4, 'D', 200),
-    ])
-    expect(warnings).toEqual([])
+    const days = [
+      ...evenDays(0, 3, 200),
+      day({ index: 3, type: 'rest', overnight: { name: 'A', lat: 0, lng: 0, country: 'SE' } }),
+      ...evenDays(4, 3, 200),
+    ]
+    expect(pacingWarnings(days)).toEqual([])
   })
 
-  it('flags every offending day, not just the first', () => {
+  it('reports the worst point once, not every day that contributed to it', () => {
     const warnings = pacingWarnings([
       driveDay(0, 'A', 20),
-      driveDay(1, 'B', 300),
-      driveDay(2, 'C', 25),
-      driveDay(3, 'D', 300),
-      driveDay(4, 'E', 300),
+      driveDay(1, 'B', 20),
+      driveDay(2, 'C', 20),
+      ...evenDays(3, 5, 340),
     ])
-    expect(warnings).toHaveLength(2)
-    expect(warnings[0]).toContain('Day 1')
-    expect(warnings[1]).toContain('Day 3')
+
+    expect(warnings).toHaveLength(1)
+    // Day 3 is where the remaining pace peaks, not day 1 where it first rose.
+    expect(warnings[0]).toContain('day 3')
   })
 })
