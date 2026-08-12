@@ -13,6 +13,7 @@ import {
   type Trip,
   type TripDay,
 } from '@rv/shared'
+import { applyOvernightOptions } from './overnightOptions.js'
 import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { isPlanLockStale, planAliveFields } from './planLock.js'
@@ -377,6 +378,14 @@ export async function runFullGeneration(
   const warnings = pacingWarnings(days.map((d) => d.day))
 
   await writeGeneratedDays(tripRef, days)
+  // Where each night is actually spent, resolved for the whole trip at once
+  // now that every day's town is known. Best-effort by design: it moves pins
+  // and fills the picker, and a plan with every day still sitting on its town
+  // centre is worse than one with them but far better than no plan at all.
+  // Re-runnable on its own afterwards — see applyOvernightOptions.
+  await applyOvernightOptions(tripRef).catch((error: unknown) => {
+    console.warn('Overnight options pass failed; days keep their town points', error)
+  })
   // Only now that the replacement is fully committed is the checkpoint
   // (skeleton + staged days) no longer needed for a future retry.
   await clearCheckpoint(tripRef)

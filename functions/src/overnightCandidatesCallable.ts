@@ -5,7 +5,7 @@ import type { CountryGuideSection, OvernightStopCandidate, TripDay } from '@rv/s
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { COUNTRY_GUIDE_SECTIONS_COLLECTION } from './countrySectionsCallable.js'
-import { googlePlacesApiKey, searchCampsiteCandidates } from './placesApi.js'
+import { findNearbyCampsites, googlePlacesApiKey } from './placesApi.js'
 import { searchStellplatzCandidates } from './overpassApi.js'
 import {
   claudeApiKey,
@@ -147,7 +147,7 @@ export async function fetchOvernightCandidates(
 
   const [campsites, stellplatzFromOsm, wild] = await Promise.all([
     withDeadline(
-      searchCampsiteCandidates(near, country, CAMPSITE_CANDIDATE_COUNT),
+      findNearbyCampsites(near, country, CAMPSITE_CANDIDATE_COUNT),
       'campsite search (Places)',
       SOURCE_TIMEOUT_MS,
     ),

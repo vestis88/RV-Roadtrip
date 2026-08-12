@@ -190,6 +190,14 @@ export const tripDaySchema = z.object({
   date: isoDate,
   type: z.enum(['drive', 'rest']),
   overnight: overnightStopSchema,
+  // Where the day's TOWN is, as opposed to where the day sleeps. The two
+  // separated once the overnight moved off the town centre and onto an
+  // actual campsite/stellplatz, which can be up to 20km outside it. Kept so
+  // re-resolving overnight options searches around the town again instead of
+  // around the last site it picked — otherwise each re-run would drift a
+  // little further out. Absent on days written before this existed, where
+  // the overnight IS the town point.
+  townAnchor: latLngSchema.optional(),
   drive: driveLegSchema.optional(),
   summary: z.string(),
   extraTimeReason: z.string().optional(),

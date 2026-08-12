@@ -11,7 +11,6 @@ import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
 import {
   enrichActivities,
   enrichRestaurantsForMeal,
-  findNearestCampsite,
   geocodeQuery,
 } from './placesApi.js'
 
@@ -70,35 +69,20 @@ export async function resolveSkeletonDay(
     }
     // `point` is the town, and a text search for a town answers with the
     // town: "Berlin, Berlin, DE" resolves to 52.52,13.405, an intersection
-    // in Mitte. That was the plan's overnight stop, and the Day View's
-    // "Navigate" link pointed straight at it. Pull it to the nearest real
-    // campsite instead — see findNearestCampsite. A traveler-pinned stop
-    // (knownOvernight) is left exactly where they put it; so is a town with
-    // no campsite anywhere near it, which is no worse than before.
+    // in Mitte. Moving the overnight off that centroid and onto somewhere an
+    // RV can actually sleep is applyOvernightOptions' job, in a single pass
+    // once every day's location is known — the corridor-wide OSM query it
+    // depends on wants all of them at once, and this resolver only ever sees
+    // one day at a time. Until it runs, the overnight is the town.
     townPoint = { lat: point.lat, lng: point.lng }
-    const campsite = knownOvernight
-      ? null
-      : await findNearestCampsite(point).catch((error: unknown) => {
-          // Best-effort by design: a Places hiccup should cost the plan a
-          // better pin, not the whole generation.
-          console.warn(
-            `Could not resolve a campsite near "${skDay.overnight.town}"`,
-            error,
-          )
-          return null
-        })
     overnight = {
       name: skDay.overnight.name,
-      lat: campsite?.lat ?? point.lat,
-      lng: campsite?.lng ?? point.lng,
+      lat: point.lat,
+      lng: point.lng,
       country: knownOvernight?.country ?? skDay.overnight.country,
-      // The resolved campsite's real name beats Claude's suggestion, which
-      // is unverified prose it was told not to look up.
-      ...(campsite
-        ? { campsiteSuggestion: campsite.name }
-        : skDay.overnight.campsiteSuggestion
-          ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
-          : {}),
+      ...(skDay.overnight.campsiteSuggestion
+        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
+        : {}),
     }
     const leg = await computeRouteLeg(currentLocation, point)
     drive = {
@@ -166,6 +150,7 @@ export async function resolveSkeletonDay(
         date: skDay.date,
         type: skDay.type,
         overnight,
+        townAnchor: townPoint,
         drive,
         summary: skDay.summary,
         ...(skDay.extraTimeReason

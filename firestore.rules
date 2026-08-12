@@ -43,6 +43,10 @@ service cloud.firestore {
         match /restaurants/{placeId} {
           allow read, write: if hasAccess() && isMember(tripId);
         }
+
+        match /overnightOptions/{optionId} {
+          allow read, write: if hasAccess() && isMember(tripId);
+        }
       }
 
       match /corridorStops/{stopId} {

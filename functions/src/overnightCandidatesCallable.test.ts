@@ -17,13 +17,13 @@ beforeAll(() => {
 // orchestration itself (near/country passed through, stellplatz's
 // OSM-then-Claude fallback) is verified deterministically against the real
 // Firestore emulator, without needing real Places/Claude/Overpass access.
-const searchCampsiteCandidatesMock = vi.fn()
+const findNearbyCampsitesMock = vi.fn()
 vi.mock('./placesApi.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./placesApi.js')>()
   return {
     ...actual,
-    searchCampsiteCandidates: (...args: unknown[]) =>
-      searchCampsiteCandidatesMock(...args),
+    findNearbyCampsites: (...args: unknown[]) =>
+      findNearbyCampsitesMock(...args),
   }
 })
 
@@ -78,7 +78,7 @@ describe('fetchOvernightCandidates', () => {
     const { tripId } = await createTripForUser('uidOvernightA')
     await seedDay(tripId, '2026-08-01')
 
-    searchCampsiteCandidatesMock
+    findNearbyCampsitesMock
       .mockReset()
       .mockResolvedValue([fixtureCandidate('Campsite A', 'campsite')])
     searchStellplatzCandidatesMock
@@ -93,7 +93,7 @@ describe('fetchOvernightCandidates', () => {
     )
     const candidates = await fetchOvernightCandidates(tripId, '2026-08-01')
 
-    expect(searchCampsiteCandidatesMock).toHaveBeenCalledWith(
+    expect(findNearbyCampsitesMock).toHaveBeenCalledWith(
       { lat: 61.1, lng: 10.5 },
       'NO',
       expect.any(Number),
@@ -119,7 +119,7 @@ describe('fetchOvernightCandidates', () => {
     const { tripId } = await createTripForUser('uidOvernightB')
     await seedDay(tripId, '2026-08-01')
 
-    searchCampsiteCandidatesMock.mockReset().mockResolvedValue([])
+    findNearbyCampsitesMock.mockReset().mockResolvedValue([])
     searchStellplatzCandidatesMock.mockReset().mockResolvedValue([]) // no OSM coverage
     generateClaudeOvernightCandidatesMock
       .mockReset()
@@ -144,7 +144,7 @@ describe('fetchOvernightCandidates', () => {
     const { tripId } = await createTripForUser('uidOvernightC')
     await seedDay(tripId, '2026-08-01')
 
-    searchCampsiteCandidatesMock.mockReset().mockResolvedValue([])
+    findNearbyCampsitesMock.mockReset().mockResolvedValue([])
     searchStellplatzCandidatesMock
       .mockReset()
       .mockResolvedValue([fixtureCandidate('OSM stellplatz', 'stellplatz')])
@@ -169,7 +169,7 @@ describe('fetchOvernightCandidates', () => {
     const { tripId } = await createTripForUser('uidOvernightE')
     await seedDay(tripId, '2026-08-01')
 
-    searchCampsiteCandidatesMock
+    findNearbyCampsitesMock
       .mockReset()
       .mockResolvedValue([fixtureCandidate('Campsite A', 'campsite')])
     // Overpass has no SLA and can genuinely time out or 5xx in production —
@@ -211,7 +211,7 @@ describe('getOvernightCandidates callable', () => {
   it('rejects a signed-in caller who is not a member of the trip', async () => {
     const { tripId } = await createTripForUser('uidOvernightCallableOwner')
     await seedDay(tripId, '2026-08-01')
-    searchCampsiteCandidatesMock.mockReset()
+    findNearbyCampsitesMock.mockReset()
     const { getOvernightCandidates } = await import('./overnightCandidatesCallable.js')
     await expect(
       getOvernightCandidates.run({
@@ -219,6 +219,6 @@ describe('getOvernightCandidates callable', () => {
         auth: { uid: 'uidOvernightCallableStranger', token: { access: true } },
       } as never),
     ).rejects.toThrow('Not a member of this trip')
-    expect(searchCampsiteCandidatesMock).not.toHaveBeenCalled()
+    expect(findNearbyCampsitesMock).not.toHaveBeenCalled()
   })
 })

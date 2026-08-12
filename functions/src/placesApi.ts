@@ -803,9 +803,11 @@ const OVERNIGHT_CAMPSITE_MAX_KM = 20
  * a site with four reviews is still somewhere to sleep, and the alternative
  * this is rescuing the plan from is a road junction.
  */
-export async function findNearestCampsite(
+export async function findNearbyCampsites(
   near: LatLng,
-): Promise<{ name: string; lat: number; lng: number } | null> {
+  country: string,
+  limit: number,
+): Promise<OvernightStopCandidate[]> {
   const apiKey = googlePlacesApiKey.value()
   if (!apiKey) {
     throw new Error(
@@ -818,7 +820,13 @@ export async function findNearestCampsite(
     found.push(...(await nearbySearch(placeType, near, apiKey)))
   }
 
+  const seen = new Set<string>()
   const byDistance = found
+    .filter((candidate) => {
+      if (seen.has(candidate.id)) return false
+      seen.add(candidate.id)
+      return true
+    })
     .map((candidate) => ({
       candidate,
       km: haversineDistanceKm(near, {
@@ -827,60 +835,26 @@ export async function findNearestCampsite(
       }),
     }))
     .filter((entry) => entry.km <= OVERNIGHT_CAMPSITE_MAX_KM)
-    .sort((a, b) => a.km - b.km)
-
-  const best =
-    byDistance.find((entry) => meetsQualityBar(entry.candidate)) ??
-    byDistance[0]
-  if (!best) return null
-  return {
-    name: best.candidate.name,
-    lat: best.candidate.lat,
-    lng: best.candidate.lng,
-  }
-}
-
-/**
- * Overnight-stop candidates, commercial-campsite type (implemented
- * 2026-07-27): unlike activities/restaurants, `rv_park` and `campground`
- * are both valid Places (New) includedTypes — rv_park specifically excludes
- * tent-only sites, the right match for an RV, so it's searched first and
- * campground fills in the rest. Same quality bar as activities/restaurants.
- */
-export async function searchCampsiteCandidates(
-  near: LatLng,
-  country: string,
-  limit: number,
-): Promise<OvernightStopCandidate[]> {
-  const apiKey = googlePlacesApiKey.value()
-  if (!apiKey) {
-    throw new Error(
-      'GOOGLE_PLACES_API_KEY is not configured — campsite lookup requires real data and has no synthetic fallback.',
+    // Quality first, then distance: unlike stellplatz and free parking,
+    // commercial campsites carry ratings, and a well-reviewed site 15km out
+    // beats an unrated one at 4km for somewhere you are paying to sleep.
+    .sort(
+      (a, b) =>
+        Number(meetsQualityBar(b.candidate)) -
+          Number(meetsQualityBar(a.candidate)) || a.km - b.km,
     )
-  }
 
-  const seenIds = new Set<string>()
-  const candidates: OvernightStopCandidate[] = []
-  for (const placeType of ['rv_park', 'campground']) {
-    if (candidates.length >= limit) break
-    const results = await nearbySearch(placeType, near, apiKey)
-    for (const result of results) {
-      if (candidates.length >= limit) break
-      if (seenIds.has(result.id) || !meetsQualityBar(result)) continue
-      seenIds.add(result.id)
-      candidates.push({
-        name: result.name,
-        type: 'campsite',
-        lat: result.lat,
-        lng: result.lng,
-        country,
-        description: result.rating
-          ? `Rated ${result.rating.toFixed(1)} (${result.ratingCount ?? 0} reviews) on Google.`
-          : 'Commercial campsite.',
-        source: 'places',
-        ...(result.googleMapsUrl ? { googleMapsUrl: result.googleMapsUrl } : {}),
-      })
-    }
-  }
-  return candidates
+  return byDistance.slice(0, limit).map(({ candidate }) => ({
+    name: candidate.name,
+    type: 'campsite' as const,
+    lat: candidate.lat,
+    lng: candidate.lng,
+    country,
+    description: candidate.rating
+      ? `Rated ${candidate.rating.toFixed(1)} (${candidate.ratingCount ?? 0} reviews) on Google.`
+      : 'Commercial campsite.',
+    source: 'places' as const,
+    ...(candidate.googleMapsUrl ? { googleMapsUrl: candidate.googleMapsUrl } : {}),
+  }))
 }
+

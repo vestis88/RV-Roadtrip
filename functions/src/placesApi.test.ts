@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   enrichActivities,
   enrichRestaurantsForMeal,
-  findNearestCampsite,
-  searchCampsiteCandidates,
+  findNearbyCampsites,
   type ProposedActivity,
   type ProposedRestaurant,
 } from './placesApi.js'
@@ -220,7 +219,7 @@ describe('enrichRestaurantsForMeal', () => {
   })
 })
 
-describe('searchCampsiteCandidates', () => {
+describe('findNearbyCampsites', () => {
   beforeEach(() => {
     placeCounter = 0
     vi.stubEnv('GOOGLE_PLACES_API_KEY', 'test-key')
@@ -243,7 +242,7 @@ describe('searchCampsiteCandidates', () => {
       ) // campground: shared + 2 more
     vi.stubGlobal('fetch', fetchMock)
 
-    const candidates = await searchCampsiteCandidates(NEAR, 'NO', 3)
+    const candidates = await findNearbyCampsites(NEAR, 'NO', 3)
 
     expect(candidates).toHaveLength(3)
     expect(new Set(candidates.map((c) => c.name)).size).toBe(3) // no duplicate
@@ -261,29 +260,37 @@ describe('searchCampsiteCandidates', () => {
     })
   })
 
-  it('drops results below the quality bar', async () => {
+  // Ranks by quality rather than filtering on it. This is a deliberate change
+  // from the lookup that fed only the on-demand picker: these results are now
+  // the standing options for a night, and a two-star campsite is still a real
+  // place to sleep — offering it below the good one beats offering nothing at
+  // all for a stretch of road that has nothing else.
+  it('puts a below-par campsite last rather than dropping it', async () => {
+    const poor = goodPlace({ rating: 3.0, userRatingCount: 10 })
+    const good = goodPlace()
     const fetchMock = vi
       .fn()
-      .mockImplementationOnce(() =>
-        jsonResponse({ places: [goodPlace({ rating: 3.0, userRatingCount: 10 })] }),
-      )
-      .mockImplementationOnce(() => jsonResponse({ places: [goodPlace()] }))
+      .mockImplementationOnce(() => jsonResponse({ places: [poor] }))
+      .mockImplementationOnce(() => jsonResponse({ places: [good] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const candidates = await searchCampsiteCandidates(NEAR, 'NO', 3)
+    const candidates = await findNearbyCampsites(NEAR, 'NO', 3)
 
-    expect(candidates).toHaveLength(1)
+    expect(candidates.map((c) => c.name)).toEqual([
+      good.displayName.text,
+      poor.displayName.text,
+    ])
   })
 
   it('throws when the Places API key is not configured', async () => {
     vi.unstubAllEnvs()
-    await expect(searchCampsiteCandidates(NEAR, 'NO', 3)).rejects.toThrow(
+    await expect(findNearbyCampsites(NEAR, 'NO', 3)).rejects.toThrow(
       /GOOGLE_PLACES_API_KEY/,
     )
   })
 })
 
-describe('findNearestCampsite', () => {
+describe('findNearbyCampsites — ordering', () => {
   // ~0.09 degrees of latitude is roughly 10km; 0.45 is roughly 50km, past
   // OVERNIGHT_CAMPSITE_MAX_KM.
   const at = (dLat: number, overrides: Record<string, unknown> = {}) =>
@@ -312,7 +319,7 @@ describe('findNearestCampsite', () => {
         .mockImplementationOnce(() => jsonResponse({ places: [near] })),
     )
 
-    const found = await findNearestCampsite(NEAR)
+    const found = (await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null
 
     expect(found?.name).toBe(near.displayName.text)
   })
@@ -328,7 +335,7 @@ describe('findNearestCampsite', () => {
         .mockImplementationOnce(() => jsonResponse({ places: [] })),
     )
 
-    expect(await findNearestCampsite(NEAR)).toBeNull()
+    expect((await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null).toBeNull()
   })
 
   // A campsite with four reviews is still somewhere to sleep, and what this
@@ -343,7 +350,7 @@ describe('findNearestCampsite', () => {
         .mockImplementationOnce(() => jsonResponse({ places: [] })),
     )
 
-    expect((await findNearestCampsite(NEAR))?.name).toBe(
+    expect(((await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null)?.name).toBe(
       unrated.displayName.text,
     )
   })
@@ -362,7 +369,7 @@ describe('findNearestCampsite', () => {
         .mockImplementationOnce(() => jsonResponse({ places: [rated] })),
     )
 
-    expect((await findNearestCampsite(NEAR))?.name).toBe(rated.displayName.text)
+    expect(((await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null)?.name).toBe(rated.displayName.text)
   })
 
   it('returns null when there is nothing nearby at all', async () => {
@@ -371,6 +378,6 @@ describe('findNearestCampsite', () => {
       vi.fn().mockImplementation(() => jsonResponse({ places: [] })),
     )
 
-    expect(await findNearestCampsite(NEAR)).toBeNull()
+    expect((await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null).toBeNull()
   })
 })

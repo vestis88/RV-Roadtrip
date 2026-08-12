@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { collection, getDocs } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { OvernightStopCandidate, Trip, TripDay } from '@rv/shared'
-import { functions } from '../lib/firebase'
+import { db, functions } from '../lib/firebase'
 import { googleMapsSearchUrl } from '../lib/mapLinks'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
@@ -75,12 +76,30 @@ export function OvernightCandidatesPicker({
     })
   }
 
+  /**
+   * Options are resolved for every day when the plan is generated and stored
+   * alongside it, the same way activities and restaurants are — so the
+   * common case is a Firestore read of something already there, not a
+   * multi-source lookup across Places, Overpass and Claude while someone
+   * watches a spinner. That lookup is what used to sit here, and what used
+   * to time out.
+   */
   async function loadCandidates() {
     setOpen(true)
     if (candidates || loading) return
     setLoading(true)
     setError(null)
     try {
+      const stored = await getDocs(
+        collection(db, 'trips', tripId, 'days', dayId, 'overnightOptions'),
+      )
+      if (!stored.empty) {
+        setCandidates(stored.docs.map((doc) => doc.data() as OvernightStopCandidate))
+        return
+      }
+      // Nothing stored: a trip generated before options were resolved up
+      // front, or a day added since. Fall back to resolving this one day
+      // live — the same call this used to make every time.
       const call = httpsCallable<
         { tripId: string; dayId: string },
         { candidates: OvernightStopCandidate[] }
@@ -88,7 +107,7 @@ export function OvernightCandidatesPicker({
       const result = await call({ tripId, dayId })
       setCandidates(result.data.candidates)
     } catch (err) {
-      console.error('getOvernightCandidates failed', err)
+      console.error('Loading overnight options failed', err)
       setError('Could not load overnight options right now.')
     } finally {
       setLoading(false)
