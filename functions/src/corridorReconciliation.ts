@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import {
+  FieldValue,
   getFirestore,
   type DocumentReference,
   type QueryDocumentSnapshot,
@@ -13,7 +14,7 @@ import {
   type Trip,
   type TripDay,
 } from '@rv/shared'
-import { validatePacing } from './pacingValidator.js'
+import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { computeRouteLeg } from './routesApi.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { resolveSkeletonDay } from './planPipeline.js'
@@ -63,6 +64,7 @@ export interface ReconcileCorridorResult {
   addedDays: { overnightName: string; date: string }[]
   totalKm: number
   avgDriveMinutesPerDay: number
+  pacingWarnings: string[]
   endDateChange?: { from: string; to: string }
 }
 
@@ -411,6 +413,10 @@ export async function computeCorridorReconciliation(
     addedDays,
     totalKm,
     avgDriveMinutesPerDay,
+    // Advisory, not a gate — see pacingWarnings(). Reordering or dropping a
+    // stop is exactly the kind of edit that can leave a day with nowhere to
+    // go, so it's recomputed here rather than left over from generation.
+    pacingWarnings: pacingWarnings(finalDays),
     ...(endDateChange ? { endDateChange } : {}),
   }
 }
@@ -447,6 +453,10 @@ export async function runReconcileCorridor(
     'planMeta.status': 'ready',
     'planMeta.totalKm': result.totalKm,
     'planMeta.avgDriveMinutesPerDay': result.avgDriveMinutesPerDay,
+    'planMeta.pacingWarnings':
+      result.pacingWarnings.length > 0
+        ? result.pacingWarnings
+        : FieldValue.delete(),
   })
 
   return result

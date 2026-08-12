@@ -117,3 +117,29 @@ test('map tab shows the plan error and no header stats when generation failed', 
   )
   await expect(page.getByTestId('map-header')).toHaveCount(0)
 })
+
+test('map tab flags days that barely move the trip along, and lets them be dismissed', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.pacingWarnings': [
+        'Day 1 (2026-07-10) only covers 45 km, to Helsingor — under half the 199 km this route averages per driving day. Worth checking that the stop is worth a whole day of the trip.',
+      ],
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('pacing-warning-banner').waitFor()
+
+  await expect(page.getByTestId('pacing-warning-banner')).toContainText(
+    'only covers 45 km',
+  )
+  // Advice, not an error — the plan itself is still fully usable behind it.
+  await expect(page.getByTestId('map-header')).toBeVisible()
+
+  await page.getByTestId('dismiss-pacing-warning').click()
+  await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
+})

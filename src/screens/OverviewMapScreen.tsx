@@ -123,6 +123,21 @@ export function OverviewMapScreen() {
   // mid-generation, failed) gets a status banner instead further down.
   const hasPlan = planStatus === 'ready' || planStatus === 'stale'
 
+  // Advice about days that barely move the trip along (see the backend's
+  // pacingWarnings()). Dismissal is keyed on the warnings themselves rather
+  // than a boolean: the plan is still perfectly usable with them, so this
+  // must not nag forever — but a regeneration that produces a *different*
+  // set has something new to say and gets to say it.
+  const pacingWarnings = trip.planMeta.pacingWarnings ?? []
+  const pacingWarningKey = pacingWarnings.join('\n')
+  const [dismissedPacingKey, setDismissedPacingKey] = useState<string | null>(
+    null,
+  )
+  const showPacingWarnings =
+    hasPlan &&
+    pacingWarnings.length > 0 &&
+    pacingWarningKey !== dismissedPacingKey
+
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
       const next = new Set(prev)
@@ -264,6 +279,27 @@ export function OverviewMapScreen() {
         >
           {trip.planMeta.error ?? 'Something went wrong generating this plan.'}
         </p>
+      )}
+
+      {showPacingWarnings && (
+        <div
+          data-testid="pacing-warning-banner"
+          className="border-b border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          <ul className="list-disc space-y-1 pl-5">
+            {pacingWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            data-testid="dismiss-pacing-warning"
+            className="btn btn-ghost mt-2 text-xs"
+            onClick={() => setDismissedPacingKey(pacingWarningKey)}
+          >
+            Got it
+          </button>
+        </div>
       )}
 
       {!online && (

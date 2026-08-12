@@ -13,7 +13,7 @@ import {
   type Trip,
   type TripDay,
 } from '@rv/shared'
-import { validatePacing } from './pacingValidator.js'
+import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { isPlanLockStale, planAliveFields } from './planLock.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
@@ -373,6 +373,8 @@ export async function runFullGeneration(
   if (violation) {
     throw new Error(`Pacing validation failed: ${violation.reason}`)
   }
+  // Advisory, not a gate — see pacingWarnings().
+  const warnings = pacingWarnings(days.map((d) => d.day))
 
   await writeGeneratedDays(tripRef, days)
   // Only now that the replacement is fully committed is the checkpoint
@@ -394,6 +396,8 @@ export async function runFullGeneration(
     'planMeta.totalKm': totalKm,
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
     'planMeta.generatedAt': new Date().toISOString(),
+    'planMeta.pacingWarnings':
+      warnings.length > 0 ? warnings : FieldValue.delete(),
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': FieldValue.delete(),
     'planMeta.progressTotal': FieldValue.delete(),

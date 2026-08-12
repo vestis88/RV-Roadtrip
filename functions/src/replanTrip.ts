@@ -10,7 +10,7 @@ import {
   type TripDay,
   type TripSettings,
 } from '@rv/shared'
-import { validatePacing } from './pacingValidator.js'
+import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
 import { planTrip } from './prompts/planTrip.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
@@ -187,6 +187,11 @@ export async function runReplan(
   if (violation) {
     throw new Error(`Pacing validation failed: ${violation.reason}`)
   }
+  // Scoped to the remainder for the same reason the check above is: past
+  // days are historical fact, and telling a traveler mid-trip that a day
+  // they already drove was wasted is noise. The remainder's own average is
+  // also the right yardstick here — it's the ground left over the days left.
+  const warnings = pacingWarnings(remainderDays)
 
   // Only now — once the replacement is known-good — touch existing docs.
   const futureIds = new Set(futureDocs.map((doc) => doc.id))
@@ -262,6 +267,8 @@ export async function runReplan(
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
     'planMeta.generatedAt': now,
     'planMeta.lastReplanAt': now,
+    'planMeta.pacingWarnings':
+      warnings.length > 0 ? warnings : FieldValue.delete(),
     'planMeta.progressLabel': FieldValue.delete(),
     'planMeta.progressCurrent': FieldValue.delete(),
     'planMeta.progressTotal': FieldValue.delete(),

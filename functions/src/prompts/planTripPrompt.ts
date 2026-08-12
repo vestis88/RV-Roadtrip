@@ -6,7 +6,8 @@ const PACING_RULES = `Pacing rules (follow exactly):
 2. Target daily drive distance = total route distance / drive days.
 3. No day may exceed 1.4x the target distance.
 4. The final 2 days of the trip must each be at most 1.0x the target distance (a relaxed finish).
-5. Rest days must be placed in high-interest locations, never transit towns, roughly one per restDayFrequency days (0 means no rest days).`
+5. Rest days must be placed in high-interest locations, never transit towns, roughly one per restDayFrequency days (0 means no rest days).
+6. Make real progress on every drive day. A drive day covering less than half the target distance spends a day of a finite trip without getting anywhere — do it only when that day's own highlightReason genuinely justifies the stop, and never on two consecutive days. This applies with full force to the first days: starting with a near-zero hop because somewhere interesting sits just past the start point is the most common way a short trip loses a third of itself before it has begun.`
 
 const HIGHLIGHTS_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families. Your ONLY job right now is curation, not scheduling: figure out what's genuinely worth seeing along this trip, before anyone worries about dates or drive times.
 
