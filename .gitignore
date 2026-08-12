@@ -30,3 +30,9 @@ blob-report/
 *.njsproj
 *.sln
 *.sw?
+
+# Scratch git worktrees created for isolated subagent runs. These are whole
+# checkouts of this same repository, so committing them would nest the repo
+# inside itself; they are created and reclaimed per run and carry nothing
+# worth keeping.
+.claude/worktrees/
