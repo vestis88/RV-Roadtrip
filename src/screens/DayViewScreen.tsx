@@ -469,6 +469,15 @@ export function DayViewScreen() {
         <p className="mx-4 mt-4 flex flex-wrap items-center gap-1.5 text-sm text-neutral-700 dark:text-neutral-200">
           <span>
             Overnight: <span className="font-medium">{day.overnight.name}</span>
+            {/* The pin and the Navigate link below point at this campsite,
+                not at the town — so say which one, or the link looks like
+                it is sending you to the wrong place. */}
+            {day.overnight.campsiteSuggestion && (
+              <span data-testid="overnight-campsite">
+                {' — '}
+                {day.overnight.campsiteSuggestion}
+              </span>
+            )}
           </span>
           <a
             data-testid="overnight-navigate"

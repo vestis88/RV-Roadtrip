@@ -11,6 +11,7 @@ import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
 import {
   enrichActivities,
   enrichRestaurantsForMeal,
+  findNearestCampsite,
   geocodeQuery,
 } from './placesApi.js'
 
@@ -49,6 +50,13 @@ export async function resolveSkeletonDay(
 ): Promise<{ generated: GeneratedDay; nextLocation: NamedPoint }> {
   let overnight: OvernightStop
   let drive: TripDay['drive']
+  // Where the day's *town* is, as distinct from where its bed is. Since the
+  // overnight below moved off the town centre and onto a campsite that can
+  // be up to OVERNIGHT_CAMPSITE_MAX_KM outside it, everything that means
+  // "the place this day is about" — what activities are searched near, what
+  // the next day is planned relative to — has to keep using this rather
+  // than follow the bed out to a field by the motorway.
+  let townPoint = { lat: currentLocation.lat, lng: currentLocation.lng }
 
   if (skDay.type === 'drive') {
     const point = knownOvernight ?? (await geocodeQuery(
@@ -60,14 +68,37 @@ export async function resolveSkeletonDay(
         `Could not geocode overnight stop "${skDay.overnight.name}, ${skDay.overnight.town}"`,
       )
     }
+    // `point` is the town, and a text search for a town answers with the
+    // town: "Berlin, Berlin, DE" resolves to 52.52,13.405, an intersection
+    // in Mitte. That was the plan's overnight stop, and the Day View's
+    // "Navigate" link pointed straight at it. Pull it to the nearest real
+    // campsite instead — see findNearestCampsite. A traveler-pinned stop
+    // (knownOvernight) is left exactly where they put it; so is a town with
+    // no campsite anywhere near it, which is no worse than before.
+    townPoint = { lat: point.lat, lng: point.lng }
+    const campsite = knownOvernight
+      ? null
+      : await findNearestCampsite(point).catch((error: unknown) => {
+          // Best-effort by design: a Places hiccup should cost the plan a
+          // better pin, not the whole generation.
+          console.warn(
+            `Could not resolve a campsite near "${skDay.overnight.town}"`,
+            error,
+          )
+          return null
+        })
     overnight = {
       name: skDay.overnight.name,
-      lat: point.lat,
-      lng: point.lng,
+      lat: campsite?.lat ?? point.lat,
+      lng: campsite?.lng ?? point.lng,
       country: knownOvernight?.country ?? skDay.overnight.country,
-      ...(skDay.overnight.campsiteSuggestion
-        ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
-        : {}),
+      // The resolved campsite's real name beats Claude's suggestion, which
+      // is unverified prose it was told not to look up.
+      ...(campsite
+        ? { campsiteSuggestion: campsite.name }
+        : skDay.overnight.campsiteSuggestion
+          ? { campsiteSuggestion: skDay.overnight.campsiteSuggestion }
+          : {}),
     }
     const leg = await computeRouteLeg(currentLocation, point)
     drive = {
@@ -99,13 +130,12 @@ export async function resolveSkeletonDay(
   // everything else that day is done. Only a 'morning'/'midday' slot means
   // the drive already happened before the day's activities, making the new
   // `overnight` the right anchor. Rest days have no drive at all, and
-  // `overnight` is already set to currentLocation for them above, so the
+  // `townPoint` is already set to currentLocation for them above, so the
   // 'drive'-only guard below is a no-op either way for those.
-  const activityAnchor =
+  const near =
     skDay.type === 'drive' && (skDay.drive?.slot ?? 'evening') !== 'evening'
-      ? overnight
-      : currentLocation
-  const near = { lat: activityAnchor.lat, lng: activityAnchor.lng }
+      ? townPoint
+      : { lat: currentLocation.lat, lng: currentLocation.lng }
   const excludeIds = new Set<string>()
   const [activities, breakfast, lunch, dinner] = await Promise.all([
     enrichActivities(skDay.activities, near),
@@ -148,7 +178,13 @@ export async function resolveSkeletonDay(
       activities,
       restaurants: [...breakfast, ...lunch, ...dinner],
     },
-    nextLocation: { name: overnight.name, lat: overnight.lat, lng: overnight.lng },
+    // The town, not the campsite: this seeds the next day's geocoding bias
+    // and its activity anchor, and both want "the place we are", not the
+    // specific field we slept in. The next drive leg's origin is a few km
+    // off as a result — the same order of approximation it always carried,
+    // and much cheaper than pulling every following day's restaurant search
+    // out towards a motorway junction.
+    nextLocation: { name: overnight.name, ...townPoint },
   }
 }
 

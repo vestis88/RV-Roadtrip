@@ -775,6 +775,72 @@ export async function enrichRestaurantsForMeal(
 }
 
 /**
+ * How far from a town a campsite may be and still count as that town's
+ * overnight stop. nearbySearch's own locationRestriction already caps
+ * results at SEARCH_RADIUS_METERS, so this only tightens it: 30km out is a
+ * different place to spend the evening, not "the edge of town".
+ */
+const OVERNIGHT_CAMPSITE_MAX_KM = 20
+
+/**
+ * The nearest campsite to a town — where an RV would actually spend the
+ * night there.
+ *
+ * Added 2026-08-12. A generated overnight stop was geocoded straight from
+ * "Berlin, Berlin, DE", and a text search for a city answers with the city:
+ * the plan's overnight for that night was 52.52,13.405, which is an
+ * intersection in Mitte. Every downstream use of that point — the Day View
+ * pin, its "Navigate" link, the overview map marker — pointed at a road
+ * junction you cannot park an RV on, let alone sleep at.
+ *
+ * Nearest rather than best-rated: this is the default the traveler gets
+ * before they have opinions, and "just outside the town I picked" is the
+ * property that makes a default defensible. If they want a different one,
+ * "Change overnight" offers the full ranked set (campsites, stellplatz,
+ * wild) from getOvernightCandidates.
+ *
+ * Falls back to the nearest campsite of any quality before returning null:
+ * a site with four reviews is still somewhere to sleep, and the alternative
+ * this is rescuing the plan from is a road junction.
+ */
+export async function findNearestCampsite(
+  near: LatLng,
+): Promise<{ name: string; lat: number; lng: number } | null> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — campsite lookup requires real data and has no synthetic fallback.',
+    )
+  }
+
+  const found: PlaceCandidate[] = []
+  for (const placeType of ['rv_park', 'campground']) {
+    found.push(...(await nearbySearch(placeType, near, apiKey)))
+  }
+
+  const byDistance = found
+    .map((candidate) => ({
+      candidate,
+      km: haversineDistanceKm(near, {
+        lat: candidate.lat,
+        lng: candidate.lng,
+      }),
+    }))
+    .filter((entry) => entry.km <= OVERNIGHT_CAMPSITE_MAX_KM)
+    .sort((a, b) => a.km - b.km)
+
+  const best =
+    byDistance.find((entry) => meetsQualityBar(entry.candidate)) ??
+    byDistance[0]
+  if (!best) return null
+  return {
+    name: best.candidate.name,
+    lat: best.candidate.lat,
+    lng: best.candidate.lng,
+  }
+}
+
+/**
  * Overnight-stop candidates, commercial-campsite type (implemented
  * 2026-07-27): unlike activities/restaurants, `rv_park` and `campground`
  * are both valid Places (New) includedTypes — rv_park specifically excludes

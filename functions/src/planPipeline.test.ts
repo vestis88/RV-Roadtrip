@@ -9,8 +9,10 @@ import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
 const geocodeQueryMock = vi.fn()
 const enrichActivitiesMock = vi.fn()
 const enrichRestaurantsForMealMock = vi.fn()
+const findNearestCampsiteMock = vi.fn()
 vi.mock('./placesApi.js', () => ({
   geocodeQuery: (...args: unknown[]) => geocodeQueryMock(...args),
+  findNearestCampsite: (...args: unknown[]) => findNearestCampsiteMock(...args),
   enrichActivities: (...args: unknown[]) => enrichActivitiesMock(...args),
   enrichRestaurantsForMeal: (...args: unknown[]) =>
     enrichRestaurantsForMealMock(...args),
@@ -74,6 +76,7 @@ describe('resolveSkeletonDay — activity/restaurant geocoding anchor', () => {
       .mockResolvedValue({ distanceKm: 100, durationMin: 90 })
     enrichActivitiesMock.mockReset().mockResolvedValue([])
     enrichRestaurantsForMealMock.mockReset().mockResolvedValue([])
+    findNearestCampsiteMock.mockReset().mockResolvedValue(null)
   })
 
   it('anchors near currentLocation for a drive day defaulting to the evening slot — the day is spent where it started, arriving at the new overnight only after dinner', async () => {
@@ -139,6 +142,96 @@ describe('resolveSkeletonDay — activity/restaurant geocoding anchor', () => {
   })
 })
 
+// The reported bug: a generated overnight in Berlin was 52.52,13.405 — the
+// centroid a text search for a city returns, which on the ground is an
+// intersection in Mitte. That was the pin, and the Day View's "Navigate"
+// link pointed at it.
+describe('resolveSkeletonDay — overnight lands on a campsite, not a town centroid', () => {
+  const CAMPSITE = { name: 'Krossinsee Camping', lat: 55.2, lng: 15.3 }
+
+  beforeEach(() => {
+    geocodeQueryMock.mockReset().mockResolvedValue(NEW_OVERNIGHT_POINT)
+    computeRouteLegMock
+      .mockReset()
+      .mockResolvedValue({ distanceKm: 100, durationMin: 90 })
+    enrichActivitiesMock.mockReset().mockResolvedValue([])
+    enrichRestaurantsForMealMock.mockReset().mockResolvedValue([])
+    findNearestCampsiteMock.mockReset().mockResolvedValue(CAMPSITE)
+  })
+
+  it('puts the overnight at the campsite and names it', async () => {
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    const { generated } = await resolveSkeletonDay(driveDay(), CURRENT_LOCATION)
+
+    expect(generated.day.overnight.lat).toBe(CAMPSITE.lat)
+    expect(generated.day.overnight.lng).toBe(CAMPSITE.lng)
+    expect(generated.day.overnight.campsiteSuggestion).toBe(CAMPSITE.name)
+    // The town still names the stop — "Krossinsee Camping → ..." would make
+    // the route unreadable at a glance.
+    expect(generated.day.overnight.name).toBe('New town')
+  })
+
+  it('keeps the town centroid when there is no campsite anywhere near', async () => {
+    findNearestCampsiteMock.mockResolvedValue(null)
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    const { generated } = await resolveSkeletonDay(driveDay(), CURRENT_LOCATION)
+
+    expect(generated.day.overnight.lat).toBe(NEW_OVERNIGHT_POINT.lat)
+    expect(generated.day.overnight.campsiteSuggestion).toBeUndefined()
+  })
+
+  // A Places hiccup should cost the plan a better pin, not the whole
+  // generation — everything else about the day is already resolved by then.
+  it('falls back to the town centroid when the campsite lookup fails', async () => {
+    findNearestCampsiteMock.mockRejectedValue(new Error('Places 500'))
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    const { generated } = await resolveSkeletonDay(driveDay(), CURRENT_LOCATION)
+
+    expect(generated.day.overnight.lat).toBe(NEW_OVERNIGHT_POINT.lat)
+  })
+
+  // The point the traveler pinned is the point they meant. Re-resolving it
+  // to a nearby campsite would move their own stop out from under them.
+  it('leaves a traveler-pinned overnight exactly where it was placed', async () => {
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    const pinned = { lat: 60.1, lng: 11.2, country: 'NO' }
+    const { generated } = await resolveSkeletonDay(
+      driveDay(),
+      CURRENT_LOCATION,
+      pinned,
+    )
+
+    expect(findNearestCampsiteMock).not.toHaveBeenCalled()
+    expect(generated.day.overnight.lat).toBe(pinned.lat)
+  })
+
+  // The campsite can be up to 20km outside town. Anchoring the next day on
+  // it would drag that day's restaurant search out towards the motorway.
+  it('hands the next day the town, not the campsite', async () => {
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    const { nextLocation } = await resolveSkeletonDay(
+      driveDay(),
+      CURRENT_LOCATION,
+    )
+
+    expect(nextLocation).toEqual({
+      name: 'New town',
+      lat: NEW_OVERNIGHT_POINT.lat,
+      lng: NEW_OVERNIGHT_POINT.lng,
+    })
+  })
+
+  it('anchors a morning-slot day on the town rather than the campsite', async () => {
+    const { resolveSkeletonDay } = await import('./planPipeline.js')
+    await resolveSkeletonDay(driveDay('morning'), CURRENT_LOCATION)
+
+    expect(enrichActivitiesMock).toHaveBeenCalledWith(
+      expect.anything(),
+      NEW_OVERNIGHT_POINT,
+    )
+  })
+})
+
 // Segmented generation (2026-07-31): resolveSkeletonDays' own deadline
 // support — the piece generateRealPlan/generatePlan.ts build the
 // chain-a-continuation-request behavior on top of. Kept as a focused unit
@@ -153,6 +246,7 @@ describe('resolveSkeletonDays — deadline', () => {
       .mockResolvedValue({ distanceKm: 100, durationMin: 90 })
     enrichActivitiesMock.mockReset().mockResolvedValue([])
     enrichRestaurantsForMealMock.mockReset().mockResolvedValue([])
+    findNearestCampsiteMock.mockReset().mockResolvedValue(null)
   })
 
   it('resolves nothing and touches no Places/Routes call when the deadline has already passed', async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   enrichActivities,
   enrichRestaurantsForMeal,
+  findNearestCampsite,
   searchCampsiteCandidates,
   type ProposedActivity,
   type ProposedRestaurant,
@@ -279,5 +280,97 @@ describe('searchCampsiteCandidates', () => {
     await expect(searchCampsiteCandidates(NEAR, 'NO', 3)).rejects.toThrow(
       /GOOGLE_PLACES_API_KEY/,
     )
+  })
+})
+
+describe('findNearestCampsite', () => {
+  // ~0.09 degrees of latitude is roughly 10km; 0.45 is roughly 50km, past
+  // OVERNIGHT_CAMPSITE_MAX_KM.
+  const at = (dLat: number, overrides: Record<string, unknown> = {}) =>
+    goodPlace({
+      location: { latitude: NEAR.lat + dLat, longitude: NEAR.lng },
+      ...overrides,
+    })
+
+  beforeEach(() => {
+    placeCounter = 0
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('returns the closest campsite to the town, not whatever Places ranked first', async () => {
+    const near = at(0.02)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => jsonResponse({ places: [at(0.09)] }))
+        .mockImplementationOnce(() => jsonResponse({ places: [near] })),
+    )
+
+    const found = await findNearestCampsite(NEAR)
+
+    expect(found?.name).toBe(near.displayName.text)
+  })
+
+  // The whole point is to stop the overnight landing somewhere that isn't
+  // the town at all. A site 50km away is a different evening.
+  it('ignores a campsite too far from the town to be its overnight', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => jsonResponse({ places: [at(0.45)] }))
+        .mockImplementationOnce(() => jsonResponse({ places: [] })),
+    )
+
+    expect(await findNearestCampsite(NEAR)).toBeNull()
+  })
+
+  // A campsite with four reviews is still somewhere to sleep, and what this
+  // is rescuing the plan from is a road junction.
+  it('takes an unrated nearby site over nothing at all', async () => {
+    const unrated = at(0.02, { rating: undefined, userRatingCount: undefined })
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() => jsonResponse({ places: [unrated] }))
+        .mockImplementationOnce(() => jsonResponse({ places: [] })),
+    )
+
+    expect((await findNearestCampsite(NEAR))?.name).toBe(
+      unrated.displayName.text,
+    )
+  })
+
+  it('still prefers a rated site over a marginally closer unrated one', async () => {
+    const rated = at(0.05)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementationOnce(() =>
+          jsonResponse({
+            places: [at(0.02, { rating: 2.1, userRatingCount: 3 })],
+          }),
+        )
+        .mockImplementationOnce(() => jsonResponse({ places: [rated] })),
+    )
+
+    expect((await findNearestCampsite(NEAR))?.name).toBe(rated.displayName.text)
+  })
+
+  it('returns null when there is nothing nearby at all', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => jsonResponse({ places: [] })),
+    )
+
+    expect(await findNearestCampsite(NEAR)).toBeNull()
   })
 })
