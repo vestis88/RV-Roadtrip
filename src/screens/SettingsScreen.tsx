@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { httpsCallable } from 'firebase/functions'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
+import { functions } from '../lib/firebase'
+import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
@@ -30,6 +33,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [overviewSubmitting, setOverviewSubmitting] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
+  const [refreshingOvernight, setRefreshingOvernight] = useState(false)
+  const [overnightResult, setOvernightResult] = useState<string | null>(null)
   // Shared between "Generate overview" and "Generate full plan" — see
   // hasRoute's own doc comment for why this check exists.
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -147,6 +152,31 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
       return
     }
     setConfirmOpen(true)
+  }
+
+  /**
+   * Re-resolves where every night is spent, without regenerating the plan.
+   * Cheap enough to press repeatedly while iterating on a route — see the
+   * refreshOvernightOptions callable for why it is separable at all.
+   */
+  async function refreshOvernight() {
+    setRefreshingOvernight(true)
+    setOvernightResult(null)
+    try {
+      const call = httpsCallable<
+        { tripId: string },
+        { daysResolved: number; optionsWritten: number }
+      >(functions, 'refreshOvernightOptions', { timeout: LONG_CALLABLE_TIMEOUT_MS })
+      const { data } = await call({ tripId })
+      setOvernightResult(
+        `Found ${data.optionsWritten} option${data.optionsWritten === 1 ? '' : 's'} across ${data.daysResolved} day${data.daysResolved === 1 ? '' : 's'}.`,
+      )
+    } catch (error) {
+      console.error('refreshOvernightOptions failed', error)
+      setOvernightResult('Could not refresh overnight stops — please try again.')
+    } finally {
+      setRefreshingOvernight(false)
+    }
   }
 
   // "Generate overview" (2026-07-31): a direct entry point into explore
@@ -374,6 +404,27 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
               {GENERATE_LABEL[trip.planMeta.status]}
             </button>
           )}
+          {/* Re-picks where every night is spent without regenerating the
+            * plan. Separable because it reads only each day's town and
+            * writes only that day's options and overnight — drive legs are
+            * measured town-to-town, so nothing it does invalidates a
+            * distance already computed. Cheap enough to press repeatedly:
+            * no Claude call, and a handful of Overpass requests for the
+            * whole trip however long it is. */}
+          {(trip.planMeta.status === 'ready' ||
+            trip.planMeta.status === 'stale') && (
+            <button
+              type="button"
+              data-testid="refresh-overnight-button"
+              onClick={() => void refreshOvernight()}
+              disabled={refreshingOvernight || submitting}
+              className="btn btn-secondary"
+            >
+              {refreshingOvernight
+                ? 'Finding places to sleep…'
+                : 'Refresh overnight stops'}
+            </button>
+          )}
           <span className="chip chip-neutral" data-testid="plan-status">
             {trip.planMeta.status}
           </span>
@@ -398,6 +449,14 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="plan-error"
           >
             {trip.planMeta.error}
+          </p>
+        )}
+        {overnightResult && (
+          <p
+            className="mt-2 text-sm text-neutral-600 dark:text-neutral-300"
+            data-testid="refresh-overnight-result"
+          >
+            {overnightResult}
           </p>
         )}
         {overviewError && (
