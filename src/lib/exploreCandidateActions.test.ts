@@ -3,10 +3,8 @@ import type { CorridorStopPriority } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 
 // The Firestore writes are the only thing worth faking here — the logic
-// under test is which doc gets which {priority, rank}, so the calls are
-// captured and asserted rather than executed.
-const batchUpdate = vi.fn()
-const batchCommit = vi.fn().mockResolvedValue(undefined)
+// under test is which doc gets which priority, so the calls are captured
+// and asserted rather than executed.
 const updateDocMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('firebase/firestore', () => ({
@@ -14,22 +12,16 @@ vi.mock('firebase/firestore', () => ({
   // identify which stop each write targeted.
   doc: (_db: unknown, ..._path: string[]) => ({ id: _path[_path.length - 1] }),
   updateDoc: (ref: { id: string }, data: unknown) => updateDocMock(ref.id, data),
-  writeBatch: () => ({
-    update: (ref: { id: string }, data: unknown) => batchUpdate(ref.id, data),
-    commit: batchCommit,
-  }),
 }))
 vi.mock('firebase/functions', () => ({ httpsCallable: () => vi.fn() }))
 vi.mock('./firebase', () => ({ db: {}, functions: {} }))
 
-const { voteExploreCandidate, groupCandidatesByPriority } = await import(
-  './exploreCandidateActions'
-)
+const { candidatePriority, setCandidatePriority, sortCandidatesForList } =
+  await import('./exploreCandidateActions')
 
 function stop(
   id: string,
-  priority: CorridorStopPriority,
-  rank: number,
+  overrides: Partial<CorridorStopWithId> = {},
 ): CorridorStopWithId {
   return {
     id,
@@ -39,144 +31,108 @@ function stop(
     country: 'NO',
     status: 'candidate',
     linkedDayIds: [],
-    priority,
-    rank,
+    priority: 'worth-a-detour' as CorridorStopPriority,
+    ...overrides,
   } as CorridorStopWithId
 }
 
 beforeEach(() => {
-  batchUpdate.mockClear()
-  batchCommit.mockClear()
   updateDocMock.mockClear()
 })
 
-describe('voteExploreCandidate', () => {
-  // Reported 2026-08-02: "promoting cards in overview mode should move them a
-  // full category, not just one step up/down." A stop mid-tier used to need
-  // one tap per sibling before its category changed at all, and every tap
-  // before the last looked like nothing had happened.
-  it('promotes a whole category from the middle of its tier, in one vote', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('m1', 'must-see', 0),
-      stop('m2', 'must-see', 1),
-      stop('w1', 'worth-a-detour', 0),
-      stop('w2', 'worth-a-detour', 1),
-      stop('w3', 'worth-a-detour', 2),
-    ])
+// Reported 2026-08-11: "let us choose the interest level per item through a
+// selecter. Ie tap a button to choose the interest level." The up/down
+// arrows this replaced moved a stop one category per tap, which only read
+// as anything while the list was grouped by category.
+describe('setCandidatePriority', () => {
+  it('writes the chosen level straight to the stop', async () => {
+    await setCandidatePriority('trip1', 'w1', 'must-see')
 
-    await voteExploreCandidate('trip1', grouped, 'w2', 'up')
-
-    // Lands at must-see's bottom edge — the shortest visible move across the
-    // boundary, not a leap to the very top.
-    expect(updateDocMock).toHaveBeenCalledWith('w2', {
-      priority: 'must-see',
-      rank: 2,
-    })
-    // No rank-swapping with siblings any more.
-    expect(batchUpdate).not.toHaveBeenCalled()
+    expect(updateDocMock).toHaveBeenCalledWith('w1', { priority: 'must-see' })
   })
 
-  it('demotes a whole category from the middle of its tier, in one vote', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('m1', 'must-see', 0),
-      stop('m2', 'must-see', 1),
-      stop('m3', 'must-see', 2),
-      stop('w1', 'worth-a-detour', 0),
-      stop('w2', 'worth-a-detour', 1),
-    ])
+  it('reaches the bottom level in one tap from the top, skipping nothing', async () => {
+    await setCandidatePriority('trip1', 'm1', 'nice-if-convenient')
 
-    await voteExploreCandidate('trip1', grouped, 'm2', 'down')
-
-    // Enters worth-a-detour at its top edge.
-    expect(updateDocMock).toHaveBeenCalledWith('m2', {
-      priority: 'worth-a-detour',
-      rank: -1,
-    })
-    expect(batchUpdate).not.toHaveBeenCalled()
-  })
-
-  it('skips no category: worth-a-detour demotes to nice-if-convenient, not past it', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('w1', 'worth-a-detour', 0),
-      stop('n1', 'nice-if-convenient', 0),
-    ])
-
-    await voteExploreCandidate('trip1', grouped, 'w1', 'down')
-
-    expect(updateDocMock).toHaveBeenCalledWith('w1', {
+    expect(updateDocMock).toHaveBeenCalledWith('m1', {
       priority: 'nice-if-convenient',
-      rank: -1,
     })
   })
 
-  it('crosses into an empty tier without NaN ranks', async () => {
-    const grouped = groupCandidatesByPriority([stop('w1', 'worth-a-detour', 0)])
+  // `rank` only ever ordered stops within a category, and the list no longer
+  // has categories to order within.
+  it('leaves rank alone', async () => {
+    await setCandidatePriority('trip1', 'w1', 'must-see')
 
-    await voteExploreCandidate('trip1', grouped, 'w1', 'up')
+    const [, written] = updateDocMock.mock.calls[0]
+    expect(written).not.toHaveProperty('rank')
+  })
+})
 
-    expect(updateDocMock).toHaveBeenCalledWith('w1', {
-      priority: 'must-see',
-      rank: 0,
-    })
+describe('candidatePriority', () => {
+  it("keeps Claude's own pre-selected level", () => {
+    expect(candidatePriority(stop('a', { priority: 'must-see' }))).toBe(
+      'must-see',
+    )
   })
 
-  it('does nothing above the top category, wherever in it the stop sits', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('m1', 'must-see', 0),
-      stop('m2', 'must-see', 1),
-    ])
+  // A pin the traveler dropped themselves has no level yet, and the selector
+  // has to show one of the three as chosen.
+  it('falls back to the middle level for a stop that has none', () => {
+    expect(candidatePriority(stop('a', { priority: undefined }))).toBe(
+      'worth-a-detour',
+    )
+  })
+})
 
-    await voteExploreCandidate('trip1', grouped, 'm2', 'up')
+describe('sortCandidatesForList', () => {
+  const START = { lat: 55, lng: 12 }
+  const END = { lat: 60, lng: 12 }
 
-    expect(updateDocMock).not.toHaveBeenCalled()
-    expect(batchUpdate).not.toHaveBeenCalled()
+  it('orders stops the way the trip drives past them, whatever their interest level', () => {
+    const ordered = sortCandidatesForList(
+      [
+        stop('far', { lat: 59, lng: 12, priority: 'nice-if-convenient' }),
+        stop('near', { lat: 56, lng: 12, priority: 'must-see' }),
+        stop('middle', { lat: 57.5, lng: 12, priority: 'worth-a-detour' }),
+      ],
+      START,
+      END,
+    )
+
+    expect(ordered.map((s) => s.id)).toEqual(['near', 'middle', 'far'])
   })
 
-  it('does nothing below the bottom category, wherever in it the stop sits', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('n1', 'nice-if-convenient', 0),
-      stop('n2', 'nice-if-convenient', 1),
+  it('orders a stop off to the side by how far along the route it sits, not how far off it', () => {
+    const ordered = sortCandidatesForList(
+      [
+        stop('late-but-close', { lat: 59, lng: 12.1 }),
+        stop('early-but-distant', { lat: 56, lng: 14 }),
+      ],
+      START,
+      END,
+    )
+
+    expect(ordered.map((s) => s.id)).toEqual([
+      'early-but-distant',
+      'late-but-close',
     ])
-
-    await voteExploreCandidate('trip1', grouped, 'n1', 'down')
-
-    expect(updateDocMock).not.toHaveBeenCalled()
-    expect(batchUpdate).not.toHaveBeenCalled()
   })
 
-  it('ignores a stop that is not in the list at all', async () => {
-    const grouped = groupCandidatesByPriority([stop('m1', 'must-see', 0)])
+  // A trip mid-edit may not have both ends yet; ordering along a corridor
+  // needs both, so the list just stays as it came rather than shuffling.
+  it('leaves the order alone when the trip has no finish point yet', () => {
+    const given = [stop('b', { lat: 59, lng: 12 }), stop('a', { lat: 56, lng: 12 })]
 
-    await voteExploreCandidate('trip1', grouped, 'ghost', 'up')
-
-    expect(updateDocMock).not.toHaveBeenCalled()
-    expect(batchUpdate).not.toHaveBeenCalled()
+    expect(
+      sortCandidatesForList(given, START, undefined).map((s) => s.id),
+    ).toEqual(['b', 'a'])
   })
 
-  // A promote followed by a demote must land the stop back where it started,
-  // or repeated nudging would drift a stop through the tiers.
-  it('round-trips a stop back to its original tier', async () => {
-    const grouped = groupCandidatesByPriority([
-      stop('m1', 'must-see', 0),
-      stop('w1', 'worth-a-detour', 0),
-    ])
+  it('does not mutate the array it was given', () => {
+    const given = [stop('b', { lat: 59, lng: 12 }), stop('a', { lat: 56, lng: 12 })]
+    sortCandidatesForList(given, START, END)
 
-    await voteExploreCandidate('trip1', grouped, 'w1', 'up')
-    expect(updateDocMock).toHaveBeenLastCalledWith('w1', {
-      priority: 'must-see',
-      rank: 1,
-    })
-
-    const afterPromote = groupCandidatesByPriority([
-      stop('m1', 'must-see', 0),
-      stop('w1', 'must-see', 1),
-    ])
-    await voteExploreCandidate('trip1', afterPromote, 'w1', 'down')
-
-    // Bottom of must-see with an empty tier below → back to worth-a-detour.
-    expect(updateDocMock).toHaveBeenLastCalledWith('w1', {
-      priority: 'worth-a-detour',
-      rank: 0,
-    })
+    expect(given.map((s) => s.id)).toEqual(['b', 'a'])
   })
 })

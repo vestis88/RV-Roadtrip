@@ -5,6 +5,7 @@ import {
   estimateDetourKm,
   estimateDriveMinutes,
   haversineDistanceKm,
+  sortAlongRoute,
 } from './geo.js'
 
 const OSLO = { lat: 59.9139, lng: 10.7522 }
@@ -218,5 +219,61 @@ describe('estimateDriveMinutes', () => {
     expect(estimateDriveMinutes(-5)).toBe(0)
     expect(estimateDriveMinutes(NaN)).toBe(0)
     expect(estimateDriveMinutes(Infinity)).toBe(0)
+  })
+})
+
+describe('sortAlongRoute', () => {
+  const named = (name: string, lat: number, lng: number) => ({ name, lat, lng })
+
+  it('keeps the caller\'s own objects, in corridor order', () => {
+    const sorted = sortAlongRoute(
+      OSLO,
+      ROME,
+      [
+        { name: 'innsbruck', ...INNSBRUCK },
+        { name: 'lillehammer', ...LILLEHAMMER },
+      ],
+      (item) => item,
+    )
+    expect(sorted.map((item) => item.name)).toEqual([
+      'lillehammer',
+      'innsbruck',
+    ])
+  })
+
+  // The same ordering buildRouteBackbone applies to its middle points, which
+  // is the whole reason this is shared rather than reimplemented.
+  it('orders identically to the backbone it was extracted from', () => {
+    const points = [INNSBRUCK, LILLEHAMMER]
+    expect(sortAlongRoute(OSLO, ROME, points, (p) => p)).toEqual(
+      buildRouteBackbone(OSLO, points, ROME).slice(1, -1),
+    )
+  })
+
+  it('sorts by distance along the corridor, not distance from it', () => {
+    // A point barely off a north-south line but far along it must come after
+    // one that is way off to the side but barely started.
+    const sorted = sortAlongRoute(
+      { lat: 50, lng: 10 },
+      { lat: 40, lng: 10 },
+      [named('far-along', 41, 10.1), named('way-off-to-the-side', 49, 20)],
+      (item) => item,
+    )
+    expect(sorted.map((item) => item.name)).toEqual([
+      'way-off-to-the-side',
+      'far-along',
+    ])
+  })
+
+  it('falls back to the given order when either end is missing', () => {
+    const points = [INNSBRUCK, LILLEHAMMER]
+    expect(sortAlongRoute(undefined, ROME, points, (p) => p)).toEqual(points)
+    expect(sortAlongRoute(OSLO, undefined, points, (p) => p)).toEqual(points)
+  })
+
+  it('does not mutate the array it was given', () => {
+    const points = [INNSBRUCK, LILLEHAMMER]
+    sortAlongRoute(OSLO, ROME, points, (p) => p)
+    expect(points).toEqual([INNSBRUCK, LILLEHAMMER])
   })
 })

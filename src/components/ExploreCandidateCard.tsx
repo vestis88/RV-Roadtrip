@@ -1,8 +1,14 @@
 import { estimateDriveMinutes } from '@rv/shared'
+import type { CorridorStopPriority } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { googleMapsSearchUrl } from '../lib/mapLinks'
 import { formatDriveTime } from '../lib/formatDuration'
+import {
+  TIER_LABEL,
+  TIER_ORDER,
+  candidatePriority,
+} from '../lib/exploreCandidateActions'
 
 interface ExploreCandidateCardProps {
   stop: CorridorStopWithId
@@ -10,38 +16,46 @@ interface ExploreCandidateCardProps {
   /** This stop is itself part of the route backbone, so it has no detour. */
   onRoute: boolean
   highlighted: boolean
-  canVoteUp: boolean
-  canVoteDown: boolean
   /** Lets the list scroll this card into view when its map pin is tapped. */
   innerRef?: (element: HTMLDivElement | null) => void
   onSelect: () => void
-  onVoteUp: () => void
-  onVoteDown: () => void
+  onSetPriority: (priority: CorridorStopPriority) => void
   onLock: () => void
   onReject: () => void
 }
 
 /**
+ * How each interest level is drawn, most interested first. Same three
+ * colours the level always had; only where they appear changed, from a
+ * section heading the card sat under to the card itself.
+ */
+const TIER_STYLE: Record<CorridorStopPriority, string> = {
+  'must-see': 'bg-orange-600 text-white',
+  'worth-a-detour': 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-50',
+  'nice-if-convenient':
+    'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100',
+}
+
+/**
  * One row in explore mode's candidate list (below the map — see
- * ExploreMapScreen). Up/down votes move the stop a whole category at a time
- * (see voteExploreCandidate's own doc comment); "Keep this" promotes
- * straight to `locked` — the same status a manually pinned stop gets, since
- * both mean "the traveler wants this in the eventual route."
+ * ExploreMapScreen). The interest selector sets how much the traveler cares
+ * about this stop, which is triage and changes nothing about the route;
+ * "Keep this" promotes straight to `locked` — the same status a manually
+ * pinned stop gets, and the only thing that does bend the route, since both
+ * mean "the traveler wants this in the eventual route."
  */
 export function ExploreCandidateCard({
   stop,
   detourKm,
   onRoute,
   highlighted,
-  canVoteUp,
-  canVoteDown,
   innerRef,
   onSelect,
-  onVoteUp,
-  onVoteDown,
+  onSetPriority,
   onLock,
   onReject,
 }: ExploreCandidateCardProps) {
+  const priority = candidatePriority(stop)
   return (
     <div
       ref={innerRef}
@@ -65,7 +79,7 @@ export function ExploreCandidateCard({
       // "this one is in my route". `onRoute` is the kept (`locked`) set,
       // the same one the route line is drawn through, so the card, the pin
       // and the drawn route always agree about which stops are in.
-      className={`card flex cursor-pointer gap-3 p-3 text-sm transition ${
+      className={`card cursor-pointer p-3 text-sm transition ${
         highlighted
           ? 'border-orange-600 ring-2 ring-orange-500'
           : onRoute
@@ -73,36 +87,7 @@ export function ExploreCandidateCard({
             : ''
       }`}
     >
-      <div className="flex flex-col items-center gap-0.5">
-        <button
-          type="button"
-          data-testid={`explore-candidate-up-${stop.id}`}
-          disabled={!canVoteUp}
-          onClick={(event) => {
-            event.stopPropagation()
-            onVoteUp()
-          }}
-          className="rounded px-1.5 text-neutral-400 hover:text-neutral-700 disabled:opacity-30 dark:hover:text-neutral-200"
-          aria-label="Vote up"
-        >
-          ▲
-        </button>
-        <button
-          type="button"
-          data-testid={`explore-candidate-down-${stop.id}`}
-          disabled={!canVoteDown}
-          onClick={(event) => {
-            event.stopPropagation()
-            onVoteDown()
-          }}
-          className="rounded px-1.5 text-neutral-400 hover:text-neutral-700 disabled:opacity-30 dark:hover:text-neutral-200"
-          aria-label="Vote down"
-        >
-          ▼
-        </button>
-      </div>
-
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="font-semibold text-neutral-900 dark:text-white">
             {stop.name} {stop.country && isoCountryFlag(stop.country)}
@@ -143,6 +128,44 @@ export function ExploreCandidateCard({
             {stop.why}
           </p>
         )}
+        {/* How much the traveler cares, set directly rather than nudged a
+          * step at a time. It sorts nothing and moves nothing — the list is
+          * in route order and only "Keep this" bends the route — it is what
+          * the eventual full generation is told to weigh when deciding what
+          * fits. Claude's own pick is what's selected until it's changed. */}
+        <div
+          role="radiogroup"
+          aria-label="How interested are you in this stop?"
+          data-testid={`explore-candidate-interest-${stop.id}`}
+          className="flex flex-wrap gap-1 pt-1"
+        >
+          {TIER_ORDER.map((tier) => {
+            const active = tier === priority
+            return (
+              <button
+                key={tier}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`explore-candidate-interest-${tier}-${stop.id}`}
+                // Same as every other control on the card: setting the level
+                // must not also count as tapping the card to look at it.
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSetPriority(tier)
+                }}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                  active
+                    ? TIER_STYLE[tier]
+                    : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700'
+                }`}
+              >
+                {TIER_LABEL[tier]}
+              </button>
+            )
+          })}
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           {/* Photos, reviews and opening hours, without this app paying to
             * mirror any of them: Places photo media is billed per load and

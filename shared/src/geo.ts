@@ -94,18 +94,41 @@ export function buildRouteBackbone(
   orderedPoints: LatLng[],
   end: LatLng | undefined,
 ): LatLng[] {
+  return [
+    isUsablePoint(start) ? start : undefined,
+    ...sortAlongRoute(start, end, orderedPoints, (point) => point),
+    isUsablePoint(end) ? end : undefined,
+  ].filter(isUsablePoint)
+}
+
+/**
+ * The same start→end ordering buildRouteBackbone applies to its own middle
+ * points, exposed for anything that needs the order without needing the
+ * backbone: the explore list renders candidates in the order you would
+ * actually drive past them, which is a different question from which of
+ * them the route is drawn through.
+ *
+ * Generic in the item so a caller keeps its own objects (with ids, names and
+ * everything else) rather than getting bare coordinates back.
+ *
+ * Falls back to the given order when either end of the trip is missing, for
+ * the reason buildRouteBackbone's own doc comment gives: ordering along a
+ * corridor needs both ends, and a trip mid-edit may not have them yet.
+ */
+export function sortAlongRoute<T>(
+  start: LatLng | undefined,
+  end: LatLng | undefined,
+  items: T[],
+  pointOf: (item: T) => LatLng,
+): T[] {
   const usableStart = isUsablePoint(start) ? start : undefined
   const usableEnd = isUsablePoint(end) ? end : undefined
-  const sorted =
-    usableStart && usableEnd
-      ? [...orderedPoints].sort(
-          (a, b) =>
-            projectAlongRoute(usableStart, usableEnd, a) -
-            projectAlongRoute(usableStart, usableEnd, b),
-        )
-      : orderedPoints
-
-  return [usableStart, ...sorted, usableEnd].filter(isUsablePoint)
+  if (!usableStart || !usableEnd) return [...items]
+  return [...items].sort(
+    (a, b) =>
+      projectAlongRoute(usableStart, usableEnd, pointOf(a)) -
+      projectAlongRoute(usableStart, usableEnd, pointOf(b)),
+  )
 }
 
 /**

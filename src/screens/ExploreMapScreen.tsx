@@ -17,10 +17,9 @@ import {
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
-  TIER_ORDER,
   generateExploreHighlights,
-  groupCandidatesByPriority,
-  voteExploreCandidate,
+  setCandidatePriority,
+  sortCandidatesForList,
 } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
@@ -35,11 +34,6 @@ import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
 
-const TIER_LABEL: Record<CorridorStopPriority, string> = {
-  'must-see': 'Must-see',
-  'worth-a-detour': 'Worth a detour',
-  'nice-if-convenient': 'Nice if convenient',
-}
 
 interface ExploreMapScreenProps {
   tripId: string
@@ -120,7 +114,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // "Generate overview", which navigates here on success, mounting this
   // screen fresh with no memory of it.
   const searchedEmpty = candidates.length === 0 && !!trip.planMeta.exploreLastRunAt
-  const grouped = useMemo(() => groupCandidatesByPriority(candidates), [candidates])
+  // Route order, not interest order: the list reads as the drive itself, so
+  // a stop's neighbours in it are its neighbours on the map. Interest level
+  // lives on each card instead (see ExploreCandidateCard).
+  const orderedCandidates = useMemo(
+    () =>
+      sortCandidatesForList(
+        candidates,
+        trip.settings.startPoint,
+        trip.settings.endPoint,
+      ),
+    [candidates, trip.settings.startPoint, trip.settings.endPoint],
+  )
 
   // What the route is actually built through: everything explicitly kept
   // (`locked`), and nothing else.
@@ -218,10 +223,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
   }
 
-  function vote(stopId: string, direction: 'up' | 'down') {
+  function setInterest(stopId: string, priority: CorridorStopPriority) {
     runStopAction(
-      voteExploreCandidate(tripId, grouped, stopId, direction),
-      'Could not reorder that stop — please try again.',
+      setCandidatePriority(tripId, stopId, priority),
+      'Could not change that stop — please try again.',
     )
   }
 
@@ -440,50 +445,34 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               : 'No stops yet — tap "Find great stops" to get suggestions for your route, or drop a pin / rescan an area on the map above.'}
           </p>
         ) : (
-          <div className="space-y-4">
-            {TIER_ORDER.filter((tier) => grouped[tier].length > 0).map((tier) => (
-              <div key={tier} className="space-y-2">
-                <h3 className="heading-sm text-sm text-neutral-500 dark:text-neutral-400">
-                  {TIER_LABEL[tier]}
-                </h3>
-                <div className="space-y-2">
-                  {grouped[tier].map((stop) => (
-                    <ExploreCandidateCard
-                      key={stop.id}
-                      stop={stop}
-                      detourKm={detourByStopId.get(stop.id) ?? null}
-                      onRoute={routeStopIds.has(stop.id)}
-                      highlighted={selectedId === stop.id}
-                      innerRef={(element) => {
-                        if (element) cardRefs.current.set(stop.id, element)
-                        else cardRefs.current.delete(stop.id)
-                      }}
-                      // A vote moves the stop a whole category, so what
-                      // matters is which category it's in, not where it sits
-                      // within one: only the top and bottom categories have a
-                      // dead arrow.
-                      canVoteUp={tier !== TIER_ORDER[0]}
-                      canVoteDown={tier !== TIER_ORDER[TIER_ORDER.length - 1]}
-                      onSelect={() => setSelectedId(stop.id)}
-                      onVoteUp={() => vote(stop.id, 'up')}
-                      onVoteDown={() => vote(stop.id, 'down')}
-                      onLock={() =>
-                        runStopAction(
-                          setCorridorStopStatus(tripId, stop.id, 'locked'),
-                          'Could not keep that stop — please try again.',
-                        )
-                      }
-                      onReject={() => {
-                        runStopAction(
-                          deleteCorridorStop(tripId, stop.id),
-                          'Could not remove that stop — please try again.',
-                        )
-                        if (selectedId === stop.id) setSelectedId(null)
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
+          <div className="space-y-2">
+            {orderedCandidates.map((stop) => (
+              <ExploreCandidateCard
+                key={stop.id}
+                stop={stop}
+                detourKm={detourByStopId.get(stop.id) ?? null}
+                onRoute={routeStopIds.has(stop.id)}
+                highlighted={selectedId === stop.id}
+                innerRef={(element) => {
+                  if (element) cardRefs.current.set(stop.id, element)
+                  else cardRefs.current.delete(stop.id)
+                }}
+                onSelect={() => setSelectedId(stop.id)}
+                onSetPriority={(priority) => setInterest(stop.id, priority)}
+                onLock={() =>
+                  runStopAction(
+                    setCorridorStopStatus(tripId, stop.id, 'locked'),
+                    'Could not keep that stop — please try again.',
+                  )
+                }
+                onReject={() => {
+                  runStopAction(
+                    deleteCorridorStop(tripId, stop.id),
+                    'Could not remove that stop — please try again.',
+                  )
+                  if (selectedId === stop.id) setSelectedId(null)
+                }}
+              />
             ))}
           </div>
         )}

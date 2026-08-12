@@ -23,6 +23,8 @@ async function seedCandidate(
     name: string
     priority: 'must-see' | 'worth-a-detour' | 'nice-if-convenient'
     rank: number
+    lat: number
+    lng: number
   }> = {},
 ) {
   await adminDb
@@ -31,8 +33,8 @@ async function seedCandidate(
     .collection('corridorStops')
     .add({
       name: overrides.name ?? 'Otta',
-      lat: 61.77,
-      lng: 9.54,
+      lat: overrides.lat ?? 61.77,
+      lng: overrides.lng ?? 9.54,
       country: 'NO',
       why: 'A local favourite.',
       status: 'candidate',
@@ -118,7 +120,7 @@ test('"Find great stops" requires a start and finish point first', async ({ page
   )
 })
 
-test('voting moves a stop a whole category, and lock/reject change status', async ({
+test('the interest selector sets a level, and lock/reject change status', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
@@ -144,9 +146,12 @@ test('voting moves a stop a whole category, and lock/reject change status', asyn
     .limit(1)
     .get()
   const lillehammerId = ottaSnap.docs[0].id
-  await page.getByTestId(`explore-candidate-up-${lillehammerId}`).click()
+  await page
+    .getByTestId(`explore-candidate-interest-worth-a-detour-${lillehammerId}`)
+    .click()
 
-  // One vote, one whole category — not a rank shuffle inside the same one.
+  // One tap, whichever level was picked — no stepping through the one
+  // between.
   await expect
     .poll(async () => {
       const snap = await adminDb
@@ -202,7 +207,7 @@ test('voting moves a stop a whole category, and lock/reject change status', asyn
 // ring but showed no "Keeping" chip and still offered a "Keep this" button
 // that changed nothing visible. Votes are triage now; keeping is the
 // commitment.
-test('voting a stop to the top tier does not put it in the route', async ({
+test('marking a stop must-see does not put it in the route', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
@@ -223,7 +228,9 @@ test('voting a stop to the top tier does not put it in the route', async ({
   await expect(card).not.toHaveClass(/border-sky-600/)
   await expect(card).not.toHaveClass(/border-orange-600/)
 
-  await page.getByTestId(`explore-candidate-up-${ottaId}`).click()
+  await page
+    .getByTestId(`explore-candidate-interest-must-see-${ottaId}`)
+    .click()
   await expect
     .poll(async () => (await stops.doc(ottaId).get()).data()?.priority)
     .toBe('must-see')
@@ -344,86 +351,105 @@ test('keeping a stop turns it blue too, from any category', async ({ page }) => 
   await expect(card).toHaveClass(/border-sky-600/)
 })
 
-// Regression: "the promote/demote does not seem to work. Everything should
-// be possible to promote/demote" — a vote used to only swap rank inside one
-// tier, so the top and bottom stop of every tier had both buttons disabled
-// and nothing could ever change priority.
-test('promoting a stop moves it into the category above', async ({
+// Reported 2026-08-11: "let us choose the interest level per item through a
+// selecter." The up/down arrows this replaced moved one category per tap,
+// and the category was also the stop's place in the list — so a stop in the
+// middle of a tier needed several taps before anything appeared to happen.
+test('the interest selector sets any level in one tap, in both directions', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
-  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
   await seedCandidate(tripId, {
     name: 'Lillehammer',
     priority: 'worth-a-detour',
-    rank: 0,
   })
 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('explore-map-screen').waitFor()
 
   const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
-  const lillehammerId = (
-    await stops.where('name', '==', 'Lillehammer').limit(1).get()
-  ).docs[0].id
+  const id = (await stops.where('name', '==', 'Lillehammer').limit(1).get())
+    .docs[0].id
 
-  // Sole occupant of worth-a-detour: previously this button was disabled.
-  const up = page.getByTestId(`explore-candidate-up-${lillehammerId}`)
-  await expect(up).toBeEnabled()
-  await up.click()
+  // Claude's own pick is what's selected until the traveler changes it.
+  await expect(
+    page.getByTestId(`explore-candidate-interest-worth-a-detour-${id}`),
+  ).toHaveAttribute('aria-checked', 'true')
 
+  // Straight to the bottom, skipping nothing — two arrow taps' worth of
+  // movement in one.
+  await page
+    .getByTestId(`explore-candidate-interest-nice-if-convenient-${id}`)
+    .click()
   await expect
-    .poll(async () => (await stops.doc(lillehammerId).get()).data()?.priority)
+    .poll(async () => (await stops.doc(id).get()).data()?.priority)
+    .toBe('nice-if-convenient')
+
+  // And straight back to the top.
+  await page.getByTestId(`explore-candidate-interest-must-see-${id}`).click()
+  await expect
+    .poll(async () => (await stops.doc(id).get()).data()?.priority)
     .toBe('must-see')
 
-  // Promotion changes where it sits in the list, not whether it is in the
-  // route — so it still carries a detour estimate rather than the on-route
-  // chip. Keeping is what commits a stop; see the voting/keeping test above.
+  // Interest is triage, not commitment: the stop is still off the route, so
+  // it still reports a detour rather than the on-route chip.
   await expect(
-    page.getByTestId(`explore-candidate-detour-${lillehammerId}`),
+    page.getByTestId(`explore-candidate-detour-${id}`),
   ).toBeVisible()
-
-  // ...and demoting puts it back.
-  await page.getByTestId(`explore-candidate-down-${lillehammerId}`).click()
-  await expect
-    .poll(async () => (await stops.doc(lillehammerId).get()).data()?.priority)
-    .toBe('worth-a-detour')
 })
 
-// A vote is a category move, so what disables an arrow is the stop's
-// CATEGORY, never its position within one: every stop in must-see has a dead
-// up arrow, including one sitting below a sibling.
-test('only the top and bottom categories have a dead arrow, wherever a stop sits in them', async ({
+// Reported 2026-08-11: "ordering by must see, worth a detour and so on"
+// answered a question the traveler already had answered on each card, while
+// the one they actually had — is this before or after Hamburg — took
+// cross-referencing three sections against the map.
+test('the list runs in route order, whatever each stop\'s interest level', async ({
   page,
 }) => {
   const tripId = await getTripId(page)
-  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
-  await seedCandidate(tripId, { name: 'Dombås', priority: 'must-see', rank: 1 })
+  // Oslo (59.91, 10.75) to Bergen (60.39, 5.32) — seeded below. Interest
+  // level runs deliberately opposite to route order, so a list still sorted
+  // by category would come out exactly backwards.
   await seedCandidate(tripId, {
-    name: 'Lillehammer',
-    priority: 'nice-if-convenient',
-    rank: 0,
+    name: 'Third',
+    lat: 60.3,
+    lng: 6.0,
+    priority: 'must-see',
   })
+  await seedCandidate(tripId, {
+    name: 'First',
+    lat: 60.0,
+    lng: 10.0,
+    priority: 'nice-if-convenient',
+  })
+  await seedCandidate(tripId, {
+    name: 'Second',
+    lat: 60.15,
+    lng: 8.0,
+    priority: 'worth-a-detour',
+  })
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Oslo, Norway', lat: 59.91, lng: 10.75 },
+      'settings.endPoint': { name: 'Bergen, Norway', lat: 60.39, lng: 5.32 },
+    })
 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('explore-map-screen').waitFor()
 
-  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
-  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
-  const dombasId = (await stops.where('name', '==', 'Dombås').limit(1).get()).docs[0].id
-  const lillehammerId = (
-    await stops.where('name', '==', 'Lillehammer').limit(1).get()
-  ).docs[0].id
+  const cards = page
+    .getByTestId('explore-candidate-list')
+    .locator('[role="button"][data-testid^="explore-candidate-"]')
+  await expect(cards).toHaveCount(3)
+  await expect(cards.nth(0)).toContainText('First')
+  await expect(cards.nth(1)).toContainText('Second')
+  await expect(cards.nth(2)).toContainText('Third')
 
-  await expect(page.getByTestId(`explore-candidate-up-${ottaId}`)).toBeDisabled()
-  await expect(page.getByTestId(`explore-candidate-down-${ottaId}`)).toBeEnabled()
-  // Second in must-see, not first — still nowhere to be promoted to.
-  await expect(page.getByTestId(`explore-candidate-up-${dombasId}`)).toBeDisabled()
-  await expect(page.getByTestId(`explore-candidate-down-${dombasId}`)).toBeEnabled()
-  await expect(
-    page.getByTestId(`explore-candidate-down-${lillehammerId}`),
-  ).toBeDisabled()
-  await expect(page.getByTestId(`explore-candidate-up-${lillehammerId}`)).toBeEnabled()
+  // No category headings left to group under.
+  await expect(page.getByTestId('explore-candidate-list')).not.toContainText(
+    'Nice if convenient',
+  )
 })
 
 test('generate-full-plan requires confirmation, and only fires a planRequest on confirm', async ({
