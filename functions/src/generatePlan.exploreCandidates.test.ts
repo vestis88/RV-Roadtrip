@@ -91,6 +91,70 @@ describe('generatePlan: fromExploreCandidates', () => {
   })
 })
 
+// Reported 2026-08-12: two buttons both labelled "Generate full plan" did
+// materially different things. Committing from the explore map honoured every
+// vote, keep and rejection; the Trip Setup button submitted kind 'full',
+// which never looked at corridorStops and re-ran Claude's curation from
+// scratch — silently discarding all of it. Both seed from curation now.
+describe('generatePlan: full seeds from curation when there is any', () => {
+  it('does not demand candidates the way an explore commit does', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidFullNoCandidates')
+
+    await db.collection('planRequests').add({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+    })
+
+    const trip = await waitFor(async () => {
+      const snap = await db.collection('trips').doc(tripId).get()
+      const data = snap.data()
+      return data?.planMeta?.status === 'error' ? data : undefined
+    })
+
+    // A trip nobody has explored yet is exactly the case 'full' is for:
+    // research it from nothing. It must fail on credentials, not on the
+    // empty-corridor guard that belongs to the explore path.
+    expect(trip.planMeta.error).toBeTruthy()
+    expect(trip.planMeta.error).not.toContain('No candidate stops')
+  })
+
+  it('reaches the pipeline with curated stops present', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidFullWithCandidates')
+    await db
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Otta',
+        lat: 61.77,
+        lng: 9.54,
+        country: 'NO',
+        status: 'candidate',
+        linkedDayIds: [],
+        priority: 'must-see',
+        region: 'Gudbrandsdalen',
+        rank: 0,
+      })
+
+    await db.collection('planRequests').add({
+      tripId,
+      kind: 'full',
+      status: 'pending',
+    })
+
+    const trip = await waitFor(async () => {
+      const snap = await db.collection('trips').doc(tripId).get()
+      const data = snap.data()
+      return data?.planMeta?.status === 'error' ? data : undefined
+    })
+
+    expect(trip.planMeta.error).toBeTruthy()
+  })
+})
+
 // generateRealPlan's `highlights` param (explore mode's commit step) —
 // mocked the same way generatePlan.checkpoint.test.ts mocks planTrip, so
 // the "which Claude entry point gets called" and "checkpoints from the two

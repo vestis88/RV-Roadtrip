@@ -240,7 +240,7 @@ describe('writeGeneratedDays', () => {
     }
   }, 30_000)
 
-  it('wipes and rematerializes corridorStops alongside days', async () => {
+  it('rebuilds committed corridorStops from the new days', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidCorridorRegen')
     const tripRef = db.collection('trips').doc(tripId)
@@ -268,5 +268,81 @@ describe('writeGeneratedDays', () => {
 
     const daysSnap = await tripRef.collection('days').get()
     expect(stop.linkedDayIds).toEqual([daysSnap.docs[0].id])
+  })
+
+  // Reported 2026-08-12: this used to delete EVERY corridorStop, so the first
+  // generation destroyed the whole researched set — every stop marked worth a
+  // detour that did not make the route, gone, recoverable only by paying
+  // Claude to research the corridor again. replanTrip never did this; it
+  // deletes only stops linked to days it is replacing.
+  it('keeps the traveler research that is not part of the plan', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorPreserve')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    await tripRef.collection('corridorStops').add({
+      name: 'Roros',
+      lat: 62.57,
+      lng: 11.38,
+      country: 'NO',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      why: 'A mining town that never made the cut.',
+    } satisfies CorridorStop)
+    await tripRef.collection('corridorStops').add({
+      name: 'Traveler pin',
+      lat: 63.4,
+      lng: 10.4,
+      country: 'NO',
+      status: 'locked',
+      linkedDayIds: [],
+    } satisfies CorridorStop)
+
+    await writeGeneratedDays(tripRef, [
+      generatedDay(0, '2026-07-10', 'Oslo', [], []),
+    ])
+
+    const stops = (await tripRef.collection('corridorStops').get()).docs.map(
+      (doc) => doc.data() as CorridorStop,
+    )
+    expect(stops.map((s) => s.name).sort()).toEqual([
+      'Oslo',
+      'Roros',
+      'Traveler pin',
+    ])
+    // And the research keeps everything that made it useful.
+    const roros = stops.find((s) => s.name === 'Roros')
+    expect(roros?.priority).toBe('worth-a-detour')
+    expect(roros?.why).toContain('mining town')
+  })
+
+  // The other half: a candidate the plan now routes through would otherwise
+  // appear twice — once awaiting a decision, once already in the trip.
+  it('drops a preserved candidate the new plan committed to anyway', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorDedupe')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    await tripRef.collection('corridorStops').add({
+      name: 'Oslo',
+      // A slightly different geocode of the same town, as the highlights
+      // pass and the day resolution genuinely produce.
+      lat: 61.02,
+      lng: 9.02,
+      country: 'NO',
+      status: 'locked',
+      linkedDayIds: [],
+    } satisfies CorridorStop)
+
+    await writeGeneratedDays(tripRef, [
+      generatedDay(0, '2026-07-10', 'Oslo', [], []),
+    ])
+
+    const stops = (await tripRef.collection('corridorStops').get()).docs.map(
+      (doc) => doc.data() as CorridorStop,
+    )
+    expect(stops).toHaveLength(1)
+    expect(stops[0].status).toBe('committed')
   })
 })

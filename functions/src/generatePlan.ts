@@ -6,6 +6,7 @@ import {
 import { onDocumentCreated } from 'firebase-functions/firestore'
 import {
   activitySchema,
+  haversineDistanceKm,
   restaurantSchema,
   tripDaySchema,
   type CorridorStop,
@@ -103,6 +104,13 @@ interface PlanRequestData {
 // day-resolution even starts. Flagged as a known residual gap, not solved
 // here — see master_plan.md.
 const GENERATION_TIME_BUDGET_MS = 480_000
+
+/**
+ * How close a preserved candidate has to be to a newly-committed stop before
+ * the two count as the same place. Generous, because it is comparing two
+ * independent geocodes of the same town name rather than two real positions.
+ */
+const SAME_STOP_KM = 5
 
 /**
  * Runs the real planning pipeline for a fresh trip: Claude proposes the
@@ -255,9 +263,23 @@ export async function writeGeneratedDays(
     restaurants.docs.forEach((r) => writes.push({ op: 'delete', ref: r.ref }))
     writes.push({ op: 'delete', ref: doc.ref })
   }
-  existingCorridorSnap.docs.forEach((stop) =>
-    writes.push({ op: 'delete', ref: stop.ref }),
+  // Only the committed stops go — they describe the plan being replaced and
+  // are rebuilt from the new days below. Everything else is the traveler's
+  // research: candidates curated in explore mode, rescan finds, pins they
+  // dropped themselves. That used to be deleted here too, unconditionally,
+  // which meant the first generation destroyed every stop that hadn't made
+  // the route — the whole "worth a detour, but not this time" set, gone, with
+  // no way to get it back short of paying Claude to research it all again.
+  //
+  // It also made generation the odd one out: replanTrip deletes only stops
+  // linked to days it is actually replacing (see its own staleCorridorStops),
+  // and a stop with no linked days survives a replan untouched.
+  const preservedStops = existingCorridorSnap.docs.filter(
+    (stop) => (stop.data() as CorridorStop).status !== 'committed',
   )
+  existingCorridorSnap.docs
+    .filter((stop) => (stop.data() as CorridorStop).status === 'committed')
+    .forEach((stop) => writes.push({ op: 'delete', ref: stop.ref }))
 
   const writtenDays: { ref: DocumentReference; day: TripDay }[] = []
   for (const { day, activities, restaurants } of days) {
@@ -282,6 +304,25 @@ export async function writeGeneratedDays(
       })
     }
   }
+  // A preserved stop the new plan now routes through is the same place
+  // listed twice: once as something still awaiting a decision, once as part
+  // of the trip. The committed copy is the true one, so the preserved
+  // duplicate goes. Matched on name or proximity, since a candidate's
+  // coordinates come from the highlights geocode and the day's from its own,
+  // and the two land a street apart rather than identical.
+  const committedStops = writtenDays.map(({ day }) => day.overnight)
+  preservedStops
+    .filter((stop) => {
+      const data = stop.data() as CorridorStop
+      return committedStops.some(
+        (committed) =>
+          committed.name.trim().toLowerCase() === data.name.trim().toLowerCase() ||
+          haversineDistanceKm(committed, { lat: data.lat, lng: data.lng }) <=
+            SAME_STOP_KM,
+      )
+    })
+    .forEach((stop) => writes.push({ op: 'delete', ref: stop.ref }))
+
   writes.push(...buildCorridorStopWrites(tripRef, writtenDays))
   await commitInChunks(db, writes)
 }
@@ -321,21 +362,32 @@ export async function runFullGeneration(
   const tripSnap = await tripRef.get()
   const trip = tripSnap.data() as Trip
 
-  let highlights: RegionHighlightsResponse | undefined
-  if (kind === 'fromExploreCandidates') {
-    const candidatesSnap = await tripRef
-      .collection('corridorStops')
-      .where('status', 'in', ['candidate', 'locked'])
-      .get()
-    highlights = buildRegionHighlightsFromCandidates(
-      candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
+  // Both generate paths seed from the traveler's own curation whenever there
+  // is any (2026-08-12). Only 'fromExploreCandidates' used to, which made the
+  // two "Generate full plan" buttons behave completely differently for no
+  // reason a traveler could see: committing from the explore map honoured
+  // every vote, keep and rejection, while pressing the button on Trip Setup
+  // ran Claude's curation phase again from scratch and silently threw all of
+  // it away — and then writeGeneratedDays deleted the evidence.
+  //
+  // The difference that remains is what happens with NO curated stops:
+  // 'full' researches the trip from nothing, which is exactly right for a
+  // trip nobody has explored yet, while an explore commit with an empty
+  // corridor is a mistake worth reporting.
+  const candidatesSnap = await tripRef
+    .collection('corridorStops')
+    .where('status', 'in', ['candidate', 'locked'])
+    .get()
+  const curated = buildRegionHighlightsFromCandidates(
+    candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
+  )
+  if (kind === 'fromExploreCandidates' && curated.regions.length === 0) {
+    throw new Error(
+      'No candidate stops to build a plan from — explore a few first.',
     )
-    if (highlights.regions.length === 0) {
-      throw new Error(
-        'No candidate stops to build a plan from — explore a few first.',
-      )
-    }
   }
+  const highlights: RegionHighlightsResponse | undefined =
+    curated.regions.length > 0 ? curated : undefined
 
   const { days, complete } = await generateRealPlan(
     trip,
