@@ -92,6 +92,10 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     setSettings((prev) => mergeRemoteSettings(prev, trip.settings, dirtyKeys))
   }
 
+  // Trips that predate the setting have nothing stored, so the slider reads
+  // the default through the one helper that applies it rather than showing 0.
+  const offGridTolerance = offGridToleranceOf(settings)
+
   function commit(partial: Partial<TripSettings>) {
     setDirtyKeys((prev) => {
       const next = new Set(prev)
@@ -398,10 +402,10 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           * all. */}
         <label className="block">
           <span className="field-label">
-            {offGridToleranceOf(settings) === 0
+            {offGridTolerance === 0
               ? 'No free camping — every night at a campsite or stellplatz'
-              : `Up to ${offGridToleranceOf(settings)} free night${
-                  offGridToleranceOf(settings) === 1 ? '' : 's'
+              : `Up to ${offGridTolerance} free night${
+                  offGridTolerance === 1 ? '' : 's'
                 } in a row before servicing`}
           </span>
           <input
@@ -410,7 +414,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             max={7}
             data-testid="off-grid-tolerance-input"
             className="w-full accent-orange-600"
-            value={offGridToleranceOf(settings)}
+            value={offGridTolerance}
             onChange={(event) =>
               commit({ offGridTolerance: Number(event.target.value) })
             }
