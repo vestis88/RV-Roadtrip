@@ -620,3 +620,162 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(result.days).toHaveLength(2)
   })
 })
+
+// The shape of the response that broke "Generate overview" in production on
+// 2026-08-12 (trip "Luxemburg", both attempts, 500 to the traveler): a
+// complete curation whose final candidate is a key with no value, followed
+// by correctly-balanced closing braces. Taken from the Cloud Logging entry
+// rather than invented — `"why "` with nothing after it is exactly what
+// Claude emitted, and it is what made JSON.parse discard the whole
+// 5,609-character answer.
+const HIGHLIGHTS_WITH_BROKEN_TAIL = `{
+  "regions": [
+    {
+      "region": "Danish crossing / Little Belt & Zealand transit",
+      "country": "DK",
+      "reasoning": "Mostly transit, but the belt bridges are a genuine sight in themselves.",
+      "candidateStops": [
+        { "town": "Middelfart", "country": "DK", "why": "Bridge views over the Little Belt, and a harbour the kids can swim off.", "priority": "worth-a-detour" },
+        { "town": "Ribe", "country": "DK", "why": "Denmark's oldest town: cobbled lanes, storks on the rooftops, a Viking museum built for children.", "priority": "must-see" },
+        {
+          "town": "Bouillon",
+          "country": "BE",
+          "why "
+        }
+      ]
+    }
+  ]
+}`
+
+describe('salvageJsonPrefix', () => {
+  it('cuts back to the last complete element of the production failure', async () => {
+    const { salvageJsonPrefix } = await import('./planTrip.js')
+    const repaired = salvageJsonPrefix(HIGHLIGHTS_WITH_BROKEN_TAIL)
+
+    expect(repaired).not.toBeNull()
+    const parsed = JSON.parse(repaired as string)
+    // Everything Claude finished writing survives; only the half-written
+    // trailing candidate is lost.
+    expect(
+      parsed.regions[0].candidateStops.map((s: { town: string }) => s.town),
+    ).toEqual(['Middelfart', 'Ribe'])
+  })
+
+  it('leaves valid JSON exactly as it found it', async () => {
+    const { salvageJsonPrefix } = await import('./planTrip.js')
+    const valid = '{"regions": [{"region": "x", "candidateStops": []}]}'
+
+    expect(JSON.parse(salvageJsonPrefix(valid) as string)).toEqual(
+      JSON.parse(valid),
+    )
+  })
+
+  // The other way a response stops being parseable: the JSON is complete and
+  // Claude then keeps talking, despite the prompt asking for JSON only.
+  it('drops trailing prose after the closing brace', async () => {
+    const { salvageJsonPrefix } = await import('./planTrip.js')
+    const withProse = '{"regions": []}\n\nLet me know if you would like more!'
+
+    expect(JSON.parse(salvageJsonPrefix(withProse) as string)).toEqual({
+      regions: [],
+    })
+  })
+
+  // Braces and quotes inside a "why" sentence are content, not structure — a
+  // scanner that ignored string state would cut in the middle of one.
+  it('does not mistake braces or escaped quotes inside a string for structure', async () => {
+    const { salvageJsonPrefix } = await import('./planTrip.js')
+    const tricky = JSON.stringify({
+      regions: [
+        {
+          region: 'Wallonia',
+          country: 'BE',
+          reasoning: 'A note with a } brace and a "quoted" phrase.',
+          candidateStops: [
+            {
+              town: 'Dinant',
+              country: 'BE',
+              why: 'A citadel {above} the Meuse.',
+              priority: 'must-see',
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(JSON.parse(salvageJsonPrefix(`${tricky} trailing`) as string)).toEqual(
+      JSON.parse(tricky),
+    )
+  })
+
+  it('returns null when there is no complete element to fall back to', async () => {
+    const { salvageJsonPrefix } = await import('./planTrip.js')
+
+    expect(salvageJsonPrefix('not json at all')).toBeNull()
+    expect(salvageJsonPrefix('{"regions": [{"region": "x"')).toBeNull()
+    // A mismatched closer means the nesting itself is untrustworthy, so no
+    // cut point recorded before it can be relied on either.
+    expect(salvageJsonPrefix('{"regions": [{"region": "x"}]]}')).toBeNull()
+  })
+})
+
+describe('salvage on the highlights call', () => {
+  // The end-to-end regression for 2026-08-12: with both attempts returning
+  // the broken response, the run used to throw and the callable 500'd after
+  // paying for two Claude calls. The complete candidates are kept now.
+  it('returns the complete candidates when both attempts come back malformed', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValue(textResponse(HIGHLIGHTS_WITH_BROKEN_TAIL))
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(highlights.regions[0].candidateStops.map((s) => s.town)).toEqual([
+      'Middelfart',
+      'Ribe',
+    ])
+  })
+
+  it('still throws when the last response has no valid prefix to keep', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValue(textResponse('still not valid json'))
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    await expect(
+      generateRegionHighlights({ settings: {} as never, notesFreeText: '' }),
+    ).rejects.toThrow()
+    expect(createMock).toHaveBeenCalledTimes(2)
+  })
+
+  // Salvage is deliberately limited to the curation pass. A truncated
+  // outline would parse into a shorter trip that never reaches the finish
+  // point, and a truncated chunk detail into a day with no plan — both are
+  // worse than failing loudly, so neither call gets a salvage path.
+  it('does not salvage a truncated outline, which would silently shorten the trip', async () => {
+    createMock.mockReset()
+    const fullOutline = JSON.parse(
+      RECORDED_OUTLINE.replace(/```json|```/g, ''),
+    ) as { days: unknown[] }
+    // Broken in exactly the way the highlights response was — a complete
+    // first day, then a second day cut off at a key with no value. Salvage
+    // WOULD recover the first day here; the assertion is that the outline
+    // call never offers it that, because a one-day plan for a two-day trip
+    // is a wrong answer rather than a partial one.
+    const brokenOutline = `{"days":[${JSON.stringify(fullOutline.days[0])},{"index":1,"date" }]}`
+    expect(
+      (await import('./planTrip.js')).salvageJsonPrefix(brokenOutline),
+    ).not.toBeNull()
+    createMock
+      .mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+      .mockResolvedValue(textResponse(brokenOutline))
+
+    const { planTrip } = await import('./planTrip.js')
+    await expect(
+      planTrip({ settings: {} as never, notesFreeText: '' }),
+    ).rejects.toThrow()
+  })
+})

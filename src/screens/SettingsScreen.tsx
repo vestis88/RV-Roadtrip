@@ -10,7 +10,10 @@ import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
 import { EUROPEAN_COUNTRIES } from '../lib/countries'
 import { PRESET_INTERESTS } from '../lib/interests'
 import { mergeRemoteSettings } from '../lib/mergeRemoteSettings'
-import { generateExploreHighlights } from '../lib/exploreCandidateActions'
+import {
+  describeExploreHighlightsError,
+  generateExploreHighlights,
+} from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { updateTripSettings } from '../lib/updateTripSettings'
 import { hasRoute } from '../lib/validateRoute'
@@ -206,7 +209,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
       navigate('/map')
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
-      setOverviewError('Could not find stops right now — please try again.')
+      setOverviewError(describeExploreHighlightsError(error))
     } finally {
       setOverviewSubmitting(false)
     }

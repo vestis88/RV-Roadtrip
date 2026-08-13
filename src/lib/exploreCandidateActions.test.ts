@@ -16,8 +16,62 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('firebase/functions', () => ({ httpsCallable: () => vi.fn() }))
 vi.mock('./firebase', () => ({ db: {}, functions: {} }))
 
-const { candidatePriority, setCandidatePriority, sortCandidatesForList } =
-  await import('./exploreCandidateActions')
+const {
+  candidatePriority,
+  describeExploreHighlightsError,
+  setCandidatePriority,
+  sortCandidatesForList,
+} = await import('./exploreCandidateActions')
+
+const GENERIC = 'Could not find stops right now — please try again.'
+
+// Regression for 2026-08-12: both callers replaced every failure with the
+// generic line, so a server message written for exactly this moment never
+// reached the traveler and a deterministic fault was reported as something a
+// retry would fix.
+describe('describeExploreHighlightsError', () => {
+  it('shows the server message for the codes this callable raises itself', () => {
+    expect(
+      describeExploreHighlightsError({
+        code: 'functions/failed-precondition',
+        message: 'Already finding great stops for this trip — hang tight.',
+      }),
+    ).toBe('Already finding great stops for this trip — hang tight.')
+
+    expect(
+      describeExploreHighlightsError({
+        code: 'functions/internal',
+        message: 'Could not find stops: SyntaxError: Unexpected token.',
+      }),
+    ).toBe('Could not find stops: SyntaxError: Unexpected token.')
+  })
+
+  // firebase-functions' placeholder for a server error it could not
+  // describe — shown as-is it would read as gibberish.
+  it('falls back when the server error carries no real message', () => {
+    expect(
+      describeExploreHighlightsError({ code: 'functions/internal', message: 'INTERNAL' }),
+    ).toBe(GENERIC)
+    expect(
+      describeExploreHighlightsError({ code: 'functions/internal', message: '  ' }),
+    ).toBe(GENERIC)
+  })
+
+  // These codes come from the Firebase client, not from our callable, and
+  // their message is just the code repeated back.
+  it('falls back for transport-level failures and non-callable errors', () => {
+    expect(
+      describeExploreHighlightsError({
+        code: 'functions/deadline-exceeded',
+        message: 'deadline-exceeded',
+      }),
+    ).toBe(GENERIC)
+    expect(describeExploreHighlightsError(new TypeError('Failed to fetch'))).toBe(
+      GENERIC,
+    )
+    expect(describeExploreHighlightsError(undefined)).toBe(GENERIC)
+  })
+})
 
 function stop(
   id: string,

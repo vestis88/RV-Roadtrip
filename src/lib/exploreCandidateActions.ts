@@ -86,6 +86,48 @@ export function sortCandidatesForList(
   }))
 }
 
+const GENERIC_STOPS_ERROR = 'Could not find stops right now — please try again.'
+
+// Codes generateExploreHighlights raises itself, every one of them with a
+// message written for the traveler. Everything else a callable can fail
+// with — 'deadline-exceeded', 'unavailable', 'cancelled' — carries the code
+// string as its message, which is not something to put on screen.
+const SERVER_AUTHORED_CODES = new Set([
+  'functions/failed-precondition',
+  'functions/internal',
+  'functions/invalid-argument',
+  'functions/not-found',
+  'functions/permission-denied',
+  'functions/unauthenticated',
+])
+
+/**
+ * Prefers the server's own account of what went wrong (2026-08-12).
+ *
+ * Both callers used to replace every failure with one generic "please try
+ * again", which is wrong twice over. It threw away messages written
+ * specifically for this moment — "Already finding great stops for this trip
+ * — hang tight" is a request to WAIT, and re-pressing is the one thing that
+ * cannot help — and it advised a retry for faults that are deterministic,
+ * so a traveler hitting one pressed the button until they gave up, paying
+ * for two Claude calls a press. See exploreHighlightsCallable.ts, which now
+ * makes sure an unexpected server failure carries a real message too.
+ *
+ * 'INTERNAL' is firebase-functions' placeholder for a server error it could
+ * not describe, and a network failure's "Failed to fetch" says nothing a
+ * traveler can act on — both fall back to the generic line.
+ */
+export function describeExploreHighlightsError(error: unknown): string {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
+  if (typeof code !== 'string' || !SERVER_AUTHORED_CODES.has(code)) {
+    return GENERIC_STOPS_ERROR
+  }
+  if (typeof message !== 'string' || message.trim() === '' || message === 'INTERNAL') {
+    return GENERIC_STOPS_ERROR
+  }
+  return message
+}
+
 /** Triggers the cheap, repeatable highlights-only curation pass. */
 export async function generateExploreHighlights(
   tripId: string,
