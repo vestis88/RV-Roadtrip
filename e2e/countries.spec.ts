@@ -81,6 +81,31 @@ test('every route country is listed, and its sections start un-researched', asyn
   })
 })
 
+// Now that Trip Setup can prefer any country, a plan can overnight anywhere
+// — and this tab used to name countries from the sixteen preferred-country
+// chips alone, so anything else listed as a bare code. That name isn't only
+// cosmetic: CountryDetailScreen passes it to the researchCountrySections
+// callable, so a Luxembourg guide would have been researched for a country
+// called "LU".
+test('a country outside the quick-pick chips is still named, not shown as a bare code', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const days = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .get()
+  await days.docs[0].ref.update({ 'overnight.country': 'LU' })
+
+  await page.goto('/countries')
+  await expect(page.getByTestId('country-link-LU')).toContainText('Luxembourg')
+  await page.getByTestId('country-link-LU').click()
+  await expect(page.getByTestId('country-detail-title')).toContainText(
+    'Luxembourg',
+  )
+})
+
 test('a researched section renders its findings, and un-researched ones stay empty beside it', async ({
   page,
 }) => {
