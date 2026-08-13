@@ -214,7 +214,7 @@ describe('generateRealPlan: highlights param', () => {
           country: 'NO',
           reasoning: 'r',
           candidateStops: [
-            { town: 'Otta', country: 'NO', why: 'w', priority: 'must-see' },
+            { sight: 'Otta', town: 'Otta', country: 'NO', why: 'w', priority: 'must-see' },
           ],
         },
       ],
@@ -242,7 +242,7 @@ describe('generateRealPlan: highlights param', () => {
           country: 'NO',
           reasoning: 'r',
           candidateStops: [
-            { town: 'Otta', country: 'NO', why: 'w', priority: 'must-see' },
+            { sight: 'Otta', town: 'Otta', country: 'NO', why: 'w', priority: 'must-see' },
           ],
         },
       ],

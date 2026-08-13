@@ -1,5 +1,10 @@
 import type { DocumentReference } from 'firebase-admin/firestore'
-import { corridorStopSchema, type CorridorStopPriority } from '@rv/shared'
+import {
+  corridorStopSchema,
+  type CorridorStop,
+  type CorridorStopPriority,
+  type SightTimeNeeded,
+} from '@rv/shared'
 import type { PendingWrite } from './firestoreBatch.js'
 import type {
   RegionHighlightCandidate,
@@ -7,47 +12,121 @@ import type {
 } from './prompts/planTripSchema.js'
 
 /**
- * Explore mode (2026-07-30): flattens a fresh highlights-only curation pass
- * into `candidate` corridorStop writes — one doc per candidate town, region
- * label preserved for the explore list's grouping, `rank` assigned by
- * position within its own priority tier (Claude already orders each
- * region's candidateStops by how strongly it favors them, and regions
- * themselves come out in roughly-corridor order, so walking the response
- * top-to-bottom and incrementing per tier as candidates are encountered
- * reproduces that ordering without re-deriving it).
+ * A corridor stop already in Firestore, as much of it as the merge below
+ * needs: its name (identity), and its tier (so new finds rank after it). No
+ * ref, because nothing here deletes anything any more.
+ */
+export type ExistingCandidateStop = Pick<CorridorStop, 'name' | 'priority'>
+
+export interface ExploreCandidateMerge {
+  writes: PendingWrite[]
+  /** Genuinely new suggestions, written as fresh `candidate` stops. */
+  added: number
+  /** Suggestions already in the corridor — left exactly as the traveler left them. */
+  alreadyKnown: number
+  /** Suggestions whose sight could not be located, and so were not written at all. */
+  unlocated: number
+}
+
+/**
+ * Collapses a place name to a comparison key: case-folded, diacritics
+ * dropped, punctuation and spacing removed. "Møns Klint", "Mons Klint" and
+ * "møns klint" are one place.
+ */
+function identityKey(name: string): string {
+  return name
+    .toLowerCase()
+    // Letters NFD does not decompose, for the same reason placesApi.ts's
+    // nameTokens special-cases them: they are letters, not a base plus an
+    // accent, so the strip below would delete them outright.
+    .replace(/\u00f8/g, 'o')
+    .replace(/\u00e6/g, 'ae')
+    .replace(/\u00df/g, 'ss')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Explore mode (2026-07-30): flattens a highlights-only curation pass into
+ * `candidate` corridorStop writes — one doc per curated sight, region label
+ * preserved for the explore list's grouping, `rank` assigned by position
+ * within its own priority tier (Claude already orders each region's
+ * candidateStops by how strongly it favors them, and regions themselves come
+ * out in roughly-corridor order, so walking the response top-to-bottom and
+ * incrementing per tier as candidates are encountered reproduces that
+ * ordering without re-deriving it).
  *
- * Deletes every EXISTING `candidate` stop first (passed in by the caller,
- * already read) — a fresh curation pass reflects the trip's current
- * settings, so stale candidates from before a settings change shouldn't
- * linger alongside new ones. `locked` stops (the traveler's explicit
- * approvals) are never touched here — that's the caller's job to preserve.
+ * MERGES with what is already there (2026-08-13). It used to delete every
+ * existing `candidate` stop first, on the reasoning that a fresh pass
+ * reflects the trip's current settings and stale candidates shouldn't linger
+ * beside new ones. That was defensible while candidates were consumed at
+ * generation and gone; it stopped being defensible the day generation began
+ * preserving them. A traveler may now spend weeks setting interest levels,
+ * keeping some stops and turning others down — and pressing "Find more
+ * stops" threw all of it away and handed back a fresh list, including every
+ * suggestion they had already rejected.
+ *
+ * So: existing stops are never touched, a proposal matching one by name is
+ * counted and skipped, and only genuinely new finds are written. Matching is
+ * by name alone, deliberately NOT by proximity the way writeGeneratedDays
+ * dedupes overnight towns — sights cluster, and a 5 km proximity rule would
+ * decide that Kronborg Castle and the Maritime Museum next door are the same
+ * suggestion. Name matching is reliable here because the sight's name comes
+ * back from Places itself rather than from the model (see
+ * verifyPlaceLocation), so the same sight resolves to the same string across
+ * passes however Claude spelled it this time.
+ *
+ * `rejected` stops are passed in alongside the live ones and match the same
+ * way: that status exists precisely so a refresh can tell "never suggested"
+ * from "suggested and turned down" (see corridorStopStatusSchema).
  */
 export function buildExploreCandidateWrites(
   tripRef: DocumentReference,
   highlights: RegionHighlightsResponse,
-  existingCandidateRefs: DocumentReference[],
-): PendingWrite[] {
-  const writes: PendingWrite[] = existingCandidateRefs.map((ref) => ({
-    op: 'delete',
-    ref,
-  }))
+  existing: ExistingCandidateStop[],
+): ExploreCandidateMerge {
+  const writes: PendingWrite[] = []
+  const knownKeys = new Set(existing.map((stop) => identityKey(stop.name)))
 
+  // New finds are appended after whatever is already in their tier, so a
+  // refresh never reshuffles the list the traveler has been working through.
   const nextRankByPriority = new Map<CorridorStopPriority, number>()
+  for (const stop of existing) {
+    const priority = stop.priority ?? 'worth-a-detour'
+    nextRankByPriority.set(priority, (nextRankByPriority.get(priority) ?? 0) + 1)
+  }
+
+  let added = 0
+  let alreadyKnown = 0
+  let unlocated = 0
   for (const region of highlights.regions) {
     for (const candidate of region.candidateStops) {
       if (candidate.lat === undefined || candidate.lng === undefined) {
-        // Best-effort geocoding (see generateRegionHighlights) — a candidate
-        // that never resolved has nothing to put a map marker at, so it's
-        // dropped here rather than written with unusable coordinates.
+        // Best-effort sight resolution (see geocodeHighlights) — a candidate
+        // whose sight could not be verified where it was said to be has
+        // nothing to put a map marker at, and a guessed marker is how a
+        // Danish dinner stop ended up in Greece. Dropped rather than written
+        // at an approximate location.
+        unlocated++
         continue
       }
+      const key = identityKey(candidate.sight)
+      if (knownKeys.has(key)) {
+        alreadyKnown++
+        continue
+      }
+      // Guards against one pass proposing the same sight from two regions,
+      // which would otherwise write it twice in a single batch.
+      knownKeys.add(key)
       const rank = nextRankByPriority.get(candidate.priority) ?? 0
       nextRankByPriority.set(candidate.priority, rank + 1)
+      added++
       writes.push({
         op: 'set',
         ref: tripRef.collection('corridorStops').doc(),
         data: corridorStopSchema.parse({
-          name: candidate.town,
+          name: candidate.sight,
           lat: candidate.lat,
           lng: candidate.lng,
           country: candidate.country,
@@ -57,11 +136,14 @@ export function buildExploreCandidateWrites(
           priority: candidate.priority,
           region: region.region,
           rank,
+          baseTown: candidate.town,
+          ...(candidate.interest ? { interest: candidate.interest } : {}),
+          ...(candidate.timeNeeded ? { timeNeeded: candidate.timeNeeded } : {}),
         }),
       })
     }
   }
-  return writes
+  return { writes, added, alreadyKnown, unlocated }
 }
 
 interface CandidateLike {
@@ -73,6 +155,9 @@ interface CandidateLike {
   priority?: CorridorStopPriority
   region?: string
   rank?: number
+  baseTown?: string
+  interest?: string
+  timeNeeded?: SightTimeNeeded
 }
 
 /**
@@ -85,6 +170,16 @@ interface CandidateLike {
  * rescan find or a manually pinned stop, neither of which has region
  * context — falls into one "Added stops" catch-all region per country
  * rather than being dropped.
+ *
+ * A stop's own name is its `sight` and `baseTown` is where to sleep while
+ * seeing it. A stop with no `baseTown` — one curated before sights led the
+ * route, a hand-dropped pin, a rescan find — is a place whose own name is
+ * the whole story, so it stands as both: that is what it always meant, and
+ * inventing a separate base town for it would be a guess the outline phase
+ * would then route around. `interest`/`timeNeeded` are passed through only
+ * when the stop actually has them; the outline prompt is told what to assume
+ * when they're missing, rather than being handed a default that reads as a
+ * measurement.
  *
  * A stop with no `country` (a hand-placed pin dropped before Places
  * resolved one) can't become a RegionHighlightCandidate, which requires a
@@ -118,10 +213,13 @@ export function buildRegionHighlightsFromCandidates(
       byRegionKey.set(key, group)
     }
     group.items.push({
-      town: stop.name,
+      sight: stop.name,
+      town: stop.baseTown ?? stop.name,
       country: stop.country,
       why: stop.why ?? `${stop.name}, chosen while exploring the route.`,
       priority: stop.priority ?? 'worth-a-detour',
+      ...(stop.interest ? { interest: stop.interest } : {}),
+      ...(stop.timeNeeded ? { timeNeeded: stop.timeNeeded } : {}),
       lat: stop.lat,
       lng: stop.lng,
     })

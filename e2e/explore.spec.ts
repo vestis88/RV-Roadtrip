@@ -25,6 +25,9 @@ async function seedCandidate(
     rank: number
     lat: number
     lng: number
+    baseTown: string
+    interest: string
+    timeNeeded: 'couple-of-hours' | 'half-day' | 'full-day'
   }> = {},
 ) {
   await adminDb
@@ -42,6 +45,12 @@ async function seedCandidate(
       priority: overrides.priority ?? 'must-see',
       region: 'Gudbrandsdalen',
       rank: overrides.rank ?? 0,
+      // The sights-led fields are omitted unless a test asks for them: a
+      // stop curated before sights led the route has none of them, and that
+      // is the shape most of this file is exercising.
+      ...(overrides.baseTown ? { baseTown: overrides.baseTown } : {}),
+      ...(overrides.interest ? { interest: overrides.interest } : {}),
+      ...(overrides.timeNeeded ? { timeNeeded: overrides.timeNeeded } : {}),
     })
 }
 
@@ -187,6 +196,10 @@ test('the interest selector sets a level, and lock/reject change status', async 
       .get()
   ).docs[0].id
   await page.getByTestId(`explore-candidate-reject-${ottaId}`).click()
+  // Turning a stop down leaves a tombstone rather than deleting it
+  // (2026-08-13): "Find more stops" merges into the corridor now, and a
+  // deleted stop is indistinguishable from one that was never suggested, so
+  // the next refresh would hand it straight back. Off the list either way.
   await expect
     .poll(async () => {
       const snap = await adminDb
@@ -195,9 +208,62 @@ test('the interest selector sets a level, and lock/reject change status', async 
         .collection('corridorStops')
         .doc(ottaId)
         .get()
-      return snap.exists
+      return snap.data()?.status
     })
-    .toBe(false)
+    .toBe('rejected')
+  await expect(page.getByTestId(`explore-candidate-${ottaId}`)).toHaveCount(0)
+})
+
+// Curation answers "what shouldn't we miss" now, so a candidate is a sight
+// with a town attached rather than a town. The card has to say which of the
+// traveler's own interests it is there for — otherwise the match is
+// something they have to take on trust.
+test('a sight candidate shows its base town, the interest it serves, and how long it takes', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Hunderfossen Eventyrpark',
+    baseTown: 'Lillehammer',
+    interest: 'theme parks',
+    timeNeeded: 'full-day',
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const id = (
+    await stops.where('name', '==', 'Hunderfossen Eventyrpark').limit(1).get()
+  ).docs[0].id
+
+  const card = page.getByTestId(`explore-candidate-${id}`)
+  await expect(card).toContainText('Hunderfossen Eventyrpark')
+  await expect(card).toContainText('Sleep in Lillehammer')
+  await expect(page.getByTestId(`explore-candidate-serves-${id}`)).toContainText(
+    'theme parks',
+  )
+  await expect(page.getByTestId(`explore-candidate-time-${id}`)).toContainText(
+    'A full day',
+  )
+})
+
+// A stop curated before sights led the route (and any pin the traveler drops
+// themselves) has none of those fields, and must not sprout empty chips.
+test('a town-only candidate renders without the sights-led extras', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta' })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const id = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+
+  await expect(page.getByTestId(`explore-candidate-${id}`)).toContainText('Otta')
+  await expect(page.getByTestId(`explore-candidate-facts-${id}`)).toHaveCount(0)
 })
 
 // Voting and keeping are different decisions, and only keeping moves the

@@ -58,26 +58,58 @@ export type PlanTripSkeleton = z.infer<typeof planTripSkeletonSchema>
 // under real time/distance constraints, instead of trying to both curate
 // and schedule in a single call — which is what previously biased routes
 // toward whatever town was closest to the direct line.
-// lat/lng are NOT produced by Claude — they're geocoded server-side after
+//
+// Sights lead the route (2026-08-13). The unit of curation used to be a
+// TOWN — "which towns along this corridor are worth sleeping in" — with the
+// sights inside it left implicit, so a trip could be routed through a town
+// whose one reason for existing on the list never made it into any day.
+// The unit is a SIGHT now: `sight` is what shouldn't be missed, `town` is
+// only where to sleep while seeing it, `interest` names the traveler's own
+// stated interest (or a phrase from their notes) that it serves, and
+// `timeNeeded` is what the outline phase paces the day against. The town
+// still matters — a sight with nowhere sensible to spend the night is not
+// routable — it is just no longer the thing being chosen.
+//
+// lat/lng are NOT produced by Claude — they're resolved server-side after
 // the response validates (generateRegionHighlights), so the review UI can
 // draw the candidates on a map and estimate each one's detour off the
-// ideal route. Optional because geocoding is best-effort: a town that
-// doesn't resolve, a transient Places error, or an unconfigured
-// GOOGLE_PLACES_API_KEY must degrade to "no coordinates for this one",
-// never to a failed trip generation.
+// ideal route. They are the SIGHT's coordinates, verified by name and
+// distance against the base town (see resolveSightLocation): a named sight,
+// unlike a town, routinely has no match where it was asked for, and Places
+// answers that with a plausible namesake somewhere else entirely. Optional
+// because resolution is best-effort — a sight that can't be located
+// confidently must degrade to "no coordinates for this one" (and is then
+// dropped rather than mapped to a guess), never to a failed generation.
 // `source` is not produced by the highlights call either: it's stamped on
-// server-side by the opt-in web-search enrichment pass (enrichHighlights.ts)
-// so the review UI can show the traveler which suggestions came from a web
-// search rather than the curated pass. Optional, and absent/undefined means
-// 'curated' — every candidate produced before this feature existed (real
-// trips mid-flight, stored pendingHighlights, existing tests) has to stay
-// valid, and a candidate the plain highlights call returned is curated by
-// definition.
+// server-side by the opt-in web-search enrichment pass so the review UI can
+// show the traveler which suggestions came from a web search rather than
+// the curated pass. Optional, and absent/undefined means 'curated' — every
+// candidate produced before this feature existed (real trips mid-flight,
+// existing tests) has to stay valid, and a candidate the plain highlights
+// call returned is curated by definition.
 export const regionHighlightCandidateSchema = z.object({
+  // Required, because it is the whole point of this phase: a response that
+  // lists towns without saying what is at them is the shape this replaced,
+  // and failing it sends Claude back through callWithRetry's correct-and-
+  // resubmit loop rather than silently reverting the design.
+  // buildRegionHighlightsFromCandidates supplies the stop's own name here
+  // for a town-only stop curated before this existed, so the reverse
+  // direction never has to invent one.
+  sight: z.string().min(1),
+  /** Where to sleep while seeing `sight` — not itself the thing chosen. */
   town: z.string(),
   country: z.string().length(2),
   why: z.string(),
   priority: z.enum(['must-see', 'worth-a-detour', 'nice-if-convenient']),
+  // Optional despite the prompt demanding both, because both must survive
+  // the reverse direction: a stop the traveler pinned by hand, a rescan
+  // find, or anything curated before this existed has no interest match and
+  // no duration behind it, and guessing one would put a fabricated figure
+  // straight into the pacing rules that read it.
+  interest: z.string().optional(),
+  timeNeeded: z
+    .enum(['couple-of-hours', 'half-day', 'full-day'])
+    .optional(),
   source: z.enum(['curated', 'search']).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
@@ -127,6 +159,17 @@ export const routeOutlineDaySchema = z.object({
   // defaulting to whichever town is geographically closest to the direct
   // line between startPoint and endPoint — see OUTLINE_SYSTEM_PROMPT.
   highlightReason: z.string().min(1),
+  // The curated sights this day exists to see (2026-08-13). highlightReason
+  // has always carried the same information in prose, and the detail phase
+  // has always had a rule that a place NAMED in it must become one of the
+  // day's activities — but that rule can only fire when the reason happens
+  // to name the place cleanly, which is exactly the kind of thing a sentence
+  // does unreliably. Naming them as a list makes the seam explicit: the
+  // detail prompt is told these must appear among the day's activities,
+  // verbatim. Optional, so a plain connecting overnight (a night that
+  // exists to break up a drive, not to see anything) stays valid, and so an
+  // outline generated before this existed still parses.
+  sights: z.array(z.string()).optional(),
 })
 
 export const routeOutlineSchema = z.object({

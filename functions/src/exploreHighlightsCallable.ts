@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import type { Trip } from '@rv/shared'
+import type { CorridorStop, Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { commitInChunks } from './firestoreBatch.js'
@@ -42,10 +42,18 @@ function describeCause(error: unknown): string {
  * "generating" banner while this runs. Guarded by its own
  * `planMeta.exploreStatus` instead, so two devices on a shared trip can't
  * both trigger a redundant call at once.
+ *
+ * Re-runnable without loss (2026-08-13): the result is merged into the
+ * existing corridor rather than replacing it, so pressing this a second time
+ * — weeks into curating, or by accident from Trip Setup's "Generate
+ * overview" — costs a Claude call and adds whatever is new, and cannot cost
+ * the traveler a single interest level they set. `candidateCount` is
+ * therefore what was ADDED; `alreadyKnown` is how much of the answer they
+ * already had.
  */
 export async function generateExploreHighlightsForTrip(
   tripId: string,
-): Promise<{ candidateCount: number }> {
+): Promise<{ candidateCount: number; alreadyKnown: number }> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
 
@@ -85,46 +93,55 @@ export async function generateExploreHighlightsForTrip(
       tripId,
     })
 
-    const existingCandidatesSnap = await tripRef
+    // Every stop a refresh has to reckon with, including the `rejected`
+    // ones: a suggestion the traveler already turned down must not come
+    // back, which is the whole reason that status exists. `locked` stops
+    // count as known too — a sight they have already committed to is
+    // obviously not a new find.
+    const existingSnap = await tripRef
       .collection('corridorStops')
-      .where('status', '==', 'candidate')
+      .where('status', 'in', ['candidate', 'locked', 'rejected'])
       .get()
 
-    const writes = buildExploreCandidateWrites(
+    const merge = buildExploreCandidateWrites(
       tripRef,
       highlights,
-      existingCandidatesSnap.docs.map((doc) => doc.ref),
+      existingSnap.docs.map((doc) => doc.data() as CorridorStop),
     )
-    const candidateCount = writes.filter((w) => w.op === 'set').length
-    // Claude proposing real towns but NONE of them surviving to a write
-    // means every geocode failed — a systemic problem (missing/invalid
-    // Places key, quota exhaustion, an outage), not the per-candidate
-    // best-effort degradation buildExploreCandidateWrites' drop is meant
-    // for. Reported as an error rather than an empty success: the traveler
-    // sees "nothing found" for a route full of real stops, and the Claude
-    // call is already paid for, so silently returning 0 is the worst
-    // possible outcome. Deliberately checked before the write and before
-    // exploreLastRunAt, so a broken run neither half-applies nor gets
-    // recorded as a genuine "searched and found nothing".
+    // Claude proposing real sights but NONE of them being locatable means
+    // every lookup failed — a systemic problem (missing/invalid Places key,
+    // quota exhaustion, an outage), not the per-candidate best-effort
+    // degradation buildExploreCandidateWrites' drop is meant for. Reported
+    // as an error rather than an empty success: the traveler sees "nothing
+    // found" for a route full of real stops, and the Claude call is already
+    // paid for, so silently returning 0 is the worst possible outcome.
+    // Deliberately checked before the write and before exploreLastRunAt, so
+    // a broken run neither half-applies nor gets recorded as a genuine
+    // "searched and found nothing".
+    //
+    // Measured against `unlocated` specifically, not against "nothing was
+    // written" (2026-08-13). Now that a refresh merges, a run that proposes
+    // ten sights the traveler already has writes nothing at all — and that
+    // is a completely healthy result, not an outage.
     const proposedCount = highlights.regions.reduce(
       (total, region) => total + region.candidateStops.length,
       0,
     )
-    if (proposedCount > 0 && candidateCount === 0) {
+    if (proposedCount > 0 && merge.unlocated === proposedCount) {
       throw new HttpsError(
         'internal',
         `Found ${proposedCount} stops but could not locate any of them on the map — please try again.`,
       )
     }
 
-    await commitInChunks(db, writes)
+    await commitInChunks(db, merge.writes)
 
     // A completed run only — not attempted-but-failed — so the frontend
     // can tell "never searched" apart from "searched and genuinely found
     // nothing" regardless of which screen fired the call. See
     // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
     await tripRef.update({ 'planMeta.exploreLastRunAt': new Date().toISOString() })
-    return { candidateCount }
+    return { candidateCount: merge.added, alreadyKnown: merge.alreadyKnown }
   } catch (error) {
     // firebase-functions only forwards the message of an HttpsError;
     // anything else reaches the browser as the bare code 'internal' with the
