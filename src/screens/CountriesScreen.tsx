@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
-import { EUROPEAN_COUNTRIES } from '../lib/countries'
+// Was a local lookup over the sixteen quick-pick countries alone, so any
+// other country the plan actually overnighted in listed as a bare code —
+// "LU" under a Luxembourg flag. Now that a trip can prefer any country,
+// that gap would have been the first thing a Luxembourg trip saw here.
+import { countryName } from '../lib/countries'
 import { isoCountryFlag } from '../lib/countryFlag'
-
-function countryName(code: string): string {
-  return EUROPEAN_COUNTRIES.find((c) => c.code === code)?.name ?? code
-}
 
 export function CountriesScreen() {
   const { tripId } = useTripContext()

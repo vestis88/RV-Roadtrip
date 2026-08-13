@@ -7,7 +7,11 @@ import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 import { ChipMultiSelect } from '../components/ChipMultiSelect'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlaceAutocompleteInput } from '../components/PlaceAutocompleteInput'
-import { EUROPEAN_COUNTRIES } from '../lib/countries'
+import {
+  countryChipOptions,
+  countryLabel,
+  searchCountries,
+} from '../lib/countries'
 import { PRESET_INTERESTS } from '../lib/interests'
 import { mergeRemoteSettings } from '../lib/mergeRemoteSettings'
 import {
@@ -333,15 +337,36 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           allowFreeEntry
         />
 
+        {/* The chips are the sixteen countries this app's trips actually
+          * cross, kept one tap away — but they were also the ONLY countries
+          * that could be chosen, so a trip to Luxembourg (reported with a
+          * screenshot of a trip literally named "Luxemburg") had no way to
+          * name its own destination. The search box below them opens the
+          * full ISO list without pushing the common cases aside; picking a
+          * result appends a chip that looks and deselects exactly like the
+          * presets, and stores the same two-letter code, so nothing
+          * downstream — the flag renderer, the Countries tab, the settings
+          * JSON handed to Claude — can tell the two apart. It commits
+          * through the same commit() path as every other field, so the
+          * optimistic update and the dirty-key merge against incoming
+          * snapshots both apply unchanged. */}
         <ChipMultiSelect
           label="Preferred countries"
           testIdPrefix="country"
-          options={EUROPEAN_COUNTRIES.map((country) => ({
-            value: country.code,
-            label: country.name,
-          }))}
+          options={countryChipOptions(settings.preferredCountries)}
           selected={settings.preferredCountries}
           onChange={(preferredCountries) => commit({ preferredCountries })}
+          search={{
+            label: 'Search for another country to add',
+            placeholder: 'Add another country…',
+            emptyLabel: 'No country matches that.',
+            alreadySelectedLabel: 'Already in your list.',
+            find: (query) =>
+              searchCountries(query).map((country) => ({
+                value: country.code,
+                label: countryLabel(country.code),
+              })),
+          }}
         />
 
         <label className="block">

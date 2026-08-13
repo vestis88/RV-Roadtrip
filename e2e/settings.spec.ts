@@ -153,6 +153,60 @@ test('settings form fills and persists across reload, without falsely marking an
   await expect(page.getByTestId('plan-status')).toHaveText('idle')
 })
 
+// Reported with a screenshot of a trip named "Luxemburg" whose country
+// could not be named: the preferred-countries chips were a fixed list of
+// sixteen, so anywhere else in the world was simply unselectable. The value
+// stored is an ISO 3166-1 alpha-2 code (tripSettingsSchema rejects anything
+// else, and a rejected write leaves a trip document that no longer parses),
+// so the real check here is that a country added by search survives the
+// round trip through Firestore exactly like a preset chip does.
+test('a country with no chip can be found by search, and persists like a preset', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+
+  await expect(page.getByTestId('country-chip-LU')).toHaveCount(0)
+
+  await page.getByTestId('country-search').fill('luxem')
+  await page.getByTestId('country-search-result-LU').click()
+
+  // Named, not a bare "LU", and pressed like any other selected chip.
+  const chip = page.getByTestId('country-chip-LU')
+  await expect(chip).toHaveAttribute('aria-pressed', 'true')
+  await expect(chip).toContainText('Luxembourg')
+  // The presets stay exactly where they were — one tap away, not pushed
+  // aside by the long tail.
+  await expect(page.getByTestId('country-chip-NO')).toBeVisible()
+
+  // Searching for it again offers no duplicate; it says it's already there
+  // rather than claiming no such country exists.
+  await page.getByTestId('country-search').fill('luxem')
+  await expect(page.getByTestId('country-search-result-LU')).toHaveCount(0)
+  await expect(page.getByTestId('country-search-empty')).toContainText(
+    'Already in your list',
+  )
+
+  // Same commit() path as every other field — an independent Firestore
+  // write with nothing visible flipping to confirm it landed.
+  await page.waitForTimeout(500)
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+
+  await expect(page.getByTestId('country-chip-LU')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  // And it deselects by tapping the chip, exactly like a preset.
+  await page.getByTestId('country-chip-LU').click()
+  await expect(page.getByTestId('country-chip-LU')).toHaveCount(0)
+  await page.waitForTimeout(500)
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('country-chip-LU')).toHaveCount(0)
+})
+
 test('editing settings on a trip with a ready plan marks it stale', async ({
   page,
 }) => {

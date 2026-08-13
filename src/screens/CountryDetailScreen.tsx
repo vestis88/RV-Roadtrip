@@ -12,12 +12,13 @@ import {
   saveCountryBrief,
   sectionIdFromTitle,
 } from '../lib/countryBriefActions'
-import { EUROPEAN_COUNTRIES } from '../lib/countries'
+// This name isn't only cosmetic here — it's passed to the
+// researchCountrySections callable and lands in the prompt Claude answers
+// from. The old lookup only knew the sixteen quick-pick countries and fell
+// back to the raw code for everything else, so researching a guide for
+// Luxembourg would have asked Claude about a country called "LU".
+import { countryName } from '../lib/countries'
 import { isoCountryFlag } from '../lib/countryFlag'
-
-function countryName(code: string): string {
-  return EUROPEAN_COUNTRIES.find((c) => c.code === code)?.name ?? code
-}
 
 function SectionCard({
   resolved,
@@ -205,7 +206,7 @@ export function CountryDetailScreen() {
       </Link>
 
       <div className="mt-4 flex items-center justify-between gap-2">
-        <h2 className="heading-md">
+        <h2 className="heading-md" data-testid="country-detail-title">
           {isoCountryFlag(code)} {countryName(code)}
         </h2>
         <button
