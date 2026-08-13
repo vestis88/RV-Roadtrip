@@ -240,10 +240,11 @@ export function OverviewMapScreen() {
             <button
               type="button"
               data-testid="reorder-stops-button"
-              className="btn btn-ghost"
+              className="btn btn-ghost disabled:opacity-40"
+              disabled={planBusy}
               onClick={() => setReorderOpen(true)}
             >
-              Edit route
+              {planBusy ? 'Updating the plan…' : 'Edit route'}
             </button>
           )}
         </div>
@@ -254,6 +255,8 @@ export function OverviewMapScreen() {
           tripId={tripId}
           stops={committedCorridorStops}
           addableStops={addableCorridorStops}
+          planBusy={planBusy}
+          onSubmitted={markPlanSubmitted}
           onClose={() => setReorderOpen(false)}
         />
       )}

@@ -15,6 +15,15 @@ interface ReorderCorridorPanelProps {
    * "+ add" entries; including one generates its day via the detail phase
    * once confirmed. */
   addableStops: { id: string; name: string }[]
+  /**
+   * True while the plan is already being rewritten — including a submission
+   * this client just made that the backend has not acknowledged yet. Same
+   * prop, same reason, as AddRestDay/RequestChangesForDay/
+   * OvernightCandidatesPicker.
+   */
+  planBusy: boolean
+  /** Called once the planRequest write lands, so the busy state starts. */
+  onSubmitted: () => void
   onClose: () => void
 }
 
@@ -34,11 +43,25 @@ interface ReorderCorridorPanelProps {
  * whenever the preview reports an `endDateChange`, this panel requires an
  * explicit tick before "Confirm" is enabled — an edit meant as "swap this
  * stop for that one" should never silently move the trip's return date.
+ *
+ * The doc comment above used to claim the existing "generating" banner
+ * covered the wait. It does not cover the window this panel actually opens:
+ * `loading` clears when the planRequest write resolves, the trip is still
+ * 'ready' until generatePlan's trigger claims it a second or two later, and
+ * "Edit route" on the map behind is immediately live again — so a second
+ * reconciliation can be submitted against a route the first one is already
+ * rewriting. That matters more here than anywhere else, because
+ * reconcileCorridor recomputes every day's date from the stop order: run it
+ * twice against overlapping state and days stretch rather than converge
+ * (2026-08-13: a traveler trying to repair an already-corrupted trip through
+ * this panel turned a one-night stop into four). Hence planBusy.
  */
 export function ReorderCorridorPanel({
   tripId,
   stops,
   addableStops,
+  planBusy,
+  onSubmitted,
   onClose,
 }: ReorderCorridorPanelProps) {
   const [order, setOrder] = useState<string[]>(stops.map((s) => s.id))
@@ -104,6 +127,9 @@ export function ReorderCorridorPanel({
     setError(null)
     try {
       await submitReconcileCorridor(tripId, order, acceptEndDateChange)
+      // Before the panel closes, so the busy banner is already up by the
+      // time these controls disappear.
+      onSubmitted()
       onClose()
     } catch (err) {
       console.error('submitReconcileCorridor failed', err)
@@ -296,11 +322,11 @@ export function ReorderCorridorPanel({
               <button
                 type="button"
                 data-testid="reorder-confirm-button"
-                disabled={loading || !canConfirm}
+                disabled={loading || planBusy || !canConfirm}
                 onClick={confirm}
                 className="btn btn-sm btn-primary disabled:opacity-40"
               >
-                Confirm
+                {planBusy ? 'Updating the plan…' : 'Confirm'}
               </button>
             )}
             <button
