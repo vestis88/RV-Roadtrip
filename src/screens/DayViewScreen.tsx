@@ -488,6 +488,22 @@ export function DayViewScreen() {
           >
             Navigate
           </a>
+          {/* Recorded per night by applyOvernightOptions, and only ever on a
+              free one: the sentence from this country's own researched rules
+              that made sleeping here permissible. Shown next to the pin
+              because that is where the question gets asked — standing at a
+              lay-by at dusk, working out whether the sign means you. The
+              coordinates are a mapped lay-by or free motorhome parking area,
+              not a field someone imagined; in a right-to-roam country this
+              rule is what says how far off it you may legally go. */}
+          {day.overnight.freeCampingRule && (
+            <span
+              data-testid="overnight-free-camping-rule"
+              className="basis-full text-xs text-neutral-500 dark:text-neutral-400"
+            >
+              Free camping here: {day.overnight.freeCampingRule}
+            </span>
+          )}
         </p>
 
         {day.type === 'rest' ? (

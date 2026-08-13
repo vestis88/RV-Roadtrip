@@ -69,7 +69,7 @@ You are not limited to candidateHighlights for every single night — where two 
 ${PACING_RULES}
 6. The route must start at startPoint on the trip's first day and end at endPoint on the trip's last day — every day in between must be accounted for.
 
-Choose overnight stops with nearby campsites where possible.
+Choose overnight stops with nearby campsites where possible — except that "offGridTolerance" in the settings is how many nights in a row these travelers can spend off grid, so up to that many consecutive stops may be somewhere rural with no campsite at all, and the stop after such a run must be a town with campsites or a motorhome service point. Where the country allows free camping this buys real freedom in choosing a stop; where it does not, keep every stop near a campsite regardless.
 
 Default every drive day's "slot" to "evening": drive after that day's
 activities and dinner, arriving at the new overnight town late, so full

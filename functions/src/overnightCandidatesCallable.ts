@@ -1,10 +1,9 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import { FREE_CAMPING_SECTION_ID } from '@rv/shared'
-import type { CountryGuideSection, OvernightStopCandidate, TripDay } from '@rv/shared'
+import type { OvernightStopCandidate, TripDay } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
-import { COUNTRY_GUIDE_SECTIONS_COLLECTION } from './countrySectionsCallable.js'
+import { loadFreeCampingRulesByCountry } from './countryGuideSections.js'
 import { findNearbyCampsites, googlePlacesApiKey } from './placesApi.js'
 import { searchStellplatzCandidates } from './overpassApi.js'
 import {
@@ -97,25 +96,6 @@ export const __testing = { withDeadline }
  * candidates for every day at generation time would mean paying the
  * Places/Overpass/Claude cost for stops nobody ever looks at twice.
  */
-/**
- * Best-effort: the wild-camping prompt is meaningfully better with the
- * country's free-camping rules in hand, but it degrades to generic advice
- * without them rather than failing — a country nobody has researched yet is
- * normal, not an error.
- */
-async function loadFreeCampingRules(
-  countryCode: string,
-): Promise<string[] | undefined> {
-  const snap = await getFirestore()
-    .collection(COUNTRY_GUIDE_SECTIONS_COLLECTION)
-    .where('countryCode', '==', countryCode)
-    .where('sectionId', '==', FREE_CAMPING_SECTION_ID)
-    .limit(1)
-    .get()
-  if (snap.empty) return undefined
-  return (snap.docs[0].data() as CountryGuideSection).items
-}
-
 export async function fetchOvernightCandidates(
   tripId: string,
   dayId: string,
@@ -131,18 +111,14 @@ export async function fetchOvernightCandidates(
   const near = { lat: day.overnight.lat, lng: day.overnight.lng }
   const country = day.overnight.country
 
-  // Country research moved out of the trip (2026-08-02) so it can be reused
-  // across trips: free-camping rules are cached per country, not per vehicle,
-  // so the wild-camping prompt can read whichever entry exists for this
-  // country without needing this trip's own vehicle to match.
-  // Best-effort by its own definition (see above), so a Firestore hiccup here
-  // must not be the thing that fails the picker — it was the only await in
-  // this function with no guard on it at all.
-  const freeCampingRules = await loadFreeCampingRules(country).catch(
-    (error: unknown) => {
-      console.warn('Overnight candidates: free-camping rules lookup failed', error)
-      return undefined
-    },
+  // The wild-camping prompt is meaningfully better with the country's own
+  // free-camping rules in hand, and degrades to generic advice without them
+  // rather than failing. Shares the overnight pass's loader (which swallows
+  // its own per-country failures, so a Firestore hiccup here cannot be the
+  // thing that fails the picker) so the prose the picker shows and the rules
+  // the planner commits nights on can never come from different documents.
+  const freeCampingRules = (await loadFreeCampingRulesByCountry([country])).get(
+    country,
   )
 
   const [campsites, stellplatzFromOsm, wild] = await Promise.all([

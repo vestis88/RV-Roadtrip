@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_OFF_GRID_TOLERANCE,
   activitySchema,
   countryGuideSectionSchema,
+  offGridToleranceOf,
   logEntrySchema,
   planRequestSchema,
   restaurantSchema,
@@ -51,6 +53,35 @@ describe('fixture trip validates against every schema', () => {
     expect(planRequestSchema.parse(fixturePlanRequest)).toEqual(
       fixturePlanRequest,
     )
+  })
+})
+
+describe('off-grid tolerance', () => {
+  // Every trip that existed before the setting did has no value stored, and
+  // must keep validating — which is also the reason the default lives in one
+  // function instead of a `?? 3` at each reader.
+  it('validates a trip whose settings predate the setting', () => {
+    expect(fixtureTrip.settings).not.toHaveProperty('offGridTolerance')
+    expect(tripSchema.parse(fixtureTrip)).toEqual(fixtureTrip)
+    expect(offGridToleranceOf(fixtureTrip.settings)).toBe(
+      DEFAULT_OFF_GRID_TOLERANCE,
+    )
+  })
+
+  // 0 is a real answer — "give me facilities every night" — not an absent one.
+  it('keeps a stored zero rather than defaulting it away', () => {
+    expect(offGridToleranceOf({ offGridTolerance: 0 })).toBe(0)
+  })
+
+  it('rejects a fractional or negative number of nights', () => {
+    for (const offGridTolerance of [1.5, -1]) {
+      expect(() =>
+        tripSchema.parse({
+          ...fixtureTrip,
+          settings: { ...fixtureTrip.settings, offGridTolerance },
+        }),
+      ).toThrow()
+    }
   })
 })
 

@@ -40,8 +40,34 @@ export const tripSettingsSchema = z.object({
   preferredCountries: z.array(z.string().length(2)),
   restDayFrequency: z.number().int().nonnegative(),
   maxDriveHoursPerDay: z.number().positive(),
+  // How many nights in a row may be spent off grid before the plan has to
+  // put the RV somewhere with facilities again. Optional because every trip
+  // that existed before this setting did has to keep validating — read it
+  // through offGridToleranceOf(), never with a `?? 3` at the call site.
+  offGridTolerance: z.number().int().nonnegative().optional(),
   vehicle: vehicleSchema,
 })
+
+/**
+ * The traveler's own "off grid for a couple of days easily", rounded up.
+ *
+ * This is a tank number, not a taste number: what actually ends a run of
+ * free nights is fresh water running out and grey/black filling up, so the
+ * setting is expressed in consecutive nights without a service point and
+ * NOT as a share of the trip. 0 means never commit a night to a free spot.
+ */
+export const DEFAULT_OFF_GRID_TOLERANCE = 3
+
+/**
+ * The one place the default is applied. Takes a bare shape rather than
+ * TripSettings so it can also be handed a partially-built settings object
+ * (the trip-creation defaults, a settings patch) without a cast.
+ */
+export function offGridToleranceOf(settings: {
+  offGridTolerance?: number
+}): number {
+  return settings.offGridTolerance ?? DEFAULT_OFF_GRID_TOLERANCE
+}
 
 export const tripMetaSchema = z.object({
   name: z.string(),
@@ -139,12 +165,26 @@ export const tripSchema = z.object({
 
 export const daySlotSchema = z.enum(['morning', 'midday', 'evening'])
 
+export const overnightStopTypeSchema = z.enum(['campsite', 'stellplatz', 'wild'])
+
 export const overnightStopSchema = z.object({
   name: z.string(),
   lat: z.number(),
   lng: z.number(),
   country: z.string().length(2),
   campsiteSuggestion: z.string().optional(),
+  // What kind of place the night is actually committed to, once
+  // applyOvernightOptions has moved the overnight off the town centre. Absent
+  // on a day still sitting on its town point, and on days written before the
+  // planner was allowed to choose a free night at all.
+  type: overnightStopTypeSchema.optional(),
+  // Only ever set on a 'wild' night: the sentence from THIS country's own
+  // researched free-camping rules that made the night permissible. Recorded
+  // per day rather than left in the country guide because "why is it legal to
+  // sleep here" is a question asked at the roadside, about one night, and
+  // because the rules can be re-researched afterwards — this is what the plan
+  // was actually decided on.
+  freeCampingRule: z.string().optional(),
 })
 
 // Overnight-stop type & candidate selection (implemented 2026-07-27):
@@ -156,7 +196,7 @@ export const overnightStopSchema = z.object({
 // callable.
 export const overnightStopCandidateSchema = z.object({
   name: z.string(),
-  type: z.enum(['campsite', 'stellplatz', 'wild']),
+  type: overnightStopTypeSchema,
   lat: z.number(),
   lng: z.number(),
   country: z.string().length(2),

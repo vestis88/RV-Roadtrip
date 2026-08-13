@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { OvernightStopCandidate } from '@rv/shared'
-import { pickDefaultOvernight } from './overnightOptions.js'
+import {
+  pickDefaultOvernight,
+  type OvernightChoiceContext,
+} from './overnightOptions.js'
 import { __testing, nearestOsmPlaces, type OsmOvernightPlace } from './overpassApi.js'
 
 const { dedupePoints, toPlace, overpassClauses } = __testing
@@ -20,13 +23,91 @@ function option(
   }
 }
 
-// The traveler's stated preference: stellplatz where there is one.
+/**
+ * A night in a country that permits free camping, with tank capacity to
+ * spare — the case where a free spot is what the traveler asked for.
+ */
+const OFF_GRID: OvernightChoiceContext = {
+  freeCampingPermitted: true,
+  offGridNightsRemaining: 3,
+  restDay: false,
+}
+
 describe('pickDefaultOvernight', () => {
+  // The whole point of the 2026-08-13 change: the traveler is equipped for
+  // it, the country allows it, so this is the night they wanted.
+  it('commits a free spot where the country allows it and the tanks are fine', () => {
+    const picked = pickDefaultOvernight(
+      [
+        option('campsite', 'Krossinsee Camping'),
+        option('stellplatz', 'Wohnmobilstellplatz am Hafen'),
+        option('wild', 'Lay-by on the 108'),
+      ],
+      OFF_GRID,
+    )
+    expect(picked?.name).toBe('Lay-by on the 108')
+  })
+
+  // Germany outside designated spots, Croatia, Italy. Nothing about the
+  // trip's own preferences overrides the country's law.
+  it('never commits a free spot where the country prohibits it', () => {
+    const picked = pickDefaultOvernight(
+      [option('wild', 'Lay-by on the 108')],
+      { ...OFF_GRID, freeCampingPermitted: false },
+    )
+    expect(picked).toBeNull()
+  })
+
+  // An unresearched country arrives here as "not permitted" (see
+  // freeCampingPolicy), which is the same path as an outright prohibition:
+  // the night falls back to something serviced rather than being skipped.
+  it('falls back to a campsite rather than nothing where free is not permitted', () => {
+    const picked = pickDefaultOvernight(
+      [option('campsite', 'Krossinsee Camping'), option('wild', 'Lay-by')],
+      { ...OFF_GRID, freeCampingPermitted: false },
+    )
+    expect(picked?.name).toBe('Krossinsee Camping')
+  })
+
+  // The constraint that actually binds: fresh water out, grey/black full.
+  it('requires facilities once the off-grid tolerance is spent', () => {
+    const picked = pickDefaultOvernight(
+      [option('wild', 'Lay-by on the 108'), option('campsite', 'Krossinsee Camping')],
+      { ...OFF_GRID, offGridNightsRemaining: 0 },
+    )
+    expect(picked?.name).toBe('Krossinsee Camping')
+  })
+
+  // A rest day is a whole day parked in one place — the day the tanks empty
+  // fastest and the day a stellplatz's short max-stay bites.
+  it('gives a rest day a serviced stop even mid-run', () => {
+    const picked = pickDefaultOvernight(
+      [option('wild', 'Lay-by on the 108'), option('campsite', 'Krossinsee Camping')],
+      { ...OFF_GRID, restDay: true },
+    )
+    expect(picked?.name).toBe('Krossinsee Camping')
+  })
+
+  // Servicing is due and there is nowhere to do it. A real place beats a
+  // town-centre intersection; applyOvernightOptions keeps the tanks due, so
+  // the requirement carries into the next day instead of being dropped.
+  it('still takes the free spot when servicing is due but unavailable', () => {
+    const picked = pickDefaultOvernight([option('wild', 'Lay-by on the 108')], {
+      ...OFF_GRID,
+      offGridNightsRemaining: 0,
+    })
+    expect(picked?.name).toBe('Lay-by on the 108')
+  })
+
+  // The traveler's stated preference among serviced options, unchanged.
   it('prefers a named stellplatz over a campsite', () => {
-    const picked = pickDefaultOvernight([
-      option('campsite', 'Krossinsee Camping'),
-      option('stellplatz', 'Wohnmobilstellplatz am Hafen'),
-    ])
+    const picked = pickDefaultOvernight(
+      [
+        option('campsite', 'Krossinsee Camping'),
+        option('stellplatz', 'Wohnmobilstellplatz am Hafen'),
+      ],
+      { ...OFF_GRID, offGridNightsRemaining: 0 },
+    )
     expect(picked?.name).toBe('Wohnmobilstellplatz am Hafen')
   })
 
@@ -34,29 +115,26 @@ describe('pickDefaultOvernight', () => {
   // the site still operates. A rated campsite is the better thing to commit a
   // night to — the anonymous point stays in the options list either way.
   it('falls back to a campsite when the only stellplatz is anonymous', () => {
-    const picked = pickDefaultOvernight([
-      option('campsite', 'Krossinsee Camping'),
-      option('stellplatz', 'Unnamed motorhome stopover'),
-    ])
+    const picked = pickDefaultOvernight(
+      [
+        option('campsite', 'Krossinsee Camping'),
+        option('stellplatz', 'Unnamed motorhome stopover'),
+      ],
+      { ...OFF_GRID, offGridNightsRemaining: 0 },
+    )
     expect(picked?.name).toBe('Krossinsee Camping')
   })
 
   it('takes the anonymous stellplatz when there is no campsite at all', () => {
-    const picked = pickDefaultOvernight([
-      option('stellplatz', 'Unnamed motorhome stopover'),
-    ])
+    const picked = pickDefaultOvernight(
+      [option('stellplatz', 'Unnamed motorhome stopover')],
+      { ...OFF_GRID, offGridNightsRemaining: 0 },
+    )
     expect(picked?.type).toBe('stellplatz')
   })
 
-  // Whether you may actually spend the night in a free parking spot is a
-  // question about local signage and national law. It is offered, never
-  // chosen on the traveler's behalf.
-  it('never commits the trip to a free parking spot', () => {
-    expect(pickDefaultOvernight([option('wild', 'Lay-by on the 108')])).toBeNull()
-  })
-
   it('reports nothing rather than guessing when there are no options', () => {
-    expect(pickDefaultOvernight([])).toBeNull()
+    expect(pickDefaultOvernight([], OFF_GRID)).toBeNull()
   })
 })
 

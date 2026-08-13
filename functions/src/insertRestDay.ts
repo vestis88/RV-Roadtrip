@@ -105,6 +105,11 @@ export async function runInsertRestDay(
     index: afterDay.index + 1,
     date: newRestDate,
     type: 'rest',
+    // Verbatim, including a free night's type/freeCampingRule: staying put is
+    // the whole request, so this must not quietly relocate the traveler to a
+    // campsite the way the off-grid rule would have (pickDefaultOvernight
+    // gives rest days facilities). A "refresh overnight options" run applies
+    // that rule to the extended stay if they want it applied.
     overnight: afterDay.overnight,
     summary: `An extra day in ${afterDay.overnight.name} — no driving today.`,
   })
