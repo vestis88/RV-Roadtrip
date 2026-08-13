@@ -23,7 +23,7 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 | Place data | Google Places API (New) |
 | Routing | Google Routes API |
 | AI planning | Claude API (`claude-sonnet-5` — switched from `claude-sonnet-4-6`; cheaper under intro pricing through 2026-08-31, same 1M context), called ONLY from Firebase Cloud Functions |
-| Repo | GitHub, CI via GitHub Actions → Firebase deploy. Fully automated: Workload Identity Federation (keyless GCP auth, no service-account JSON key — blocked by org policy) authenticates the deploy job; push to `main` or the working branch builds, tests (incl. E2E against the Firebase Emulator Suite), and deploys automatically. No manual `firebase deploy` needed. |
+| Repo | GitHub, CI via GitHub Actions → Firebase deploy. Workload Identity Federation (keyless GCP auth, no service-account JSON key — blocked by org policy) authenticates every deploy. `.github/workflows/ci.yml` builds and tests (incl. E2E against the Firebase Emulator Suite) on **every** branch — deliberately un-filtered, see 2026-08-02's trunk entry in Section 11 — and deploys only from `main`. `.github/workflows/deploy.yml` is a second, **manual-dispatch** path for the same deploy, with a target picker (hosting / functions / rules / all): a release mid-trip is a decision someone makes, not a side effect of merging. Between them there is no case left that needs a `firebase deploy` from somebody's laptop, which is what releases actually depended on until 2026-08-10. |
 | Cloud region | `europe-west1` for Firestore and all Cloud Functions (set via `setGlobalOptions` in `functions/src/index.ts`). Do NOT use `europe-north2` (Stockholm) — Cloud Functions triggers are not supported there, causes deploy failures. |
 
 ---
@@ -69,7 +69,9 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
             ┌──────────┬───┴────┬───────────┐
             ▼          ▼        ▼           ▼
         Claude API  Places   Routes    Overpass/OSM
-        (planning)  (detail) (drive)   (stellplatz)
+        (planning)  (detail) (drive)   (stellplatz +
+                                        free parking,
+                                        corridor-wide)
 ```
 
 **The Map tab has two modes**, chosen by `planMeta.status`:
@@ -77,11 +79,14 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 - **Explore mode** (`status: 'idle'` — no plan yet). `ExploreMapScreen`: a
   cheap, repeatable curation pass. "Find great stops" / "Generate overview"
   runs *only* Claude's highlights phase and writes the results as
-  `candidate` corridor stops. The traveler ranks them across three priority
-  tiers, keeps or rejects them, drops pins, and rescans areas — all before
-  paying for a single day of itinerary detail. The drawn route runs through
-  the `locked` + `must-see` stops, so promoting a stop reshapes the route
-  and re-measures every other candidate's detour against it.
+  `candidate` corridor stops. The traveler sets an interest level per stop,
+  keeps or rejects them, drops pins, and rescans areas — all before paying
+  for a single day of itinerary detail. The drawn route runs through the
+  `locked` stops **only** (revised 2026-08-10 — it used to be `locked` +
+  `must-see`, which gave two unrelated controls the same effect and let them
+  disagree; interest is now triage, keeping is the commitment), and every
+  other candidate's detour is measured against that route, so keeping a stop
+  reshapes it and re-measures everything else.
 - **Plan mode** (any other status). `OverviewMapScreen`: the generated
   day-by-day plan, its real driving route, and corridor editing.
 
@@ -94,8 +99,17 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
 2. **`httpsCallable` functions** — everything on-demand and comparatively
    cheap: `generateExploreHighlights`, `rescanCorridor`,
    `researchMoreAlternatives`, `getOvernightCandidates`,
-   `previewReconcileCorridor` (a pure dry run), `refreshCountryGuide`, plus
-   trip lifecycle (`createTrip`, `joinTrip`, `deleteTrip`, `mergeTrips`).
+   `refreshOvernightOptions`, `previewReconcileCorridor` (a pure dry run),
+   `researchCountrySections`, plus trip lifecycle (`createTrip`, `joinTrip`,
+   `deleteTrip`, `mergeTrips`), read-only sharing (`createTripShareLink`,
+   `revokeTripShareLink`, `viewSharedTrip`) and `claimAccess`.
+
+   `refreshOvernightOptions` is a callable rather than a `planRequests` kind
+   for a specific structural reason, not just cost: it reads only each day's
+   town and writes only that day's overnight options plus its committed
+   overnight point. Drive legs are measured town-to-town, so nothing it does
+   invalidates a distance already computed — which means it needs no plan
+   lock and can run on a trip that is `ready`, mid-edit, or anything else.
 
    Explore mode's generation is a callable *on purpose*: routing it through
    `planRequests` would flip the trip out of `idle` and collapse the Map tab
@@ -108,16 +122,27 @@ A Progressive Web App (PWA) for planning and executing a European RV road trip.
    any competing request. The claim carries a heartbeat and expires
    (`planLock.ts`) so a crashed run can't wedge the trip forever.
 3. Claude runs in three sequential phases (Section 6.1): highlights →
-   route outline → per-chunk day detail. An explore-mode commit skips
-   phase 1 and seeds from the traveler's curated stops.
+   route outline → per-chunk day detail. Phase 1 is skipped and seeded from
+   the traveler's curated corridor stops whenever the trip has any — for
+   *both* generate buttons since 2026-08-12, not just the explore-mode
+   commit.
 4. Each day is enriched: Routes API for real drive legs, Places API for
    activities/restaurants. Days are **staged to `generationStaging` as they
    resolve**, so a failure resumes rather than restarting.
 5. If the invocation nears its time budget, it writes itself a continuation
    request (`isContinuation`) and hands off — a long trip spans several
    invocations rather than dying at the 540s ceiling.
-6. Days are committed, `corridorStops` re-materialized, checkpoint cleared,
-   `status: 'ready'`. All devices update live via Firestore listeners.
+6. Days are committed and `corridorStops` re-materialized — the *committed*
+   ones only; candidates, rescan finds and hand-dropped pins survive a
+   generation (2026-08-12).
+7. One overnight-options pass runs over the written days (Section 4's
+   `overnightOptions` subcollection): campsites from Places, stellplatz and
+   free motorhome parking from a handful of corridor-wide Overpass queries
+   for the whole trip, then each day's committed overnight is moved onto the
+   best of them. Best-effort — a failure here leaves every day on its town
+   point, which is worse than having sites but far better than no plan.
+8. Checkpoint cleared, pacing advisories written, `status: 'ready'`. All
+   devices update live via Firestore listeners.
 
 **Authorization.** Callables run on the Admin SDK, which bypasses
 `firestore.rules` entirely — so every `tripId`-taking callable must call
@@ -155,6 +180,10 @@ trips/{tripId}
                  avgDriveMinutesPerDay, totalKm, generatedAt, lastReplanAt, error?,
                  // progress, surfaced live while generating
                  progressLabel?, progressCurrent?, progressTotal?,
+                 // advisory pacing notes (Section 5) — at most one, written
+                 // by pacingValidator.pacingWarnings(). Absent, not [], when
+                 // there's nothing to say. Never fails a generation.
+                 pacingWarnings?: string[],
                  // resumable generation (planCheckpoint.ts) — internal, never rendered
                  checkpoint?: { settingsHash, skeleton },
                  // busy-guard heartbeat; lets an abandoned claim expire (planLock.ts)
@@ -175,11 +204,49 @@ trips/{tripId}/days/{dayId}             // dayId is a Firestore AUTO-ID.
                                         // deleted and recreated.)
   { index, date, type: drive|rest,
     overnight: {name, lat, lng, country, campsiteSuggestion},
+                                        // a REAL place since 2026-08-12 —
+                                        // the campsite/stellplatz picked from
+                                        // overnightOptions below, not the
+                                        // geocode of the town's name (which
+                                        // put "Berlin, Berlin, DE" at an
+                                        // intersection in Mitte).
+    townAnchor?: {lat, lng},            // where the day's TOWN is, as opposed
+                                        // to where it sleeps — the two
+                                        // separated once the overnight moved
+                                        // onto a site up to 20 km outside it.
+                                        // Kept so re-resolving options
+                                        // searches around the town again
+                                        // instead of around the last site
+                                        // picked, which would drift a little
+                                        // further out on every re-run. Absent
+                                        // on days written before it existed,
+                                        // where the overnight IS the town.
     drive: { fromName, toName, distanceKm, durationMin,
              slot: morning|midday|evening, polyline },
+                                        // measured town-to-town, which is
+                                        // what makes the overnight pass
+                                        // re-runnable without invalidating
+                                        // any distance already computed.
     summary: string,                    // Claude's 1-2 sentence day pitch
     highlightReason?: string,           // why this stop is on the route
     extraTimeReason?: string }          // why this place got more time
+
+trips/{tripId}/days/{dayId}/overnightOptions/{autoId}   // where this night
+  { name, type: campsite|stellplatz|wild,               // COULD be spent
+    lat, lng, country, description,
+    source: places|osm|claude, googleMapsUrl? }
+  // Resolved for every day at generation and stored (2026-08-12), not looked
+  // up on demand when "Change overnight" is opened. The on-demand version
+  // cost, per day, an Overpass request and one or two Claude web-search
+  // calls — which over sixty days is not a cost question but an
+  // impossibility: a single one of those calls already took the picker past
+  // its 180-second ceiling. Campsites come from Places (already being called
+  // to place the overnight itself, so they're free); stellplatz and free
+  // motorhome parking come from OSM in corridor-wide Overpass queries —
+  // three requests for a 60-day trip rather than sixty. No Claude call at
+  // all. The picker still falls back to `getOvernightCandidates` for a day
+  // with nothing stored (a trip generated before this existed, or a day
+  // added since).
 
 trips/{tripId}/days/{dayId}/activities/{autoId}
   { name, category: sight|hike|museum|beach|playground|other,
@@ -265,15 +332,31 @@ to invalidate).
 
 ## 5. PACING ALGORITHM (the "no monster last day" rule)
 
-**Revised from v1.0.** The original design (below, kept for history) hard-failed the *entire* generated plan whenever any day exceeded 1.4× the trip's own computed average distance — an internal artifact of that specific route, not a constraint the traveler actually asked for. In production this rejected legitimate plans (e.g. a day that needed extra driving to reach a worthwhile stop) with no way to accept the tradeoff, and raising `maxDriveHoursPerDay` in Settings did nothing because that field was never checked at all.
+**Revised twice.** v1.0 (kept at the bottom) hard-failed the *entire* generated plan whenever any day exceeded 1.4× the trip's own computed average distance — an internal artifact of that specific route, not a constraint the traveler actually asked for. In production this rejected legitimate plans (e.g. a day that needed extra driving to reach a worthwhile stop) with no way to accept the tradeoff, and raising `maxDriveHoursPerDay` in Settings did nothing because that field was never checked at all. That revision dropped the trip-average gate and kept only what the traveler had actually asked for — which was right, and left the app with nothing at all to say about how a trip's driving was *distributed*. A Helsingborg→Berlin plan that spent two of its three days 45 km from the start passed every check it had.
 
-**Current design:**
-1. The 1.4×/1.0×-of-target shape below is still given to Claude as *generation guidance* (Section 6.1's outline prompt) — a soft aim, not a post-hoc gate.
-2. The only **hard** validation (`functions/src/pacingValidator.ts`) left after generation:
+**Current design** (`functions/src/pacingValidator.ts`), in three layers, only one of which can fail a generation:
+
+1. **Generation guidance** (Section 6.1's outline prompt, `PACING_RULES` in `functions/src/prompts/planTripPrompt.ts`) — the 1.4×/1.0×-of-target shape below, plus rule 6, which states the back-loading problem in the terms the model can act on: short days and long stays are welcome and no day owes anybody a distance, but before committing to a stretch that covers little ground, work out what the remaining drive days would then have to average. A soft aim, not a post-hoc gate.
+
+2. **Hard validation** — the only thing that fails a plan (`validatePacing`):
    - No day's actual resolved drive duration may exceed **1.5 × the traveler's own `maxDriveHoursPerDay`** (some tolerance for traffic/rounding) — this is the one real constraint the user set, so it's the one that's enforced.
-   - Rest days must stay at the previous day's overnight (a genuine structural bug if violated, not a pacing tradeoff) — unchanged.
-3. Every day's `highlightReason` (see 6.1) is persisted and shown in the Day View, so a day that's longer than the trip's own average is *explained*, not silently rejected or silently allowed with no context.
-4. If the hard check still fails, the plan generation fails with a clear error (never show a bad plan) — same behavior as before, just gated on the right thing.
+   - Rest days must stay at the previous day's overnight (a genuine structural bug if violated, not a pacing tradeoff).
+   - On failure the generation fails with a clear error (never show a bad plan).
+
+3. **Advisory back-loading warning** (`pacingWarnings`, added 2026-08-12) — not a gate, and deliberately **not** a per-day minimum distance (see the superseded attempt below). The measure is the trip's own remaining budget: after each day, how much distance is left against how many drive days are left, compared with what the trip needed to average from the outset. That ratio starts at exactly 1.0 by construction and climbs only when days come in under average, which makes it a direct read on back-loading and completely indifferent to how any individual day is spent — a slow first week balanced by a slow rest of the trip never trips it; a slow first week followed by a forced march does. Thresholds: the required pace must exceed **1.4×** the trip's average (mirroring rule 3's own per-day ceiling — a trip that has to *sustain* what that rule allows as an occasional maximum is one that spent something earlier it could not afford), with at least **3 drive days remaining** (one long final day is a long final day, already bounded by layer 2), on a trip of at least **4 drive days** (below that there is no distribution to speak of, and no ratio can tell "wasteful" apart from "that is why we came"). **One warning per trip, at the worst point** — the shape is a single fact about the trip, and listing every day that contributed to it would bury it. Written to `planMeta.pacingWarnings` by `generatePlan`, `replanTrip` and `corridorReconciliation` alike, and shown as a dismissible banner on the overview (Section 7.2). Dismissal is keyed on the warning text, so a regeneration with something new to say gets to say it.
+
+4. Every day's `highlightReason` (see 6.1) is persisted and shown in the Day View, so a day that's longer than the trip's own average is *explained*, not silently rejected or silently allowed with no context.
+
+**Not verified against a real plan.** The warning has never fired on a genuinely generated trip — only on crafted fixtures in `pacingValidator.test.ts`. Whether 1.4× is the right line, and whether the sentence it produces reads as advice rather than a scolding, are open questions until it fires on a real one.
+
+<details>
+<summary>The per-day minimum (superseded the same day it landed, 2026-08-12)</summary>
+
+The first attempt flagged any drive day covering less than half the trip's average distance. The trip owner rejected it outright: on a two-month trip short days and long stays are the *point*, so a rule that treats a 40 km day as a defect is wrong about the product, and gets more wrong the longer the trip. What had actually gone wrong on the trip that prompted the work was not that a day was short. It was that the shortness was never paid for until the end, and then all at once — which is a fact about the whole trip, not about any day in it. Replaced by the back-loading measure above, which asks that question directly and has no opinion at all about how any single day is spent.
+
+Two leftovers from this attempt are still in the source and read as if it were live: `planMetaSchema.pacingWarnings`' comment in `shared/src/schemas.ts` and the banner comment in `OverviewMapScreen.tsx` both describe "drive days that barely move the trip along". The behaviour is the back-loading one; the comments are stale.
+
+</details>
 
 <details>
 <summary>Original v1.0 design (superseded, kept for history)</summary>
@@ -298,15 +381,19 @@ Three prompt templates live in `functions/src/prompts/`. All must demand **JSON-
 
 **Current design** (`functions/src/prompts/planTrip.ts`, `planTripPrompt.ts`, `planTripSchema.ts`):
 
-1. **Highlights phase** (`buildRegionHighlightsPrompt`) — pure curation, no dates/pacing involved. Given `settings` + `notes.freeText`, Claude reasons region-by-region about what's genuinely worth seeing for these travelers' interests and returns a ranked shortlist per region: `must-see` / `worth-a-detour` / `nice-if-convenient`, each with a one-sentence "why". Deliberately generous — more candidates than any one trip could fit.
+1. **Highlights phase** (`buildRegionHighlightsPrompt`) — pure curation, no dates/pacing involved. Given `settings` + `notes.freeText`, Claude reasons region-by-region about what's genuinely worth seeing for these travelers' interests and returns a ranked shortlist per region of **candidate overnight towns**: `must-see` / `worth-a-detour` / `nice-if-convenient`, each with a 2–4 sentence "why" written to be decidable on without looking the town up elsewhere. Deliberately generous — more candidates than any one trip could fit. An empty `regions` (or an empty `candidateStops` within one) is explicitly sanctioned as an honest answer for a short or local trip, rather than something to pad around. **Skipped entirely whenever the trip already has curated corridor stops** — for both generate buttons since 2026-08-12, not just the explore-mode commit; see 11's entry for why the two used to differ. (This phase is the subject of the in-flight "sights lead the route" change — see Section 11.)
 2. **Outline phase** (`buildRouteOutlinePrompt`) — given the highlights shortlist, *selects* from it (prioritizing must-sees) and sequences the selections into an actual day-by-day route from the real `startPoint` to the real `endPoint`, balancing attraction quality against time remaining and overall heading. Free to skip lower-priority candidates or add a plain connecting overnight where two highlights are too far apart for one day's drive. Every day gets a required `highlightReason` (why this town, tied to interests/notes — forces justification instead of defaulting to "closest on the way"). This is where pacing/global-routing correctness is solved, with the whole trip in view, same as the old single call.
 3. **Detail phase** (`buildChunkDetailPrompt`, chunked) — the route is split into fixed-size chunks (7 days each); each chunk gets a separate call, given the full outline for context but only asked to fill in that chunk's 5 activities + 9 restaurants (NAME + TOWN + CATEGORY only — Places API resolves details/ratings/links afterwards, Claude must not invent them) and a day `summary` + optional `extraTimeReason`. Cannot redirect the route the outline already committed to.
 
 Every individual call stays small regardless of trip length — this is what actually fixed the 10-minute-guard problem, not just raising `max_tokens`. `onProgress` callbacks report which phase is running (`{phase: 'highlights'}` / `{phase: 'outline'}` / `{phase: 'detail', chunkIndex, chunkCount}`) so the UI can show real progress instead of a bare "generating" spinner.
 
-All three calls: JSON-only output, zod-validated, one retry on parse/schema failure with the error fed back to Claude.
+All three calls: JSON-only output, zod-validated, one retry on parse/schema failure with the error fed back to Claude, and (since 2026-07-30) one retry on a transient *API-level* failure too — the `messages.create` call itself sits inside the retry's `try`, which it originally did not.
 
-**Known gap (see Section 11):** none of this is currently resumable — a failure at any phase (including the final pacing check, which runs after all Places/Routes enrichment too) discards everything and a retry redoes all three Claude phases plus all Places/Routes lookups from zero.
+**Salvage, highlights only** (`salvageJsonPrefix`/`salvageRegionHighlights`, 2026-08-12). A curation response that fails to parse is cut back to the longest prefix that *is* valid JSON, closing whatever containers are still open at that point, and re-validated against the real schema. Root cause: a production failure on trip "Luxemburg" where 5,609 characters of complete curation were discarded because the last candidate ended `"why "` with no value — `JSON.parse` is all-or-nothing, both attempts failed the same way, and the callable 500'd after paying for two Claude calls. The usage log showed 4 of 12 highlights runs needing their retry, so both attempts missing is simply the tail of a rate the code already lived with. The scan tracks string/escape state, so a brace inside a `why` sentence is never mistaken for structure, and it only ever truncates at a boundary the model itself closed — nothing is invented.
+
+**Deliberately scoped to the highlights call.** A shortened candidate list is a valid answer (the schema allows any number of regions and candidates), so the worst case costs the traveler the last town. The outline and detail calls get no salvage: a truncated route outline would silently shorten a trip, and a truncated day chunk would leave a day empty. Those still fail loudly.
+
+Generation as a whole *is* resumable — the skeleton and each resolved day are checkpointed (`planCheckpoint.ts`), and a run that nears its time budget chains a continuation rather than dying at the 540 s ceiling. See Section 11's "Resumable / checkpointed plan generation" and "Segmented/chained plan generation" entries. (The rolling-detail-window direction in Section 11 would make most of that machinery redundant, since the phase it exists to survive leaves generation.)
 
 ### 6.2 `replanTrip` — extra inputs, and a real fix (2026-07-27)
 
@@ -320,7 +407,9 @@ All three calls: JSON-only output, zod-validated, one retry on parse/schema fail
 - One section at a time (`functions/src/prompts/countrySection.ts`): the country, the vehicle, and **that section's own brief text**, which is the instruction. Output is the same flat `{ items, sources }` shape whatever the section asks, so a traveler-written section needs no code change. Enable Claude web search in this call so fees/vignette prices are current; require source-cautious phrasing ("as of {date}").
 
 ### 6.4 Places enrichment (code, not Claude)
-For each Claude-proposed name+town: Places Text Search → take top match within 30 km of the day's route → fetch rating, ratingCount, googleMapsUri, photo, opening hours, priceLevel. If no match ≥3.8 rating with ≥50 reviews, drop it and backfill from Places Nearby Search by category so the counts (5 activities, 3×3 restaurants) always hold.
+For each Claude-proposed name+town: Places Text Search → take the top match that is within 30 km of the day's anchor **and whose name actually looks like the one asked for** → fetch rating, ratingCount, googleMapsUri, photo, opening hours, priceLevel. If no match ≥3.8 rating with ≥50 reviews, drop it and backfill from Places Nearby Search by category so the counts (5 activities, 3×3 restaurants) always hold.
+
+Both of those filters are enforced rather than merely requested (2026-08-10). Places' `locationBias` is a preference, not a bound — with nothing matching nearby it will answer with the best match on another continent, which is how a dinner stop for a night in Helsingør became a hotel in Greece. Distance alone doesn't catch the other failure either: a famous landmark well *inside* the radius answering for a small café in the same town. `nameLooksRight` compares diacritic-folded, stopword-stripped tokens (dropping "restaurant", "hotel", "museum" and friends, which would otherwise match anything of that kind), so a fuller or shorter listing name for the same place is accepted and an unrelated one sharing only the town is not.
 
 **Gotcha (fixed):** the Places API (New) rejects `point_of_interest` as an `includedTypes` value for `searchNearby` — it's a Text-Search-only generic type. The `other` activity category used to map to it, so any "other"-category activity that missed the quality bar on text search and fell back to nearby search 400'd and failed the *whole* plan generation. Fixed by omitting the type filter entirely for that category instead of sending an invalid one (`functions/src/placesApi.ts`).
 
@@ -329,24 +418,44 @@ For each Claude-proposed name+town: Places Text Search → take top match within
 ## 7. SCREENS & UI CONTRACTS
 
 ### 7.1 Trip Setup / Settings
-- Form: dates (range picker), travelers (add rows: name, adult/child, age), interests (chip multi-select + free entry), start & finish (Places autocomplete), preferred countries (multi-select), rest-day frequency (slider: "rest day every N days", default 7, option "none"), max drive hours/day.
+- Form: dates (range picker), travelers (add rows: name, adult/child, age), interests (chip multi-select + free entry), start & finish (Places autocomplete), preferred countries, rest-day frequency (slider: "rest day every N days", default 7, option "none"), max drive hours/day.
+- **Preferred countries** is sixteen quick-pick chips (the ones this app's trips actually cross) **plus a search box over the full ISO 3166-1 set** (2026-08-13). Until then the chips were the only countries choosable at all, so a trip to Luxembourg — reported with a screenshot of a trip literally named "Luxemburg" — had no way to name its own destination. Picking a search result appends a chip that looks and deselects exactly like the presets. Deliberately a *closed* vocabulary rather than the free-text entry the interests chips use: `tripSettingsSchema` requires two-letter codes, and a rejected settings write doesn't fail loudly on the client — it fails on the next read of the trip document, i.e. the trip stops working. Only the alpha-2 code is ever stored, so nothing downstream can tell a searched country from a preset one.
 - **Notes panel:** full-screen editable text area bound to `notes.freeText`, autosaved, with "last updated" stamp. Placeholder explains: "Anything here is read by the planner on every generation — allergies, must-sees, driving preferences…"
 - Buttons: **Generate overview** (cheap — runs only Claude's highlights phase and lands you in explore mode on the Map tab) and **Generate full plan** / **Re-plan** (the expensive day-by-day generation, behind a confirmation dialog). Both refuse to spend a call until a start AND finish point are genuinely **located** — a name alone isn't enough, since a blank (or typed-but-unresolved) point still reads as a valid `(0,0)` coordinate downstream, so it has to be caught here.
+- **Refresh overnight stops** (shown for a `ready`/`stale` trip): re-runs the whole trip's overnight-options pass through the `refreshOvernightOptions` callable and reports how many days it touched. Cheap enough to press repeatedly — no Claude call, a handful of Overpass requests however long the trip is — and structurally safe to re-run, because it reads only each day's `townAnchor` and writes only that day's options and committed overnight. This is what makes iterating on where to sleep possible at all on a two-month trip: the alternative was regenerating sixty days, paying for the entire Claude pipeline again, to change something Claude was never consulted about.
 
 ### 7.2 Map tab
 The Map tab renders one of two screens depending on `planMeta.status`.
 
 **Explore mode (`idle` — no plan yet).** `ExploreMapScreen`: map on top,
-ranked candidate list below.
+candidate list below **in route order** (2026-08-12).
 - "Find great stops" runs the highlights-only curation pass; results appear
-  as `candidate` corridor stops grouped into three priority tiers.
-- Each card can be promoted/demoted (a vote moves it one position through
-  the flattened tier list, changing its tier when it crosses a boundary),
-  kept (`locked`), or rejected. Tapping a map pin scrolls its card into view.
-- The drawn route runs through the `locked` + `must-see` stops, so promoting
-  a stop reshapes the route; every other candidate's detour is then measured
-  against that new shape. Stops on the route show "On route" rather than a
-  detour figure.
+  as `candidate` corridor stops.
+- **The list is sorted along the corridor** (`sortAlongRoute`, `shared/src/geo.ts`)
+  rather than grouped into three priority tiers. The tiered grouping answered
+  "which of these does the app think are best", which the card already says,
+  and made the question the traveler actually had — where does this sit
+  relative to the others, is it before or after Hamburg — one they had to
+  reconstruct by cross-referencing three lists against the map.
+- **Interest is a control on the card**, not a place in the list: a
+  three-way selector (Must see / Worth a detour / If convenient) writing
+  `priority` directly. It replaced up/down arrows, which had made sense while
+  the list *was* sorted by tier — the arrows were how you moved a card
+  between headings — but in route order a vote no longer moves the card at
+  all, only repaints it, and an arrow that changes a value you cannot see is
+  a worse control than a switch showing it. `rank` is no longer written:
+  it only ever ordered stops within a tier, and nothing reads that order.
+- Each card can also be kept (`locked`) or rejected. Tapping a map pin
+  scrolls its card into view.
+- **The drawn route runs through the `locked` stops only** (2026-08-10).
+  Ranking a stop must-see used to add it to the backbone too, which gave two
+  unrelated controls the same effect, let them disagree, and left a must-see
+  stop wearing the route's blue ring with no "Keeping" chip and a "Keep this"
+  button that changed nothing visible. Interest is triage; keeping is the
+  commitment. Every other candidate's detour — distance and time, from the
+  same straight-line estimate — is measured against that route, so keeping a
+  stop reshapes it and re-measures everything else. Stops on the route show
+  "On route" rather than a detour figure.
 - "+ Add stop" (pick a place, or describe what you want in free text) and
   "Rescan this area" both anchor to wherever the map is currently looking.
 - "Generate full plan (N stops)" commits the curation into the real
@@ -360,6 +469,10 @@ ranked candidate list below.
   - 9–11: + selected activities
   - ≥ 12: + ALL suggested activities & restaurants with category icons (fork = food, mountain = hike, castle = sight, wave = beach, balloon = kids, bed = overnight)
 - Header bar: total km, **average driving time per day**, days count.
+- **Pacing advisory banner** (Section 5, layer 3) when `planMeta.pacingWarnings`
+  is non-empty: amber, dismissible, keyed on the warning text so a
+  regeneration with something different to say can say it. Advice, not a
+  gate — the plan below it is valid and usable either way.
 - Tapping a route segment or day badge → Day View for that day.
 - "Request changes" button → change interface: free-text box ("more beaches, skip big cities") + per-day lock toggles → submits a `replan` request with that text appended to notes context.
 
@@ -370,6 +483,7 @@ ranked candidate list below.
 - Each card: photo, name, category, Google rating ★ + count, blurb, "Navigate" (opens `googleMapsUrl`), and a check control: mark **Selected** (planned) or **Done** (logged to diary with optional note).
 - Prev/Next day arrows + swipe to cycle days without returning to overview (user-specified).
 - Rest days render with a "No driving today 🎉" banner.
+- **"Change overnight"** opens the day's stored `overnightOptions` — a plain Firestore read of something already resolved at generation, not a live multi-source lookup while someone watches a spinner (which is what used to sit here, and what used to time out). Falls back to the `getOvernightCandidates` callable only for a day with nothing stored. Picking one submits a scoped replan (locking every prior day) rather than a client-side write, since moving a night ripples into the following drive leg.
 
 ### 7.4 Execution mode & 50 km rule
 - Active automatically when today ∈ [startDate, endDate].
@@ -510,7 +624,7 @@ Verified end-to-end 2026-07-27 (per the user's request) — each item checked ag
 - [x] Inputs: dates, travelers + kids' ages, interests, start/finish, preferred countries (T-10) — `SettingsScreen.tsx`: date/place/traveler/interest/country inputs, all wired to `commit()`/`updateTripSettings`.
 - [x] Freeform notes "text file", editable, persisted, injected into every plan/replan (T-11, T-14, T-17) — `NotesScreen.tsx` persists `notes.freeText`; `planTrip()` takes it as `notesFreeText`; `runReplan` folds it (plus `changeRequestText`/`behindScheduleKm`) into the same field.
 - [x] Inputs saved between sessions & editable (T-09, T-10) — `useTripSession`'s `localStorage.tripId` + Firestore persistence; `settings.spec.ts` covers reload.
-- [x] Even pacing, no huge final drive (T-15) — `PACING_RULES` (`functions/src/prompts/planTripPrompt.ts`) + `pacingValidator.ts`'s hard check (1.4x cap, 1.0x relaxed finish), tested in `pacingValidator.test.ts`.
+- [x] Even pacing, no huge final drive (T-15) — **re-verified and corrected 2026-08-12**: the 1.4x cap / 1.0x relaxed finish this line claimed as the hard check had already stopped being one (see Section 5's first revision) — they live in `PACING_RULES` (`functions/src/prompts/planTripPrompt.ts`) as generation guidance. What is actually enforced is `validatePacing`'s 1.5 × `maxDriveHoursPerDay` and the rest-day-stays-put rule; distribution across the trip is now covered by `pacingWarnings`' advisory back-loading check, which is not a gate. All in `pacingValidator.ts`, tested in `pacingValidator.test.ts`.
 - [x] Extra time for deserving attractions (T-14 `extraTimeReason`) — `dayDetailSchema.extraTimeReason`, generated by `DETAIL_SYSTEM_PROMPT`, shown on Day View ("Why here: …").
 - [x] Rest days ~1/week, selectable in input (T-10, T-15) — `restDayFrequency` slider on Settings; `PACING_RULES` rule 5.
 - [x] Per day: drive + 5 activities + 3×3 restaurants (T-16) — `ACTIVITIES_PER_DAY = 5`, `RESTAURANTS_PER_MEAL = 3` × 3 meals (`placesApi.ts`), enforced by backfill and tested.
@@ -524,11 +638,11 @@ Verified end-to-end 2026-07-27 (per the user's request) — each item checked ag
 - [x] Execution prompt when >50 km behind plan (T-26) — `BEHIND_PLAN_THRESHOLD_KM = 50` in `executionMode.ts`; just fixed a real bug in the replan this triggers (see recent commit — it could suggest an even longer drive instead of an easy catch-up day).
 - [x] Cards show info, Google rating, Google Maps link; click shows on map (T-24) — `PlaceCard.tsx`: rating, `googleMapsUrl`, `onTap` → `selectedPlace` → `MapPanner`.
 - [x] Mark done → log/diary (T-25) — `markDone` (`src/lib/placeStatus.ts`) writes a `log` entry; `DiaryScreen.tsx` reads it.
-- [x] Country info: driving rules, camping, free camping, road fees & payment, speed limits (3,500 kg car-registered), LPG refill (T-18, T-27) — `countryGuideSchema`'s all 6 sections, rendered in `CountryDetailScreen.tsx`.
+- [x] Country info: driving rules, camping, free camping, road fees & payment, speed limits (3,500 kg car-registered), LPG refill (T-18, T-27) — those six are now the *defaults* of an editable per-traveler research brief (`shared/src/countryBrief.ts`), researched one section at a time into `countryGuideSections` and rendered in `CountryDetailScreen.tsx`. `countryGuideSchema` — the fixed six-topic shape this line originally named — is gone; the per-section `countryGuideSectionSchema` replaced it. Updated 2026-08-12 (the change itself landed 2026-08-02).
 - [x] Data saved but easily modified; stale→replan flow (T-10, T-17) — `updateTripSettings` flips `planMeta.status` to `'stale'` on any edit; Settings shows "Re-plan trip" for that status. **Conflict flagged, not fixed**: this flip happens even on a trip that's never been generated at all (`status: 'idle'`, no prior plan) — editing settings before ever generating once would show "Re-plan trip" instead of "Generate plan" for a trip with nothing to re-plan. Cosmetic only (the same `generatePlan()`/`kind:'full'` call runs either way, so behavior is correct — only the button label is momentarily wrong), out of scope for this pass, noted here for a future cleanup.
 - [x] Same plan live on two phones (T-07, T-09) — Firestore `onSnapshot` throughout; `sync.spec.ts` covers real-time sync across two contexts.
 - [x] iPad compatible / responsive (T-23, T-28) — `responsive-offline.spec.ts` covers phone/ipadPortrait/ipadLandscape viewports and 44px tap targets.
-- [x] GitHub + Firebase (T-01–T-03) — this repo, deployed via `.github/workflows/ci.yml`'s Firebase Hosting/Functions/Firestore-rules deploy job.
+- [x] GitHub + Firebase (T-01–T-03) — this repo, deployed via `.github/workflows/ci.yml`'s Firebase Hosting/Functions/Firestore-rules deploy job on pushes to `main`, or on demand via `.github/workflows/deploy.yml` (manual dispatch, target picker). Updated 2026-08-10.
 
 ---
 
@@ -869,6 +983,66 @@ Update 2026-07-27 (later still): design proposals written up and reviewed with t
   - **The failure that actually cost the time was diagnostic, not functional.** `AccessGate`'s status check wrapped the callable in one `try/catch` and fell through to `denied` — so a crash, a missing function, a network drop and a genuine refusal all rendered as the same sentence, and that sentence asserts something specific about the allowlist. Three diagnoses were made against it and all three went to the wrong place: an array-shaped field, then a misplaced document, then the IAM grant. Only the third was real.
   - Refusal and "couldn't ask" are now separate states: only `permission-denied` — the code `claimAccess` throws for an address it looked up and did not find — produces "not on the guest list". Everything else says the check could not be completed and prints the error code on the page, because the person hitting it is holding a phone with no console. `claimAccess` catches its own Admin SDK failures and hands back their code, which is what finally named this one: `auth/insufficient-permission`.
   - **Correction to `dcc6aae`'s commit message**, which is on `main` and says the allowlist field's *type* caused the lockout. It did not — the field was a correctly formatted string throughout. That commit was written from a guess made before the evidence existed. Reading a string or an array is still a fair thing for a hand-maintained console field to do, so the change stands; its stated justification does not.
+
+Update 2026-08-13: the entries below cover a two-month-trip-shaped batch — the trip this app is actually being built for is now sixty days, and most of what follows is something that was fine at three days and stopped being fine at sixty. Sections 3–7 and Section 10 were corrected alongside them; where a section still described the old behaviour, the correction is noted in the entry rather than applied silently.
+
+- [x] **Judge pacing by the whole trip, not by each day** (reported 2026-08-12 — a Helsingborg→Berlin plan that spent two of its three days 45 km from the start and then drove the rest in one go; **written twice**, the first version rejected by the trip owner) — Section 5 now carries the full design; this records how it got there.
+  - **The first attempt was a per-day minimum distance**: flag any drive day covering less than half the trip's average. Rejected outright, and correctly: on a two-month trip short days and long stays are the *point*, so a rule that treats a 40 km day as a defect is wrong about the product, and gets more wrong the longer the trip. It also mis-stated the complaint. What went wrong on that trip was not that a day was short — it was that the shortness was never paid for until the end, and then all at once, which is a fact about the whole trip and not about any day in it.
+  - **What replaced it** measures exactly that and nothing else: after each day, the distance still to cover against the drive days still available, versus what the trip needed to average from the outset. The ratio starts at 1.0 by construction and climbs only when days come in under average, so it is a direct read on back-loading and completely indifferent to how any individual day is spent. A slow first week balanced by a slow rest of the trip never trips it; a slow first week followed by a forced march does.
+  - **Advisory, one per trip, at the worst point.** Not a gate — the trip-average gates were removed for good reason (Section 5's v1.0 note) and the traveler is the one who knows whether the stop was worth what it cost the end of the trip. One warning rather than one per day because the shape is a single fact about the trip; listing every contributing day would bury it. Written to `planMeta.pacingWarnings` by all three write paths (`generatePlan`, `replanTrip`, `corridorReconciliation`) and shown as a dismissible amber banner on the overview, keyed on the warning text so a regeneration with something new to say gets to say it.
+  - **Says nothing at all below four drive days**, and requires three still remaining: below that there is no distribution to speak of, one stop legitimately *is* a third of the trip, and no ratio can tell "wasteful" apart from "that is why we came". The prompt is the only honest lever at that length — `PACING_RULES` gained a rule 6 stating the back-loading problem in terms the model can act on before committing to a low-mileage stretch.
+  - **Not verified on a real plan.** It has only ever fired against crafted fixtures in `pacingValidator.test.ts`. Whether 1.4× is the right line, and whether the sentence reads as advice rather than a scolding, are open until it fires on a genuinely generated trip.
+  - Leftover to clean up: `planMetaSchema.pacingWarnings`' comment and `OverviewMapScreen`'s banner comment both still describe the rejected per-day rule ("drive days that barely move the trip along"). Comments only — the behaviour is the back-loading one.
+
+- [x] **Put the overnight stop at a campsite, not a road junction — and resolve every day's options up front** (2026-08-12, two commits that only make sense together) — a generated overnight used to be the geocode of `"Berlin, Berlin, DE"`, which is an intersection in Mitte. The pin was wrong, the "Navigate" link took you to a road, and the only way to find an actual site was to open "Change overnight" and wait.
+  - **Real places.** `functions/src/overnightOptions.ts` resolves campsites (Places), stellplatz and free motorhome parking (OSM) for every day, then commits one of them as `TripDay.overnight`. `pickDefaultOvernight` prefers a *named* stellplatz — the stated preference — but falls back to a campsite before an anonymous one, because an unnamed OSM point carries no indication that the site still operates while a Places campsite comes with a rating and a review count. Free parking is offered and never chosen for you: whether you may actually sleep in one is a question about local signage and national law, not about the pin.
+  - **Up front, not on demand.** The old picker resolved one day at a time, costing an Overpass request and one or two Claude web-search calls *per day opened*. Over sixty days that is not a cost question but an impossibility — a single one of those Claude calls had already taken the picker past its 180 s ceiling (two requests on 2026-08-10 sat at 179.9999 s and were killed by Cloud Run with a 504, which the client rendered as the same generic error a real failure produces; fixed separately on 2026-08-11 with a per-source deadline so one source that never answers can't take the others down). Now: options for every day, resolved at generation, stored in `days/{dayId}/overnightOptions`, and the picker is a Firestore read. **The per-day Claude call is gone entirely** — campsites come from Places the pipeline is already calling, and stellplatz/free parking from corridor-wide Overpass queries: three requests for a 60-day trip, not sixty (points are deduped to ~11 km and batched 20 to a request).
+  - **Re-runnable on its own** — `refreshOvernightOptions` callable plus a "Refresh overnight stops" button on Trip Setup. Structurally safe rather than merely cheap: it reads only each day's town and writes only that day's options and committed overnight, and drive legs are measured town-to-town, so nothing it does invalidates a distance already computed. That is also why it takes no plan lock. `TripDay` gained `townAnchor` specifically for this: the overnight has now moved off the town centre, and re-anchoring the next search on it would let the search drift a little further out of town on every re-run.
+  - **The stellplatz OSM filter was relaxed** from `tourism=caravan_site` + `caravan_site=motorhome_stopover` to the parent tag alone, with the sub-tag kept as a ranking signal instead. The strict filter was the OSM wiki's own definition of a stellplatz and it was discarding real sites; widening the net costs some precision, and ranking an explicitly-tagged stopover above a bare caravan site at similar distance is where that cost is paid back.
+  - **Never run against live OSM.** The development sandbox blocks `overpass-api.de`, so the corridor query, the relaxed filter and the batching are tested only against mocked responses (`overpassApi.test.ts`). The query shape, the tag set and the dedupe/batch arithmetic are all unverified against the real endpoint — including whether a ~80-clause query is one Overpass actually answers in practice rather than in principle.
+  - **Deliberately not built**: wild camping as a *mapped* option. OSM does not map it — nobody surveys a field — so the free option offered here is parking a motorhome is explicitly allowed to use, which is the thing that actually has coordinates. Whether a country lets you sleep in one stays prose in the country guide's free-camping section.
+
+- [x] **Stop generation throwing away the traveler's own curation** (2026-08-12) — two related defects that between them made curation feel unreliable in a way nobody could quite pin down.
+  - **`writeGeneratedDays` deleted every corridor stop.** Harmless while candidates were consumed at generation; destructive once they were durable. The first generation wiped the entire "worth a detour, but not this time" set — every researched candidate, every rescan find, every hand-dropped pin — with no way back short of paying Claude to research it all again. Now only `committed` stops are deleted (they describe the plan being replaced and are rebuilt from the new days); everything else survives. This also makes generation consistent with `replanTrip`, which had always deleted only the stops linked to days it was actually replacing. A preserved stop the new plan now routes through is deleted as a duplicate, matched on name or proximity — a candidate's coordinates come from the highlights geocode and the day's from its own, so the two land a street apart rather than identical.
+  - **`kind: 'full'` ignored curation entirely.** The two "Generate full plan" buttons behaved completely differently for no reason a traveler could see: committing from the explore map honoured every vote, keep and rejection, while the button on Trip Setup re-ran Claude's curation phase from scratch and silently discarded all of it — and then `writeGeneratedDays` deleted the evidence. Both paths now seed from the traveler's curated stops whenever there are any. The remaining difference is only what happens with none: `full` researches the trip from nothing, which is exactly right for a trip nobody has explored yet, while an explore commit with an empty corridor is a mistake worth reporting.
+
+- [x] **Order explore by route, and put interest on the card** (2026-08-12) — the candidate list was three sections, one per priority tier, with up/down arrows to move a card between them. That answered "which of these does the app think are best", which the card already says, and made the question the traveler actually had — where does this sit relative to the others, is it before or after Hamburg — one they had to reconstruct by cross-referencing three lists against the map. The list is now sorted along the corridor (`sortAlongRoute`, `shared/src/geo.ts`, extracted from `buildRouteBackbone`'s own middle-point ordering so the two cannot disagree), and interest is a three-way selector on the card. The arrows went with the grouping they existed to serve: in route order a vote no longer moves the card at all, only repaints it, and an arrow that changes a value you cannot see is a worse control than a switch showing it. `rank` is no longer written — it only ever ordered stops within a tier, and nothing reads that order (the backbone sorts geographically, the generation groups by tier). Section 7.2 and Section 3 updated; both had described the tiered list.
+
+- [x] **Keep the curation Claude finished when it fumbles the last line** (production failure 2026-08-12, trip "Luxemburg") — 5,609 characters of otherwise-complete curation were discarded because the final candidate ended `"why "` with no value. `JSON.parse` is all-or-nothing, so both attempts failed identically and the callable 500'd after paying for two Claude calls. Not a freak: the 30-day usage log showed 4 of 12 highlights runs needing their retry, so a run where *both* attempts miss is simply the tail of a rate the code already lived with. `salvageJsonPrefix` cuts a broken response back to the longest prefix that is valid JSON and closes whatever containers are still open, tracking string/escape state so a brace inside a `why` sentence is never mistaken for structure. It only ever truncates at a boundary the model itself closed, so nothing is invented, and the result is still validated against the real schema.
+  - **Scoped to the curation call on purpose**, which is the whole design decision here. A shortened candidate list is a valid answer — the highlights schema deliberately allows any number of regions and candidates — so the worst case costs the traveler the last town. A truncated route outline would silently shorten a trip and a truncated day chunk would leave a day empty, so the outline and detail calls still fail loudly. Salvage everywhere would have been the obvious generalisation and the wrong one.
+
+- [x] **Let trip setup name any country, not just the sixteen on the chips** (reported 2026-08-13 with a screenshot of a trip literally named "Luxemburg") — the preferred-countries chips were the only countries choosable at all, so a trip whose destination wasn't among them had no way to say so. A search box over the full ISO 3166-1 set now sits under the chips; picking a result appends a chip that looks and deselects exactly like the presets. Deliberately a closed vocabulary rather than the free-text entry the interests chips use: `tripSettingsSchema` requires two-letter codes and a rejected settings write doesn't fail loudly on the client — it fails on the next read of the trip document, i.e. the trip stops working. Only the alpha-2 code is stored, so the flag renderer, the Countries tab and the settings JSON handed to Claude cannot tell a searched country from a preset one. The list is held as a literal rather than read from `Intl` at runtime, because ICU data differs between browsers and Node versions and a list whose labels shift under it can't be searched or tested deterministically.
+
+- [x] **Add a deploy workflow, so releasing stops depending on one laptop** (2026-08-10) — there was no on-demand deploy path in the repo at all: CI deployed on a push to `main`, and anything else was a `firebase deploy` from somebody's machine. That is why fixes sat on `main` while the bugs they fixed were still being re-reported from the phone. `.github/workflows/deploy.yml` is manual-dispatch only, with a target picker (hosting / functions / rules / all) — deliberately not automatic, because a deploy changes what travelers are using mid-trip and that is a decision someone makes rather than a side effect of merging. It fails early and by name if the production web config repository variables are missing, since a bundle built with the wrong values loads and then fails to authenticate anyone, which looks like an outage rather than a misconfiguration. Section 1's locked-decisions row and Section 10's last line both claimed deploys were fully automatic from `main` or the working branch; both corrected.
+
+### In flight — agreed direction, NOT yet landed
+
+- [ ] **Sights lead the route, instead of towns leading it** (agreed 2026-08-12; not built) — curation today answers "which towns are worth sleeping in" (Section 6.1 phase 1 returns candidate overnight *towns*). It is being changed to answer "what shouldn't we miss": sights and activities matched to the stated interests and the freeform notes, each carrying a base town to sleep in and a time-needed estimate that feeds pacing, with the outline phase sequencing *sights* and deriving the overnights from them.
+  - The gentler option — keep towns as the unit, but have each one list the sights that justify it — was put up and explicitly turned down. It would have been a smaller change and it would have left the actual ordering decision where it is now, on towns, with sights as after-the-fact justification. The point of the change is that the thing being sequenced should be the thing the trip is for.
+  - Consequences to plan for, not yet designed: `corridorStops` currently models a place to sleep, and a sight is not one; the time-needed estimate is a new input to pacing, which today only knows about driving; and every existing trip's curation is town-shaped, so there is a migration or a compatibility story to write.
+
+- [ ] **"Generate overview" must stop wiping curation** (agreed 2026-08-12; not built) — `generateExploreHighlights` deletes every existing `candidate` stop before writing its fresh pass (`buildExploreCandidateWrites` takes the existing refs precisely to delete them). `locked` stops already survive, which was enough when candidates were consumed at generation and are re-findable for free. It is not enough now that they are durable, carry a traveler-set interest level, and survive generation itself (see the curation entry above) — this is the one remaining path that still destroys them, and it is the button whose whole promise is "cheap and repeatable".
+
+- [ ] **Let the planner choose the overnight type, free camping included** (agreed 2026-08-12; not built) — `pickDefaultOvernight` today prefers a named stellplatz, falls back to a campsite, and never chooses a free spot for you. The change: let the plan choose the type per night, free camping included, wherever the country's own cached free-camping rules (`countryGuideSections`) allow it — with an **off-grid tolerance** (default 3 consecutive free nights) after which a serviced stop is forced. The constraint being modelled is fresh and waste water capacity, not preference: the tank is what ends a run of free nights, and a traveler who wants four in a row is asking a question about their RV rather than about their taste. Needs a settings field, a rule the pass can read per country rather than per trip, and a way for the picker to explain *why* a given night is serviced.
+
+### Agreed direction, not yet started
+
+- [ ] **Route eagerly, detail lazily** (agreed 2026-08-12; no code) — generation will stop producing activities and restaurants for every day up front.
+  - **The route stays whole-trip.** Towns, dates and drive legs are a global constraint problem — where you sleep on day 12 depends on everything before and after it — and they are cheap: one outline call plus per-day Places/Routes resolution. Nothing about that improves by deferring it.
+  - **Detail becomes a rolling 3-day window**, resolved when a day is opened, plus a "prepare the next N days" button.
+  - **The saving is mostly not on first generation.** It is on every *replan*, which today re-details the entire remainder of the trip — on a sixty-day trip, from day 5, that is fifty-five days of activities and restaurants regenerated to change one week. With a window, the days beyond it have no detail to throw away, so a replan costs the route plus at most the window.
+  - **Position-following was considered and deferred.** The execution-mode geolocation check (Section 7.4) already knows where the RV is, so the window could follow it automatically. Held back in favour of an explicit button until the calendar drift is known: a trip that runs two days behind would have the window silently detailing the wrong days, and guessing at that before there is a real trip to measure is how the last few latency diagnoses went wrong.
+  - **It also makes the segmented-generation machinery largely redundant** — `GENERATION_TIME_BUDGET_MS`, the continuation chaining, most of the per-day staging. All of it exists to survive the day-detail phase inside a 540 s ceiling, and that phase leaves generation. Not a reason to do this, but a reason not to invest further in that machinery in the meantime, and something to remove deliberately rather than leave as dead weight.
+
+### Known documentation gap
+
+- [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
+  - a Claude spend report run from the app's own Cloud Logging output (`.github/workflows/usage-report.yml`, `scripts/analyzeClaudeUsage.mjs`);
+  - Places answering with the wrong place entirely — the name-match filter now described in Section 6.4, whose motivating failure was a Helsingør dinner stop resolving to a hotel in Greece;
+  - "Add a rest day" and "Request changes" acknowledging a submitted plan change and refusing a second one — root cause of a three-day trip becoming eleven, and a case where nothing broke: the trip was corrupted by something working, repeatedly, in silence;
+  - the per-source deadline in the overnight picker (a source that never answers, rather than one that throws);
+  - detour *time* alongside detour distance, route totals, and per-stop Maps links on the explore screen — landed in the same commit as the locked-only route change, which Section 3/7.2 now describe.
+  - Also unrecorded in Section 4: the access allowlist document and the read-only share-token collection, both from the 2026-08-02/03 gate and sharing work, which have backlog entries but never made it into the data model.
 
 ---
 
