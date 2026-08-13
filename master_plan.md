@@ -143,6 +143,12 @@ trips/{tripId}
                  preferredCountries: [ISO codes],
                  restDayFrequency: number,        // days between rest days, default 7
                  maxDriveHoursPerDay: number,     // default 4
+                 offGridTolerance?: number,       // free nights in a row before the
+                                                  // plan has to service the RV;
+                                                  // default 3, 0 = never free.
+                                                  // Optional: pre-existing trips
+                                                  // have none stored (read it via
+                                                  // offGridToleranceOf()).
                  vehicle: { type:"RV", weightKg:3500, registeredAs:"car",
                             heightM?, lengthM?, widthM?, fuel?: diesel|petrol|electric|lpg } }
                  // dimensions + fuel feed the countryGuide prompt: bridge/ferry
@@ -174,7 +180,12 @@ trips/{tripId}/days/{dayId}             // dayId is a Firestore AUTO-ID.
                                         // day can be re-dated without being
                                         // deleted and recreated.)
   { index, date, type: drive|rest,
-    overnight: {name, lat, lng, country, campsiteSuggestion},
+    overnight: {name, lat, lng, country, campsiteSuggestion,
+                type?: campsite|stellplatz|wild,  // what the night is committed to
+                freeCampingRule?: string},        // on a 'wild' night only: the
+                                                  // country's own researched rule
+                                                  // that permitted it
+    townAnchor?: {lat, lng},            // the day's TOWN, as opposed to its bed
     drive: { fromName, toName, distanceKm, durationMin,
              slot: morning|midday|evening, polyline },
     summary: string,                    // Claude's 1-2 sentence day pitch

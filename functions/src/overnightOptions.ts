@@ -1,6 +1,15 @@
 import { getFirestore, type DocumentReference } from 'firebase-admin/firestore'
-import { overnightStopCandidateSchema } from '@rv/shared'
-import type { LatLng, OvernightStopCandidate, TripDay } from '@rv/shared'
+import { offGridToleranceOf, overnightStopCandidateSchema } from '@rv/shared'
+import type {
+  LatLng,
+  OvernightStopCandidate,
+  TripDay,
+  TripSettings,
+} from '@rv/shared'
+import {
+  freeCampingPolicy,
+  loadFreeCampingRulesByCountry,
+} from './countryGuideSections.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { findNearbyCampsites } from './placesApi.js'
 import {
@@ -51,6 +60,17 @@ export interface DayOvernightQuery {
  * sleep in one is prose, not a POI, and stays where it already lives: the
  * per-country free-camping rules in the country guide.
  *
+ * That gap did not close when free nights became committable (2026-08-13).
+ * What the traveler describes — pulling off somewhere quiet in open country
+ * — is precisely what no source maps, and the standing rule that Claude is
+ * never asked to invent coordinates applies hardest here: a plausible pin in
+ * a field is a night spent driving up a farm track in the dark. So a free
+ * night is only ever committed to a lay-by or free motorhome parking area
+ * that OSM actually knows about, with the country's rules recorded alongside
+ * it. In a right-to-roam country those coordinates are a starting point
+ * rather than a fence — the rules the day carries are what say how far off
+ * it the traveler may legally go.
+ *
  * Nothing here is allowed to fail the generation. Every source degrades to
  * "no options of that kind for this day", which is the honest answer anyway
  * for a stretch of road with no campsite on it.
@@ -89,38 +109,91 @@ export async function resolveOvernightOptions(
   return byDay
 }
 
+/** What the day itself contributes to the choice of where it sleeps. */
+export interface OvernightChoiceContext {
+  /**
+   * Whether this country's own researched rules permit sleeping in a free
+   * spot at all (see freeCampingPolicy). False also covers "nobody has
+   * researched this country yet", which is not permission.
+   */
+  freeCampingPermitted: boolean
+  /**
+   * Nights of the off-grid tolerance still unspent when this night starts.
+   * 0 means the tanks are due: this night has to be somewhere with
+   * facilities.
+   */
+  offGridNightsRemaining: number
+  /** A whole day parked here, rather than one night in passing. */
+  restDay: boolean
+}
+
 /**
  * Which of a day's options becomes the committed overnight — the point the
  * route is actually driven to, and the pin "Navigate" opens.
  *
  * Something has to be committed: TripDay.overnight is a single point, and
- * every drive leg is measured to it. The traveler's stated preference is
- * stellplatz, so that is what wins where one exists.
+ * every drive leg is measured to it.
  *
- * The fallback to a campsite is not just for "no stellplatz nearby". OSM
- * stellplatz entries are frequently unnamed and carry no indication of
- * whether the site still operates, whereas a Places campsite comes with a
- * rating and a review count. Where the best stellplatz on offer is an
- * anonymous point on a map, a real campsite is the better thing to commit a
- * night of the trip to — the stellplatz is still right there in the options
- * list for anyone who wants it.
+ * This used to refuse outright to commit a free night, on the grounds that
+ * whether you may sleep in one is a question about signage and national law.
+ * The traveler overruled that (2026-08-13) — they are happy to be off grid
+ * in open country and equipped for it — so legality became an input instead
+ * of a blanket refusal, and a free night is now chosen where three things
+ * hold at once:
+ *
+ *  - the country's own researched rules permit it. Norway and Sweden have a
+ *    named right to roam; Germany prohibits it outside designated spots and
+ *    Croatia and Italy are stricter still. That is per country, and it is
+ *    already researched and cached per country, so the planner reads it
+ *    rather than guessing.
+ *  - the tanks can take it. This is the constraint that actually binds:
+ *    fresh water runs out and grey/black fills up, so a run of free nights
+ *    ends after offGridTolerance of them whatever the law says. A serviced
+ *    night resets it.
+ *  - the day is a drive day. A rest day is a whole day parked in one place —
+ *    the day the tanks empty fastest, the day facilities are worth the most,
+ *    and the day a stellplatz's short max-stay bites — so rest days go to a
+ *    serviced stop even mid-run.
+ *
+ * The serviced order below is unchanged, and its fallback to a campsite is
+ * not just for "no stellplatz nearby": OSM stellplatz entries are frequently
+ * unnamed and carry no indication of whether the site still operates,
+ * whereas a Places campsite comes with a rating and a review count. Where
+ * the best stellplatz on offer is an anonymous point on a map, a real
+ * campsite is the better thing to commit a night of the trip to.
+ *
+ * Both campsites and stellplatz count as servicing the RV. A stellplatz is
+ * by definition a motorhome stopover — water and a dump point are what
+ * distinguishes one from a car park — and `fee=no` on one does not make it
+ * an off-grid night: this budget is about tanks, not about money.
  */
 export function pickDefaultOvernight(
   options: OvernightStopCandidate[],
+  context: OvernightChoiceContext,
 ): OvernightStopCandidate | null {
   const named = (candidate: OvernightStopCandidate) =>
     !/^unnamed |^motorhome parking$/i.test(candidate.name.trim())
 
   const stellplatz = options.filter((option) => option.type === 'stellplatz')
   const campsites = options.filter((option) => option.type === 'campsite')
+  const free = context.freeCampingPermitted
+    ? options.filter((option) => option.type === 'wild')
+    : []
+
+  const offGridNight =
+    !context.restDay && context.offGridNightsRemaining > 0 ? free[0] : undefined
 
   return (
+    offGridNight ??
     stellplatz.find(named) ??
     campsites[0] ??
     stellplatz[0] ??
-    // Free parking is offered but never chosen for you: whether you may
-    // actually spend the night in one is a question about local signage and
-    // national law, not about the pin. See the country's free-camping rules.
+    // Servicing was due (or this is a rest day) and nothing serviced exists
+    // near this town. Committing the free spot anyway beats leaving the night
+    // on a town-centre intersection, and the caller does not treat it as
+    // servicing — the tanks stay due, so the requirement carries into the
+    // next day, where there may be a campsite to meet it.
+    free[0] ??
     null
   )
 }
@@ -139,6 +212,12 @@ export function pickDefaultOvernight(
  * Safe to re-run precisely because drive legs are measured town-to-town (see
  * resolveSkeletonDay's own note on nextLocation) — moving the committed
  * overnight within its town does not invalidate any distance already computed.
+ *
+ * The off-grid budget is why this walks the days in index order rather than
+ * resolving each one independently: "after N free nights, service the RV" is
+ * a fact about the sequence, so each day's choice depends on what the
+ * previous nights turned out to be. Days are sorted by index below for
+ * exactly that reason, not for tidiness.
  */
 export async function applyOvernightOptions(
   tripRef: DocumentReference,
@@ -148,6 +227,24 @@ export async function applyOvernightOptions(
     .map((doc) => ({ ref: doc.ref, day: doc.data() as TripDay }))
     .sort((a, b) => a.day.index - b.day.index)
   if (days.length === 0) return { daysResolved: 0, optionsWritten: 0 }
+
+  const settings = (await tripRef.get()).data()?.settings as
+    | TripSettings
+    | undefined
+  const offGridTolerance = offGridToleranceOf(settings ?? {})
+
+  // One lookup per country the trip crosses, not per day: the rules are
+  // researched and cached per country, and a two-month trip through six of
+  // them would otherwise read the same six documents sixty times.
+  const rulesByCountry = await loadFreeCampingRulesByCountry(
+    days.map(({ day }) => day.overnight.country),
+  )
+  const policyByCountry = new Map(
+    [...new Set(days.map(({ day }) => day.overnight.country))].map((country) => [
+      country,
+      freeCampingPolicy(rulesByCountry.get(country)),
+    ]),
+  )
 
   const optionsByDay = await resolveOvernightOptions(
     days.map(({ ref, day }) => ({
@@ -163,6 +260,8 @@ export async function applyOvernightOptions(
 
   const writes: PendingWrite[] = []
   let optionsWritten = 0
+  /** Free nights committed since the last night with facilities. */
+  let offGridNightsSpent = 0
 
   for (const { ref, day } of days) {
     const existing = await ref.collection('overnightOptions').get()
@@ -183,7 +282,31 @@ export async function applyOvernightOptions(
       lat: day.overnight.lat,
       lng: day.overnight.lng,
     }
-    const picked = pickDefaultOvernight(options)
+    const policy = policyByCountry.get(day.overnight.country) ?? {
+      permitted: false,
+      rule: null,
+    }
+    const picked = pickDefaultOvernight(options, {
+      freeCampingPermitted: policy.permitted,
+      offGridNightsRemaining: Math.max(0, offGridTolerance - offGridNightsSpent),
+      restDay: day.type === 'rest',
+    })
+
+    // Only a committed campsite or stellplatz empties the tanks. A day left
+    // on its town point counts as off grid too: nothing serviced was found
+    // near it, so treating it as a service stop would hand the trip a free
+    // reset every time a stretch of road came up empty — the one place a
+    // wrong guess costs the traveler a full grey tank.
+    offGridNightsSpent =
+      picked && picked.type !== 'wild' ? 0 : offGridNightsSpent + 1
+
+    // Last run's verdict is dropped before this run's is written: `type` and
+    // `freeCampingRule` describe the night picked THIS time, and this pass
+    // re-runs. Carrying them over would leave a "free camping is legal here"
+    // sentence sitting on a night that is now a campsite.
+    const stop = { ...day.overnight }
+    delete stop.type
+    delete stop.freeCampingRule
     writes.push({
       op: 'set',
       ref,
@@ -193,12 +316,19 @@ export async function applyOvernightOptions(
         // around wherever the last run decided to sleep.
         townAnchor: anchor,
         overnight: {
-          ...day.overnight,
+          ...stop,
           ...(picked
             ? {
                 lat: picked.lat,
                 lng: picked.lng,
                 campsiteSuggestion: picked.name,
+                type: picked.type,
+                // The rule the night was actually committed on, kept with the
+                // night rather than only in the country guide — the guide can
+                // be re-researched, and this is what the decision was made on.
+                ...(picked.type === 'wild' && policy.rule
+                  ? { freeCampingRule: policy.rule }
+                  : {}),
               }
             : { lat: anchor.lat, lng: anchor.lng }),
         },

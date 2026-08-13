@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { httpsCallable } from 'firebase/functions'
+import { offGridToleranceOf } from '@rv/shared'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { functions } from '../lib/firebase'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
@@ -384,6 +385,34 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             value={settings.restDayFrequency}
             onChange={(event) =>
               commit({ restDayFrequency: Number(event.target.value) })
+            }
+          />
+        </label>
+
+        {/* A tank budget, not a preference for roughing it: what ends a run
+          * of free nights is fresh water running out and grey/black filling
+          * up. The planner enforces it after the fact (see
+          * pickDefaultOvernight) — this is the traveler saying how long
+          * their own tanks last. 0 means every night gets facilities, which
+          * is exactly how this behaved before free nights were allowed at
+          * all. */}
+        <label className="block">
+          <span className="field-label">
+            {offGridToleranceOf(settings) === 0
+              ? 'No free camping — every night at a campsite or stellplatz'
+              : `Up to ${offGridToleranceOf(settings)} free night${
+                  offGridToleranceOf(settings) === 1 ? '' : 's'
+                } in a row before servicing`}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={7}
+            data-testid="off-grid-tolerance-input"
+            className="w-full accent-orange-600"
+            value={offGridToleranceOf(settings)}
+            onChange={(event) =>
+              commit({ offGridTolerance: Number(event.target.value) })
             }
           />
         </label>

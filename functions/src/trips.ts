@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import { tripSchema, type Trip } from '@rv/shared'
+import { DEFAULT_OFF_GRID_TOLERANCE, tripSchema, type Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 
 const SHARE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -36,6 +36,7 @@ function defaultTrip(): Trip {
       preferredCountries: [],
       restDayFrequency: 7,
       maxDriveHoursPerDay: 4,
+      offGridTolerance: DEFAULT_OFF_GRID_TOLERANCE,
       vehicle: {
         type: 'RV',
         weightKg: 3500,

@@ -10,9 +10,9 @@ import {
 } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
+import { COUNTRY_GUIDE_SECTIONS_COLLECTION } from './countryGuideSections.js'
 import { claudeApiKey, generateCountrySection } from './prompts/countrySection.js'
 
-export const COUNTRY_GUIDE_SECTIONS_COLLECTION = 'countryGuideSections'
 const COUNTRY_BRIEF_PATH = ['preferences', 'countryBrief'] as const
 
 /**

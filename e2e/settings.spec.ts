@@ -100,6 +100,9 @@ test('settings form fills and persists across reload, without falsely marking an
   await page.getByTestId('country-chip-IT').click()
 
   await setRange(page.getByTestId('rest-day-frequency-input'), '5')
+  // Set before max-drive-hours so that one stays the last write this test
+  // waits on below.
+  await setRange(page.getByTestId('off-grid-tolerance-input'), '2')
   await setRange(page.getByTestId('max-drive-hours-input'), '6')
 
   // A trip that's never had a plan generated has nothing settings changes
@@ -149,6 +152,10 @@ test('settings form fills and persists across reload, without falsely marking an
     'true',
   )
   await expect(page.getByTestId('rest-day-frequency-input')).toHaveValue('5')
+  // Optional on tripSettingsSchema (pre-existing trips have none stored), so
+  // this also covers that a stored value survives the round trip rather than
+  // being re-defaulted on read.
+  await expect(page.getByTestId('off-grid-tolerance-input')).toHaveValue('2')
   await expect(page.getByTestId('max-drive-hours-input')).toHaveValue('6')
   await expect(page.getByTestId('plan-status')).toHaveText('idle')
 })
