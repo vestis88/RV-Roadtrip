@@ -90,6 +90,17 @@ async function seedTrip(uid: string) {
     status: 'committed',
     linkedDayIds: [dayRef.id],
   })
+  // A suggestion the travelers turned down. It stays in Firestore so a later
+  // refresh doesn't propose it again, and must not reach the share payload —
+  // guests have no way to see it, and it is not part of the trip.
+  await tripRef.collection('corridorStops').doc().set({
+    name: 'Hamar',
+    lat: 60.7945,
+    lng: 11.0679,
+    country: 'NO',
+    status: 'rejected',
+    linkedDayIds: [],
+  })
 
   await tripRef.collection('log').doc().set({
     date: '2026-07-10',
@@ -159,6 +170,8 @@ describe('loadSharedTripView', () => {
     expect(view!.days[0].restaurants.map((place) => place.meal)).toEqual([
       'dinner',
     ])
+    // Only the real route: the rejected stop seeded above is left out of the
+    // payload entirely rather than sent for the view to filter.
     expect(view!.corridorStops.map((stop) => stop.name)).toEqual([
       'Lillehammer',
     ])

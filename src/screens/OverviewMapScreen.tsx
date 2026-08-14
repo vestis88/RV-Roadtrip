@@ -76,8 +76,13 @@ export function OverviewMapScreen() {
   // badge — this tier only ever shows the two kinds of stop that AREN'T
   // reconciled into a day yet: proposed (rescan finds) and locked
   // (traveler-pinned).
+  // Rejected stops are excluded explicitly rather than by being absent: they
+  // are kept in Firestore now (so a later refresh doesn't suggest them
+  // again — see corridorStopStatusSchema), and "everything that isn't
+  // committed" would otherwise start drawing a pin for every suggestion the
+  // travelers have ever turned down.
   const editableCorridorStops = corridorStops.filter(
-    (stop) => stop.status !== 'committed',
+    (stop) => stop.status !== 'committed' && stop.status !== 'rejected',
   )
   const selectedCorridorStop =
     editableCorridorStops.find((stop) => stop.id === selectedCorridorStopId) ??
