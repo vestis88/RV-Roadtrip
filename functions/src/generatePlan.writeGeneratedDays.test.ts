@@ -345,4 +345,42 @@ describe('writeGeneratedDays', () => {
     expect(stops).toHaveLength(1)
     expect(stops[0].status).toBe('committed')
   })
+
+  // Proximity means "the same town geocoded twice", which is only what it
+  // means for a stop that IS a town. A curated sight sits a couple of
+  // kilometres from the town it is seen from by design, so measuring it the
+  // same way would quietly delete every sight near a town the plan happens
+  // to sleep in — including the ones that did not make the route, which are
+  // exactly the ones the traveler still has a decision to make about.
+  it('keeps a curated sight sitting near a committed overnight town', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCorridorSightNearTown')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    await tripRef.collection('corridorStops').add({
+      name: 'Louisiana Museum of Modern Art',
+      // Well inside SAME_STOP_KM of the day's own overnight point below.
+      lat: 61.01,
+      lng: 9.01,
+      country: 'NO',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      baseTown: 'Oslo',
+      interest: 'art',
+      timeNeeded: 'half-day',
+    } satisfies CorridorStop)
+
+    await writeGeneratedDays(tripRef, [
+      generatedDay(0, '2026-07-10', 'Oslo', [], []),
+    ])
+
+    const stops = (await tripRef.collection('corridorStops').get()).docs.map(
+      (doc) => doc.data() as CorridorStop,
+    )
+    expect(stops.map((s) => s.name).sort()).toEqual([
+      'Louisiana Museum of Modern Art',
+      'Oslo',
+    ])
+  })
 })

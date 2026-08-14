@@ -307,9 +307,16 @@ export async function writeGeneratedDays(
   // A preserved stop the new plan now routes through is the same place
   // listed twice: once as something still awaiting a decision, once as part
   // of the trip. The committed copy is the true one, so the preserved
-  // duplicate goes. Matched on name or proximity, since a candidate's
+  // duplicate goes. Matched on name or proximity, since a town candidate's
   // coordinates come from the highlights geocode and the day's from its own,
   // and the two land a street apart rather than identical.
+  //
+  // Proximity only counts for a stop that is itself a town, though — one with
+  // no `baseTown`, meaning its own name is the place. A sights-led candidate
+  // sits a couple of kilometres from the town it is seen from BY DESIGN (see
+  // corridorStopSchema), so measuring it against overnight towns would delete
+  // the Louisiana Museum for being near the night in Humlebæk, and with it
+  // every reason the traveler was keeping it.
   const committedStops = writtenDays.map(({ day }) => day.overnight)
   preservedStops
     .filter((stop) => {
@@ -317,8 +324,9 @@ export async function writeGeneratedDays(
       return committedStops.some(
         (committed) =>
           committed.name.trim().toLowerCase() === data.name.trim().toLowerCase() ||
-          haversineDistanceKm(committed, { lat: data.lat, lng: data.lng }) <=
-            SAME_STOP_KM,
+          (!data.baseTown &&
+            haversineDistanceKm(committed, { lat: data.lat, lng: data.lng }) <=
+              SAME_STOP_KM),
       )
     })
     .forEach((stop) => writes.push({ op: 'delete', ref: stop.ref }))
