@@ -47,3 +47,54 @@ export function isPlanLockStale(
   if (Number.isNaN(updatedAt)) return true
   return now - updatedAt > STALE_PLAN_LOCK_MS
 }
+
+/**
+ * Merge into the trip update that runs once a plan operation has finished —
+ * successfully or not — so the next request can tell whether it was written
+ * before or after that run. See wasSubmittedBeforeRunEnded.
+ */
+export function planRunEndedFields(): { 'planMeta.lastRunEndedAt': string } {
+  return { 'planMeta.lastRunEndedAt': new Date().toISOString() }
+}
+
+/**
+ * The duplicate-submission guard, and the half of the cost guard that the
+ * `planMeta.status` check alone cannot cover.
+ *
+ * The status check answers "is a run in flight *at the moment this trigger
+ * happens to fire*". That is a different question from the one that matters,
+ * and the difference is a window wide enough to destroy a trip: a planRequest
+ * is a Firestore write and generatePlan is a trigger on it, so between the
+ * write landing and the trigger claiming the trip, `planMeta.status` is still
+ * 'ready'. A second request written inside that window sees a trip that looks
+ * idle. Whether it is then refused depends entirely on when Eventarc gets
+ * around to delivering its event — during the first run it is refused, after
+ * the first run it is waved through and a second (Claude-costed, day-
+ * rewriting) operation runs against a plan the traveler already changed once.
+ * Reported twice now: 2026-08-11 via "Add a rest day here" (a three-day trip
+ * became eleven), and 2026-08-13 via the overnight-stop picker.
+ *
+ * This closes the window instead of narrowing it, because it stops asking a
+ * question about *now*. Both inputs are server timestamps that are already
+ * fixed by the time any trigger runs: when the request was committed, and
+ * when the previous run finished. A request committed before a run that has
+ * since ended was, by definition, submitted against a plan that no longer
+ * exists — it is a duplicate, whether it was written a millisecond before the
+ * claim or an hour before. Delaying, reordering or redelivering either
+ * trigger cannot change the answer, which is exactly what "closed" means
+ * here: there is no interleaving left that admits two runs from one burst of
+ * taps.
+ *
+ * Only requests genuinely submitted after the last run ended get through — a
+ * traveler asking for another change once they can see the previous one, the
+ * case the whole feature exists for.
+ */
+export function wasSubmittedBeforeRunEnded(
+  submittedAtMs: number,
+  lastRunEndedAt: string | undefined,
+): boolean {
+  if (!lastRunEndedAt) return false
+  const endedAtMs = new Date(lastRunEndedAt).getTime()
+  if (Number.isNaN(endedAtMs)) return false
+  return submittedAtMs <= endedAtMs
+}

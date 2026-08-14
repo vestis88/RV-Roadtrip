@@ -20,6 +20,7 @@ import {
   generateExploreHighlights,
 } from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
+import { usePlanBusy } from '../lib/planBusy'
 import { updateTripSettings } from '../lib/updateTripSettings'
 import { hasRoute } from '../lib/validateRoute'
 
@@ -57,6 +58,15 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // now does — read too), so it survives navigation and stays accurate
   // regardless of which screen fired the call.
   const exploring = overviewSubmitting || trip.planMeta.exploreStatus === 'generating'
+  // The same window, on the plan's own status rather than exploreStatus:
+  // `submitting` clears the instant the planRequest write resolves, but the
+  // trip stays 'idle'/'stale'/'error' until generatePlan's trigger claims it
+  // a second or two later — so "Generate full plan" renders and is live
+  // again, and a second full generation can be confirmed. Wired here after
+  // the 2026-08-13 overnight-picker incident, where the 2026-08-11 fix for
+  // this exact class turned out to have been applied to two forms and no
+  // others.
+  const { busy: planBusy, markSubmitted } = usePlanBusy(trip.planMeta.status)
 
   // Switching trips (TripSwitcher) doesn't remount this component — it's
   // the same SettingsScreen instance re-rendered with new tripId/trip
@@ -142,6 +152,8 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
     setSubmitting(true)
     try {
       await submitPlanRequest(tripId, 'full')
+      // Before the dialog closes — see planBusy's own comment above.
+      markSubmitted()
       setConfirmOpen(false)
     } catch (error) {
       // Previously uncaught: the rejection went unhandled, the dialog stayed
@@ -459,10 +471,10 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
               type="button"
               data-testid="generate-plan-button"
               onClick={openGenerateConfirm}
-              disabled={submitting}
-              className="btn btn-primary"
+              disabled={submitting || planBusy}
+              className="btn btn-primary disabled:opacity-40"
             >
-              {GENERATE_LABEL[trip.planMeta.status]}
+              {planBusy ? 'Starting…' : GENERATE_LABEL[trip.planMeta.status]}
             </button>
           )}
           {/* Re-picks where every night is spent without regenerating the

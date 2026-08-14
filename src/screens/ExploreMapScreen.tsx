@@ -32,6 +32,7 @@ import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { DirectionsRoute, type RouteTotals } from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
+import { usePlanBusy } from '../lib/planBusy'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
 
@@ -79,6 +80,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  // `committing` alone is not a guard: it clears the instant the planRequest
+  // write resolves, and the trip stays 'idle' for the second or two before
+  // generatePlan's trigger claims it — which is exactly this screen's
+  // rendering condition, so "Generate full plan" comes straight back and a
+  // second full generation can be confirmed. Same hole the 2026-08-13
+  // overnight-picker incident went through, on the most expensive button in
+  // the app. (ConfirmGenerateDialog's own ref guard only covers double-taps
+  // *within* one open dialog.)
+  const { busy: planBusy, markSubmitted } = usePlanBusy(trip.planMeta.status)
   // Same reasoning as SettingsScreen.tsx's own `exploring`: a generation
   // fired from Trip Setup and still running server-side must show as
   // "still working" here too, on a screen that never made that call
@@ -235,6 +245,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     setCommitting(true)
     try {
       await submitPlanRequest(tripId, 'fromExploreCandidates')
+      // Before the dialog closes, so the screen has already changed by the
+      // time the confirm button disappears — see planBusy above.
+      markSubmitted()
       setConfirmOpen(false)
     } catch (error) {
       // Without this the rejection was unhandled, the dialog stayed open
@@ -297,11 +310,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         <button
           type="button"
           data-testid="explore-generate-plan-button"
-          className="btn btn-secondary"
-          disabled={!canCommit}
+          className="btn btn-secondary disabled:opacity-40"
+          disabled={!canCommit || planBusy}
           onClick={() => setConfirmOpen(true)}
         >
-          Generate full plan ({candidates.length} stop{candidates.length === 1 ? '' : 's'})
+          {planBusy
+            ? 'Starting the full plan…'
+            : `Generate full plan (${candidates.length} stop${candidates.length === 1 ? '' : 's'})`}
         </button>
       </div>
 

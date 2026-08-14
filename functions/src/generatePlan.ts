@@ -17,7 +17,12 @@ import {
 import { applyOvernightOptions } from './overnightOptions.js'
 import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
-import { isPlanLockStale, planAliveFields } from './planLock.js'
+import {
+  isPlanLockStale,
+  planAliveFields,
+  planRunEndedFields,
+  wasSubmittedBeforeRunEnded,
+} from './planLock.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
 import { runReconcileCorridor } from './corridorReconciliation.js'
 import { runInsertRestDay } from './insertRestDay.js'
@@ -486,6 +491,15 @@ export const generatePlan = onDocumentCreated(
     // GENERATION_TIME_BUDGET_MS.
     const invocationDeadline = Date.now() + GENERATION_TIME_BUDGET_MS
 
+    // When this request was actually committed, as the server saw it — NOT
+    // when this trigger got round to running. The two differ by however long
+    // Eventarc took, and every duplicate-submission bug this guard exists to
+    // stop lives in exactly that difference. Taken from the CloudEvent rather
+    // than any field the client wrote, so it can't be spoofed or forgotten by
+    // a new submitter. See wasSubmittedBeforeRunEnded.
+    const parsedEventTime = Date.parse(event.time)
+    const submittedAtMs = Number.isNaN(parsedEventTime) ? Date.now() : parsedEventTime
+
     // Cost guard: only one plan request may be active per trip at a time.
     // Rapid double-clicks on "Generate" (or a replan racing a full generate)
     // create multiple planRequest docs, but this transaction ensures only
@@ -494,96 +508,174 @@ export const generatePlan = onDocumentCreated(
     // continuation (see isContinuation's own doc comment) skips claiming —
     // the invocation that chained it already holds the claim — and instead
     // just confirms the trip is still genuinely mid-generation.
-    const claimed = await db.runTransaction(async (tx) => {
+    const claim = await db.runTransaction(async (tx) => {
       const tripSnap = await tx.get(tripRef)
       const meta = tripSnap.data()?.planMeta
       const currentStatus = meta?.status
       if (request.isContinuation) {
-        return currentStatus === 'generating'
+        // Deliberately checked before the duplicate guard below: a
+        // continuation is written by the run that is still holding the
+        // claim, so "submitted while a run was in progress" is its normal,
+        // correct state rather than a duplicate.
+        return currentStatus === 'generating' ? 'ok' : 'staleContinuation'
+      }
+      // The second half of the guard, and the one the status check above
+      // cannot express: this request was written before a run that has since
+      // finished, so it was submitted against a plan that no longer exists.
+      // See wasSubmittedBeforeRunEnded for why comparing two already-fixed
+      // server timestamps closes the window rather than narrowing it.
+      if (wasSubmittedBeforeRunEnded(submittedAtMs, meta?.lastRunEndedAt)) {
+        return 'superseded'
       }
       const isBusy = currentStatus === 'pending' || currentStatus === 'generating'
       // A busy claim that hasn't been touched in STALE_PLAN_LOCK_MS belongs
       // to a run that died without ever reaching its own error handler —
       // reclaimed rather than leaving the trip permanently ungeneratable.
       // See planLock.ts.
-      if (isBusy && !isPlanLockStale(meta?.statusUpdatedAt)) return false
+      if (isBusy && !isPlanLockStale(meta?.statusUpdatedAt)) return 'busy'
       tx.update(tripRef, { 'planMeta.status': 'pending', ...planAliveFields() })
-      return true
+      return 'ok'
     })
 
-    if (!claimed) {
-      await snap.ref.update({
-        status: 'error',
-        error: request.isContinuation
-          ? 'Chained continuation found the trip no longer generating — dropped.'
-          : 'Another plan request is already in progress for this trip.',
-      })
+    if (claim !== 'ok') {
+      const CLAIM_REFUSALS = {
+        staleContinuation:
+          'Chained continuation found the trip no longer generating — dropped.',
+        superseded:
+          'This trip was already being changed when this request was submitted — refused as a duplicate.',
+        busy: 'Another plan request is already in progress for this trip.',
+      } as const
+      // Deliberately does not write planMeta at all — a refused request never
+      // ran, so it must neither disturb the run that is in flight nor move
+      // the lastRunEndedAt watermark that later requests are judged against.
+      await snap.ref.update({ status: 'error', error: CLAIM_REFUSALS[claim] })
       return
     }
 
-    if (request.kind === 'insertRestDay') {
-      const afterDayId = request.insertRestDayContext?.afterDayId
-      if (!afterDayId) {
-        const message = 'insertRestDay request is missing insertRestDayContext'
-        await tripRef.update({
-          'planMeta.status': 'error',
-          'planMeta.error': message,
-        })
-        await snap.ref.update({ status: 'error', error: message })
-        return
+    // Everything below runs under the claim just taken. Wrapped in one
+    // function with one exit so the run-ended watermark can be written in a
+    // single `finally` below: the previous fix in this area was applied at
+    // individual call sites and missed the rest, which is how the same class
+    // of bug came back through a submitter nobody had thought of. A guard
+    // that has to be remembered per branch is the same mistake one layer
+    // down.
+    const handleClaimedRequest = async (): Promise<{ chained: boolean }> => {
+      if (request.kind === 'insertRestDay') {
+        const afterDayId = request.insertRestDayContext?.afterDayId
+        if (!afterDayId) {
+          const message = 'insertRestDay request is missing insertRestDayContext'
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': message,
+          })
+          await snap.ref.update({ status: 'error', error: message })
+          return { chained: false }
+        }
+        try {
+          await tripRef.update({
+            'planMeta.status': 'generating',
+            ...planAliveFields(),
+            'planMeta.progressLabel': FieldValue.delete(),
+            'planMeta.progressCurrent': FieldValue.delete(),
+            'planMeta.progressTotal': FieldValue.delete(),
+          })
+          await runInsertRestDay(request.tripId, afterDayId)
+          await snap.ref.update({ status: 'done' })
+        } catch (error) {
+          console.error('runInsertRestDay failed', error)
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': String(error),
+            'planMeta.progressLabel': FieldValue.delete(),
+            'planMeta.progressCurrent': FieldValue.delete(),
+            'planMeta.progressTotal': FieldValue.delete(),
+          })
+          await snap.ref.update({ status: 'error', error: String(error) })
+        }
+        return { chained: false }
       }
-      try {
-        await tripRef.update({
-          'planMeta.status': 'generating',
-          ...planAliveFields(),
-          'planMeta.progressLabel': FieldValue.delete(),
-          'planMeta.progressCurrent': FieldValue.delete(),
-          'planMeta.progressTotal': FieldValue.delete(),
-        })
-        await runInsertRestDay(request.tripId, afterDayId)
-        await snap.ref.update({ status: 'done' })
-      } catch (error) {
-        console.error('runInsertRestDay failed', error)
-        await tripRef.update({
-          'planMeta.status': 'error',
-          'planMeta.error': String(error),
-          'planMeta.progressLabel': FieldValue.delete(),
-          'planMeta.progressCurrent': FieldValue.delete(),
-          'planMeta.progressTotal': FieldValue.delete(),
-        })
-        await snap.ref.update({ status: 'error', error: String(error) })
-      }
-      return
-    }
 
-    if (request.kind === 'reconcileCorridor') {
-      const newStopOrder = request.reconcileCorridorContext?.newStopOrder
-      if (!newStopOrder) {
-        const message =
-          'reconcileCorridor request is missing reconcileCorridorContext'
-        await tripRef.update({
-          'planMeta.status': 'error',
-          'planMeta.error': message,
-        })
-        await snap.ref.update({ status: 'error', error: message })
-        return
+      if (request.kind === 'reconcileCorridor') {
+        const newStopOrder = request.reconcileCorridorContext?.newStopOrder
+        if (!newStopOrder) {
+          const message =
+            'reconcileCorridor request is missing reconcileCorridorContext'
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': message,
+          })
+          await snap.ref.update({ status: 'error', error: message })
+          return { chained: false }
+        }
+        try {
+          await tripRef.update({
+            'planMeta.status': 'generating',
+            ...planAliveFields(),
+            'planMeta.progressLabel': FieldValue.delete(),
+            'planMeta.progressCurrent': FieldValue.delete(),
+            'planMeta.progressTotal': FieldValue.delete(),
+          })
+          await runReconcileCorridor(
+            request.tripId,
+            newStopOrder,
+            request.reconcileCorridorContext?.acceptEndDateChange ?? false,
+          )
+          await snap.ref.update({ status: 'done' })
+        } catch (error) {
+          console.error('runReconcileCorridor failed', error)
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': String(error),
+            'planMeta.progressLabel': FieldValue.delete(),
+            'planMeta.progressCurrent': FieldValue.delete(),
+            'planMeta.progressTotal': FieldValue.delete(),
+          })
+          await snap.ref.update({ status: 'error', error: String(error) })
+        }
+        return { chained: false }
       }
+
+      if (request.kind === 'replan') {
+        if (!request.replanContext) {
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': 'replan request is missing replanContext',
+          })
+          await snap.ref.update({
+            status: 'error',
+            error: 'replan request is missing replanContext',
+          })
+          return { chained: false }
+        }
+        try {
+          await runReplan(request.tripId, request.replanContext)
+          await snap.ref.update({ status: 'done' })
+        } catch (error) {
+          console.error('runReplan failed', error)
+          await tripRef.update({
+            'planMeta.status': 'error',
+            'planMeta.error': String(error),
+            'planMeta.progressLabel': FieldValue.delete(),
+            'planMeta.progressCurrent': FieldValue.delete(),
+            'planMeta.progressTotal': FieldValue.delete(),
+          })
+          await snap.ref.update({ status: 'error', error: String(error) })
+        }
+        return { chained: false }
+      }
+
       try {
-        await tripRef.update({
-          'planMeta.status': 'generating',
-          ...planAliveFields(),
-          'planMeta.progressLabel': FieldValue.delete(),
-          'planMeta.progressCurrent': FieldValue.delete(),
-          'planMeta.progressTotal': FieldValue.delete(),
-        })
-        await runReconcileCorridor(
+        const outcome = await runFullGeneration(
           request.tripId,
-          newStopOrder,
-          request.reconcileCorridorContext?.acceptEndDateChange ?? false,
+          request.kind,
+          invocationDeadline,
         )
         await snap.ref.update({ status: 'done' })
+        // A chained continuation carries the claim forward, so this run has
+        // not actually ended — see the watermark write below.
+        return outcome
       } catch (error) {
-        console.error('runReconcileCorridor failed', error)
+        console.error('generatePlan failed', error)
         await tripRef.update({
           'planMeta.status': 'error',
           'planMeta.error': String(error),
@@ -593,51 +685,26 @@ export const generatePlan = onDocumentCreated(
         })
         await snap.ref.update({ status: 'error', error: String(error) })
       }
-      return
+      return { chained: false }
     }
 
-    if (request.kind === 'replan') {
-      if (!request.replanContext) {
-        await tripRef.update({
-          'planMeta.status': 'error',
-          'planMeta.error': 'replan request is missing replanContext',
-        })
-        await snap.ref.update({
-          status: 'error',
-          error: 'replan request is missing replanContext',
-        })
-        return
-      }
-      try {
-        await runReplan(request.tripId, request.replanContext)
-        await snap.ref.update({ status: 'done' })
-      } catch (error) {
-        console.error('runReplan failed', error)
-        await tripRef.update({
-          'planMeta.status': 'error',
-          'planMeta.error': String(error),
-          'planMeta.progressLabel': FieldValue.delete(),
-          'planMeta.progressCurrent': FieldValue.delete(),
-          'planMeta.progressTotal': FieldValue.delete(),
-        })
-        await snap.ref.update({ status: 'error', error: String(error) })
-      }
-      return
-    }
-
+    // The watermark every later request is judged against — see
+    // wasSubmittedBeforeRunEnded. Written whether this run succeeded or
+    // failed, because either way the plan a request submitted beforehand was
+    // aimed at is gone. Skipped only when the work was handed to a chained
+    // continuation, since the run has not ended in that case.
+    let chained = false
     try {
-      await runFullGeneration(request.tripId, request.kind, invocationDeadline)
-      await snap.ref.update({ status: 'done' })
-    } catch (error) {
-      console.error('generatePlan failed', error)
-      await tripRef.update({
-        'planMeta.status': 'error',
-        'planMeta.error': String(error),
-        'planMeta.progressLabel': FieldValue.delete(),
-        'planMeta.progressCurrent': FieldValue.delete(),
-        'planMeta.progressTotal': FieldValue.delete(),
-      })
-      await snap.ref.update({ status: 'error', error: String(error) })
+      const outcome = await handleClaimedRequest()
+      chained = outcome.chained
+    } finally {
+      if (!chained) {
+        await tripRef
+          .update(planRunEndedFields())
+          .catch((error: unknown) =>
+            console.error('Failed to record the end of a plan run', error),
+          )
+      }
     }
   },
 )

@@ -15,6 +15,15 @@ interface OvernightCandidatesPickerProps {
   /** ids of every day before this one — locked so only this day (and, via
    * the replan, everything after it) gets re-planned. */
   priorDayIds: string[]
+  /**
+   * True while the plan is already being rewritten — including a submission
+   * this client just made that the backend has not acknowledged yet. Same
+   * prop, same reason, as AddRestDay and RequestChangesForDay: see the note
+   * on pickCandidate below for what happened without it.
+   */
+  planBusy: boolean
+  /** Called once the planRequest write lands, so the busy state starts. */
+  onSubmitted: () => void
 }
 
 const WILD_TOOLTIP_SEEN_KEY = 'wildCampingTooltipSeen'
@@ -33,6 +42,12 @@ const GROUPS: { type: OvernightStopCandidate['type']; label: string }[] = [
  * scoped replan (reusing submitPlanChangeRequest, the same path Day View's
  * "Request changes for this day" uses) locking every day before this one,
  * with the chosen stop passed in as a hard constraint.
+ *
+ * Because it submits a replan, it needs the same busy guard every other
+ * submitter on this screen has (see planBusy below). It shipped without one:
+ * the 2026-08-11 fix for repeat submissions was applied to "Add a rest day
+ * here" and "Request changes for this day" and to nothing else, and this
+ * picker — which had existed since 2026-07-27 — was simply not on the list.
  */
 export function OvernightCandidatesPicker({
   tripId,
@@ -40,6 +55,8 @@ export function OvernightCandidatesPicker({
   dayId,
   day,
   priorDayIds,
+  planBusy,
+  onSubmitted,
 }: OvernightCandidatesPickerProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -119,6 +136,19 @@ export function OvernightCandidatesPicker({
     window.localStorage.setItem(WILD_TOOLTIP_SEEN_KEY, '1')
   }
 
+  /**
+   * `submittingIndex` alone was the whole guard here, and it clears the
+   * moment the Firestore write resolves. But the write is only the request:
+   * generatePlan is a trigger on it, so the trip stays 'ready' for a second
+   * or two afterwards. This panel closed, the buttons went live again, and a
+   * second pick was accepted against a plan that was already being replaced
+   * — reported 2026-08-13, a three-night trip returned as eight with the
+   * route doubling back through towns it had already been through.
+   * markSubmitted() below closes that window on this client (the server
+   * closes it for good, and across devices, via planLock.ts's
+   * wasSubmittedBeforeRunEnded — this is here so the traveler gets an
+   * immediate answer instead of a rejected request).
+   */
   async function pickCandidate(
     candidate: OvernightStopCandidate,
     index: number,
@@ -135,6 +165,10 @@ export function OvernightCandidatesPicker({
           `route to continue from there.`,
         priorDayIds,
       )
+      // Before the panel closes, so the busy banner is already on screen by
+      // the time the controls disappear — closing into an apparently
+      // unchanged screen is what invited the second tap.
+      onSubmitted()
       setOpen(false)
       setCandidates(null)
     } catch (err) {
@@ -151,10 +185,11 @@ export function OvernightCandidatesPicker({
         <button
           type="button"
           data-testid="change-overnight-toggle"
+          disabled={planBusy}
           onClick={loadCandidates}
-          className="btn btn-sm btn-ghost -ml-3"
+          className="btn btn-sm btn-ghost -ml-3 disabled:opacity-40"
         >
-          Change overnight stop
+          {planBusy ? 'Updating the plan…' : 'Change overnight stop'}
         </button>
       </div>
     )
@@ -262,9 +297,9 @@ export function OvernightCandidatesPicker({
                       <button
                         type="button"
                         data-testid={`overnight-candidate-pick-${type}-${i}`}
-                        disabled={submittingIndex !== null}
+                        disabled={submittingIndex !== null || planBusy}
                         onClick={() => pickCandidate(c, i)}
-                        className="btn btn-sm btn-primary"
+                        className="btn btn-sm btn-primary disabled:opacity-40"
                       >
                         {submittingIndex === i ? 'Submitting…' : 'Use this stop'}
                       </button>

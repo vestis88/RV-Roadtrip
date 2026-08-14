@@ -193,6 +193,31 @@ export async function runReplan(
   // also the right yardstick here — it's the ground left over the days left.
   const warnings = pacingWarnings(remainderDays)
 
+  // The `daysSnap` read this entire run is built on happened minutes ago,
+  // before a Claude call and a per-day Places/Routes pass. Everything below
+  // deletes the future days that read found and writes a replacement
+  // remainder — so if the trip's day set has changed underneath us, the two
+  // plans do not replace each other, they add up: a trip with its days
+  // duplicated and a route that loops back through towns it already visited.
+  // That is precisely the corruption reported on 2026-08-11 and again on
+  // 2026-08-13, and while both were really caused upstream (a second request
+  // accepted for a trip that already had one — see generatePlan.ts's claim
+  // and planLock.ts's wasSubmittedBeforeRunEnded), a write path that
+  // silently trusts a minutes-old read is what turned an upstream slip into
+  // a destroyed trip. Nothing is supposed to restructure a trip's days while
+  // a plan operation holds the claim, so a mismatch here means a guard
+  // leaked: fail loudly with the trip still intact (generation deliberately
+  // happens before any delete — see this function's doc comment) rather than
+  // commit the duplicate.
+  const dayIdsNowSnap = await tripRef.collection('days').get()
+  const dayIdsAtRead = daysSnap.docs.map((doc) => doc.id).sort().join(',')
+  const dayIdsNow = dayIdsNowSnap.docs.map((doc) => doc.id).sort().join(',')
+  if (dayIdsAtRead !== dayIdsNow) {
+    throw new Error(
+      "The trip's days changed while this replan was being generated — refusing to write a remainder built from a plan that no longer exists.",
+    )
+  }
+
   // Only now — once the replacement is known-good — touch existing docs.
   const futureIds = new Set(futureDocs.map((doc) => doc.id))
   const corridorSnap = await tripRef.collection('corridorStops').get()

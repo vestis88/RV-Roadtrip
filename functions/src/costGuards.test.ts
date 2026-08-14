@@ -127,6 +127,97 @@ describe('cost guards', () => {
     expect(finalRequest.error).not.toMatch(/already in progress/)
   }, 15_000)
 
+  // The window the `planMeta.status` check alone cannot see, and the one
+  // that destroyed two real trips (2026-08-11 via "Add a rest day here",
+  // 2026-08-13 via the overnight-stop picker). A planRequest is a Firestore
+  // write and generatePlan is a trigger on it, so between the write landing
+  // and the trigger claiming the trip, the trip is still 'ready' — a second
+  // tap lands against an idle-looking trip. Whether the old guard caught it
+  // came down to when Eventarc delivered the second event: during the first
+  // run it was refused, after the first run it was waved through and a
+  // second Claude-costed rewrite ran against a plan that had already been
+  // replaced.
+  //
+  // `lastRunEndedAt` in the near future is how "a run that ends after this
+  // request was written" is staged deterministically here — in production
+  // the ordering arises on its own, from the first run finishing while the
+  // second request sits undelivered. What is being asserted is the property
+  // that makes the guard closed rather than narrowed: the verdict is a
+  // comparison of two fixed server timestamps, so no delivery delay can
+  // change it.
+  it('refuses a request that was written before the run in flight finished', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCostGuardWindow')
+    const tripRef = db.collection('trips').doc(tripId)
+
+    await tripRef.update({
+      // Deliberately NOT busy: this is exactly what the second tap saw.
+      'planMeta.status': 'ready',
+      'planMeta.lastRunEndedAt': new Date(Date.now() + 60_000).toISOString(),
+    })
+
+    const requestRef = await db.collection('planRequests').add({
+      tripId,
+      kind: 'replan',
+      status: 'pending',
+      replanContext: {
+        currentLocation: { lat: 55.6761, lng: 12.5683 },
+        today: '2026-08-14',
+        completedRefPaths: [],
+        remainingEndDate: '2026-08-17',
+        remainingEndPoint: { name: 'Copenhagen', lat: 55.6761, lng: 12.5683 },
+        changeRequestText: 'Change the overnight stop for Day 2',
+        lockedDayIds: [],
+      },
+    })
+
+    const finalRequest = await waitFor(async () => {
+      const snap = await requestRef.get()
+      const data = snap.data()
+      return data?.status === 'error' ? data : undefined
+    })
+
+    expect(finalRequest.error).toMatch(/refused as a duplicate/)
+
+    // A refused request must leave the trip completely alone — it never ran,
+    // so it must neither disturb a run in flight nor move the watermark that
+    // later requests are judged against.
+    const tripSnap = await tripRef.get()
+    expect(tripSnap.data()?.planMeta.status).toBe('ready')
+  }, 15_000)
+
+  // The same guarantee stated as the traveler experiences it, without
+  // staging any timestamps: two taps in one burst, and whatever the delivery
+  // order, only one of them is ever allowed to rewrite the trip.
+  it('lets only one of two requests submitted in the same burst run', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidCostGuardBurst')
+    const requests = db.collection('planRequests')
+    const body = { tripId, kind: 'full' as const, status: 'pending' }
+
+    const [first, second] = await Promise.all([
+      requests.add(body),
+      requests.add(body),
+    ])
+
+    const outcomes = await waitFor(async () => {
+      const snaps = await Promise.all([first.get(), second.get()])
+      const done = snaps.every((snap) => snap.data()?.status !== 'pending')
+      return done ? snaps.map((snap) => snap.data()?.error ?? '') : undefined
+    }, 25_000)
+
+    // One is turned away by the guard — either because the other was still
+    // running ('already in progress') or because it was written before the
+    // other finished ('refused as a duplicate'); which one depends on
+    // delivery timing and does not matter. The other gets through to the
+    // real pipeline and fails there for want of Claude credentials in this
+    // sandbox, which is what proves it was allowed to run.
+    const refused = outcomes.filter((error) =>
+      /already in progress|refused as a duplicate/.test(error),
+    )
+    expect(refused).toHaveLength(1)
+  }, 30_000)
+
   it('drops a continuation request whose trip is no longer generating, without touching the trip', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidCostGuardStaleContinuation')

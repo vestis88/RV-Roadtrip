@@ -154,6 +154,13 @@ export const planMetaSchema = z.object({
   // container can be reclaimed instead of wedging the trip forever. See
   // functions/src/planLock.ts.
   statusUpdatedAt: isoDateTime.optional(),
+  // Set when a plan operation finishes, success or failure. The watermark
+  // that makes duplicate submissions impossible rather than merely unlikely:
+  // a planRequest committed before this instant was aimed at a plan that no
+  // longer exists, so generatePlan refuses it no matter when its trigger
+  // happens to fire. Internal to the backend — never read or rendered by the
+  // frontend. See functions/src/planLock.ts's wasSubmittedBeforeRunEnded.
+  lastRunEndedAt: isoDateTime.optional(),
 })
 
 export const tripSchema = z.object({
