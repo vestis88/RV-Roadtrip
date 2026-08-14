@@ -203,6 +203,85 @@ describe('overpass corridor query', () => {
     expect(place).toMatchObject({ lat: 55.1, lng: 12.2, name: 'Hafen-Stellplatz' })
   })
 
+  // Reported 2026-08-14: three harbour stellplatz in North Zealand all read
+  // "arrive/depart any time, minimal facilities, short max stay" — identical,
+  // because the only free-text field OSM has is rarely set and everything fell
+  // through to one boilerplate sentence. The facts were in the response all
+  // along.
+  it('describes a site from the facilities its mapper recorded', () => {
+    const place = toPlace({
+      type: 'node',
+      id: 10,
+      lat: 1,
+      lon: 2,
+      tags: {
+        tourism: 'caravan_site',
+        name: 'Nivaa Havn',
+        drinking_water: 'yes',
+        sanitary_dump_station: 'yes',
+        capacity: '12',
+        maxstay: '3 days',
+      },
+    })
+
+    expect(place?.description).toContain('fresh water')
+    expect(place?.description).toContain('dump station')
+    expect(place?.description).toContain('12 pitches')
+    expect(place?.description).toContain('max stay 3 days')
+  })
+
+  it('two sites with different facilities no longer read identically', () => {
+    const serviced = toPlace({
+      type: 'node',
+      id: 11,
+      lat: 1,
+      lon: 2,
+      tags: { tourism: 'caravan_site', drinking_water: 'yes', shower: 'yes' },
+    })
+    const bare = toPlace({
+      type: 'node',
+      id: 12,
+      lat: 1,
+      lon: 2,
+      tags: { tourism: 'caravan_site', capacity: '4' },
+    })
+
+    expect(serviced?.description).not.toBe(bare?.description)
+  })
+
+  // Asserting "minimal facilities" about a site nobody has surveyed is a claim
+  // OSM never made, and it read exactly like a site that had been surveyed and
+  // found bare.
+  it('admits when nothing is recorded rather than inventing detail', () => {
+    const place = toPlace({
+      type: 'node',
+      id: 13,
+      lat: 1,
+      lon: 2,
+      tags: { tourism: 'caravan_site' },
+    })
+
+    expect(place?.description).toMatch(/no facilities recorded/i)
+    expect(place?.description).not.toMatch(/minimal facilities/i)
+  })
+
+  // A mapper who wrote prose about the place knows more than a tag list does.
+  it('prefers the mapper\'s own description when there is one', () => {
+    const place = toPlace({
+      type: 'node',
+      id: 14,
+      lat: 1,
+      lon: 2,
+      tags: {
+        tourism: 'caravan_site',
+        description: 'Quiet harbour berth, pay at the kiosk.',
+        drinking_water: 'yes',
+      },
+    })
+
+    expect(place?.description).toBe('Quiet harbour berth, pay at the kiosk.')
+  })
+
   it('says so when a site is free', () => {
     const place = toPlace({
       type: 'node',

@@ -145,6 +145,54 @@ function dedupePoints(points: LatLng[]): LatLng[] {
   return unique
 }
 
+/**
+ * What an OSM site actually says about itself, in the order an RV traveler
+ * cares (2026-08-14).
+ *
+ * Every stellplatz used to read identically — "arrive/depart any time,
+ * minimal facilities, short max stay" — because the only free-text field OSM
+ * has (`description`) is rarely set, so essentially every site fell through
+ * to one boilerplate sentence. Three harbours in North Zealand were
+ * indistinguishable, which makes the list useless for choosing between them.
+ *
+ * The facts were in the response the whole time. `out center` returns every
+ * tag, and mappers who bother with a caravan_site routinely tag the things
+ * that decide whether you can actually stay: fresh water, a dump station,
+ * power, how many pitches, how long you may stay. Reading them costs nothing
+ * — no extra request, no extra API — and they are exactly the difference
+ * between a marina you can service the van at and a car park you cannot.
+ *
+ * Ordered by what governs the decision rather than by what is common: water
+ * and waste first (they are why a stellplatz exists at all), then comfort,
+ * then size and limits.
+ */
+function describeFacilities(tags: Record<string, string>): string[] {
+  const facts: string[] = []
+  const yes = (value: string | undefined) => value === 'yes' || value === 'designated'
+
+  if (yes(tags.drinking_water) || yes(tags['drinking_water:refill'])) {
+    facts.push('fresh water')
+  }
+  if (yes(tags.sanitary_dump_station)) facts.push('dump station')
+  if (yes(tags.power_supply) || yes(tags.electricity)) facts.push('power')
+  if (yes(tags.toilets)) facts.push('toilets')
+  if (yes(tags.shower)) facts.push('showers')
+  if (yes(tags.wifi) || yes(tags.internet_access)) facts.push('wifi')
+  if (tags.capacity && /^\d+$/.test(tags.capacity)) {
+    facts.push(`${tags.capacity} pitches`)
+  }
+  if (tags.maxstay) facts.push(`max stay ${tags.maxstay}`)
+  // `fee=no` is reported separately by osmPlaceToCandidate, so only the
+  // amount adds anything here.
+  if (tags.charge) facts.push(tags.charge)
+  if (tags.opening_hours && tags.opening_hours !== '24/7') {
+    facts.push(`open ${tags.opening_hours}`)
+  } else if (tags.opening_hours === '24/7') {
+    facts.push('open 24/7')
+  }
+  return facts
+}
+
 function toPlace(element: OverpassElement): OsmOvernightPlace | null {
   const lat = element.lat ?? element.center?.lat
   const lng = element.lon ?? element.center?.lon
@@ -155,6 +203,11 @@ function toPlace(element: OverpassElement): OsmOvernightPlace | null {
   const free = tags.fee === 'no'
   const explicitStopover = tags.caravan_site === 'motorhome_stopover'
 
+  const facts = describeFacilities(tags)
+  const kindLine = isCaravanSite
+    ? 'Motorhome stopover (Stellplatz).'
+    : 'Parking where motorhomes are explicitly allowed. Check local signage for overnight rules.'
+
   return {
     name:
       tags.name ??
@@ -162,11 +215,16 @@ function toPlace(element: OverpassElement): OsmOvernightPlace | null {
     kind: isCaravanSite ? 'stellplatz' : 'wild',
     lat,
     lng,
-    description:
-      tags.description ??
-      (isCaravanSite
-        ? 'Motorhome stopover (Stellplatz) — arrive/depart any time, minimal facilities, short max stay.'
-        : 'Parking where motorhomes are explicitly allowed. Check local signage for overnight rules.'),
+    // A mapper's own words win when they wrote any; otherwise the facts they
+    // recorded. Where they recorded neither, say so plainly rather than
+    // asserting "minimal facilities, short max stay" — that was a claim about
+    // the site that OpenStreetMap had never actually made, and a traveler
+    // reading it had no way to tell an unmapped site from a bare one.
+    description: tags.description
+      ? tags.description
+      : facts.length > 0
+        ? `${kindLine} ${facts.join(' · ')}.`
+        : `${kindLine} No facilities recorded in OpenStreetMap — worth checking before relying on it.`,
     free,
     explicitStopover,
   }
