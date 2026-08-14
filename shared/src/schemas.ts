@@ -108,11 +108,13 @@ export const planMetaSchema = z.object({
   // for, once the route shape itself is known.
   progressCurrent: z.number().nonnegative().optional(),
   progressTotal: z.number().nonnegative().optional(),
-  // Advisory only, written by pacingValidator.pacingWarnings(): drive days
-  // that barely move the trip along. Deliberately not an `error` — the plan
-  // is valid and usable, and whether a near-stationary day was worth it is
-  // the traveler's call, not something to fail a generation over. Absent
-  // (rather than an empty array) when there's nothing to say.
+  // Advisory only, written by pacingValidator.pacingWarnings(): the point at
+  // which the distance still to drive has got furthest ahead of the drive
+  // days left to do it in. Deliberately not an `error` — the plan is valid
+  // and usable, and whether the early stops were worth what they cost the
+  // end of the trip is the traveler's call, not something to fail a
+  // generation over. Absent (rather than an empty array) when there's
+  // nothing to say.
   pacingWarnings: z.array(z.string()).optional(),
   // Internal to generatePlan.ts — never read or rendered by the frontend.
   // Lets a retry after a failure resume from the last completed step

@@ -123,7 +123,7 @@ export function OverviewMapScreen() {
   // mid-generation, failed) gets a status banner instead further down.
   const hasPlan = planStatus === 'ready' || planStatus === 'stale'
 
-  // Advice about days that barely move the trip along (see the backend's
+  // Advice about a trip that has back-loaded its driving (see the backend's
   // pacingWarnings()). Dismissal is keyed on the warnings themselves rather
   // than a boolean: the plan is still perfectly usable with them, so this
   // must not nag forever — but a regeneration that produces a *different*

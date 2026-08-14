@@ -67,7 +67,7 @@ When deciding which candidates to include and which to skip, balance three thing
 You are not limited to candidateHighlights for every single night — where two selected highlights are too far apart for one day's drive, add a plain connecting overnight stop between them (choose somewhere sensible, ideally still near something worthwhile).
 
 ${PACING_RULES}
-6. The route must start at startPoint on the trip's first day and end at endPoint on the trip's last day — every day in between must be accounted for.
+7. The route must start at startPoint on the trip's first day and end at endPoint on the trip's last day — every day in between must be accounted for.
 
 Choose overnight stops with nearby campsites where possible — except that "offGridTolerance" in the settings is how many nights in a row these travelers can spend off grid, so up to that many consecutive stops may be somewhere rural with no campsite at all, and the stop after such a run must be a town with campsites or a motorhome service point. Where the country allows free camping this buys real freedom in choosing a stop; where it does not, keep every stop near a campsite regardless.
 
