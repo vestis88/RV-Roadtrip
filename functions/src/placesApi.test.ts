@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  backfillActivities,
   enrichActivities,
   enrichRestaurantsForMeal,
   findNearbyCampsites,
@@ -24,10 +25,59 @@ function goodPlace(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** A place with a name of its own, for the by-name resolution paths. */
+function namedPlace(name: string, overrides: Record<string, unknown> = {}) {
+  return goodPlace({ displayName: { text: name }, ...overrides })
+}
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({
     ok: true,
     json: async () => body,
+  })
+}
+
+interface SearchRequest {
+  url: string
+  textQuery?: string
+  includedTypes?: string[]
+}
+
+function requestOf(call: [string, { body: string }]): SearchRequest {
+  const body = JSON.parse(call[1].body) as {
+    textQuery?: string
+    includedTypes?: string[]
+  }
+  return { url: String(call[0]), ...body }
+}
+
+/**
+ * A Places stub that finds exactly what it is asked for: a text search for
+ * "Some Café, Vejle" answers with a place called "Some Café". Anything else
+ * (a bare category query, a nearby search) answers with a generic well-rated
+ * place. This is the happy path — proposals that Places can verify.
+ */
+function fetchFindingEverything() {
+  return vi.fn().mockImplementation((url: string, init: { body: string }) => {
+    const request = requestOf([url, init])
+    if (request.url.includes('searchText') && request.textQuery?.includes(',')) {
+      return jsonResponse({ places: [namedPlace(request.textQuery.split(',')[0])] })
+    }
+    return jsonResponse({ places: [goodPlace()] })
+  })
+}
+
+/**
+ * A Places stub whose category searches (text or nearby) answer with a fixed
+ * pool, and whose by-name searches find nothing usable — the failure this
+ * whole area exists for.
+ */
+function fetchFillingFrom(pool: ReturnType<typeof goodPlace>[]) {
+  return vi.fn().mockImplementation((url: string, init: { body: string }) => {
+    const request = requestOf([url, init])
+    const isNamedLookup =
+      request.url.includes('searchText') && (request.textQuery?.includes(',') ?? false)
+    return jsonResponse({ places: isNamedLookup ? [] : pool })
   })
 }
 
@@ -51,10 +101,7 @@ describe('enrichActivities', () => {
   }))
 
   it('resolves all 5 proposed activities when each meets the quality bar, plus 2 hidden reserve activities', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', fetchFindingEverything())
 
     const activities = await enrichActivities(proposed, NEAR)
 
@@ -68,23 +115,31 @@ describe('enrichActivities', () => {
     expect(uniqueNames.size).toBe(7)
     expect(activities.slice(0, 5).every((a) => !a.reserve)).toBe(true)
     expect(activities.slice(5).every((a) => a.reserve === true)).toBe(true)
+    // Every displayed one is the place that was actually proposed, keeps the
+    // proposal's own words, and is not labelled a substitute.
+    expect(activities.slice(0, 5).map((a) => a.name)).toEqual(
+      proposed.map((p) => p.name),
+    )
+    expect(activities.slice(0, 5).every((a) => a.blurb === 'A nice spot.')).toBe(true)
+    expect(activities.slice(0, 5).every((a) => !a.substitute)).toBe(true)
   })
 
   it('drops a low-quality match and backfills by category to still return exactly 5 displayed + 2 reserve', async () => {
     const fetchMock = vi
       .fn()
-      // item 0: good text-search match
-      .mockImplementationOnce(() => jsonResponse({ places: [goodPlace()] }))
-      // item 1: text search returns a place below the quality bar
-      .mockImplementationOnce(() =>
-        jsonResponse({
-          places: [goodPlace({ rating: 3.0, userRatingCount: 10 })],
-        }),
-      )
-      // item 1: nearby-search fallback also comes up empty
-      .mockImplementationOnce(() => jsonResponse({ places: [] }))
-      // remaining items (2, 3, 4), the backfill to 5, and the 2 reserve slots
-      .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
+      .mockImplementation((url: string, init: { body: string }) => {
+        const request = requestOf([url, init])
+        const named = request.url.includes('searchText') && request.textQuery?.includes(',')
+        if (!named) return jsonResponse({ places: [goodPlace()] })
+        const name = request.textQuery!.split(',')[0]
+        return jsonResponse({
+          places: [
+            name === 'Attraction 1'
+              ? namedPlace(name, { rating: 3.0, userRatingCount: 10 })
+              : namedPlace(name),
+          ],
+        })
+      })
     vi.stubGlobal('fetch', fetchMock)
 
     const activities = await enrichActivities(proposed, NEAR)
@@ -93,6 +148,42 @@ describe('enrichActivities', () => {
     const uniqueNames = new Set(activities.map((a) => a.name))
     expect(uniqueNames.size).toBe(7)
     expect(activities.filter((a) => a.reserve).length).toBe(2)
+    // The dud is gone, and what took its slot says so rather than borrowing
+    // "A nice spot." from the proposal it replaced.
+    expect(activities.map((a) => a.name)).not.toContain('Attraction 1')
+    const stand_in = activities.find((a) => a.substitute)!
+    expect(stand_in.blurb).not.toBe('A nice spot.')
+    expect(stand_in.blurb).toMatch(/well-rated/)
+  })
+
+  /**
+   * The reported failure, in its activity form: the by-name lookup finds
+   * nothing (or nothing that IS the named place), and the slot is filled from
+   * a category search. Everything about the filler must say filler — the
+   * blurb above all, since that is the sentence the traveler reads.
+   */
+  it('never lets a filler inherit the proposal it replaced', async () => {
+    vi.stubGlobal('fetch', fetchFillingFrom([goodPlace(), goodPlace(), goodPlace()]))
+
+    const activities = await enrichActivities(
+      [
+        {
+          name: 'Kunstmuseet i Lillehammer',
+          town: 'Lillehammer',
+          category: 'museum',
+          kidFriendly: true,
+          blurb: 'Norwegian art in a Snøhetta-designed building.',
+        },
+      ],
+      NEAR,
+    )
+
+    expect(activities.length).toBeGreaterThan(0)
+    for (const activity of activities) {
+      expect(activity.substitute).toBe(true)
+      expect(activity.blurb).not.toContain('Snøhetta')
+      expect(activity.blurb).toMatch(/^A well-rated local /)
+    }
   })
 
   it('throws when the Places API key is not configured', async () => {
@@ -104,38 +195,30 @@ describe('enrichActivities', () => {
 
   // Regression test for a real production 400: the Places API (New) rejects
   // 'point_of_interest' as an includedTypes value for searchNearby (it's a
-  // Text-Search-only generic type). The 'other' category's nearby-search
-  // fallback must omit includedTypes entirely rather than send it.
-  it('omits includedTypes from the nearby-search fallback for the "other" category', async () => {
-    const otherProposed: ProposedActivity[] = [
-      {
-        name: 'Mystery spot',
-        town: 'Lillehammer',
-        category: 'other',
-        kidFriendly: true,
-        blurb: 'A curious find.',
-      },
-    ]
+  // Text-Search-only generic type). The 'other' category must omit
+  // includedTypes entirely rather than send it. Driven through
+  // backfillActivities with enough slots to rotate all the way to 'other',
+  // which is the only caller that can reach that category.
+  it('omits includedTypes from the nearby search for the "other" category', async () => {
     const fetchMock = vi
       .fn()
-      // text search: below quality bar, forces the nearby-search fallback
-      .mockImplementationOnce(() =>
-        jsonResponse({ places: [goodPlace({ rating: 3.0, userRatingCount: 10 })] }),
-      )
-      .mockImplementationOnce(() => jsonResponse({ places: [goodPlace()] }))
-      // remaining backfill attempts (only 1 of 5 activities was proposed)
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const activities = await enrichActivities(otherProposed, NEAR)
+    await backfillActivities(NEAR, new Set<string>(), 'test-key', 6, false)
 
-    expect(activities.length).toBeGreaterThanOrEqual(1)
-    const nearbySearchCall = fetchMock.mock.calls.find(([url]) =>
-      String(url).includes('searchNearby'),
-    )
-    expect(nearbySearchCall).toBeDefined()
-    const body = JSON.parse(nearbySearchCall![1].body as string) as Record<string, unknown>
-    expect(body).not.toHaveProperty('includedTypes')
+    const nearbyRequests = fetchMock.mock.calls
+      .map((call) => requestOf(call as [string, { body: string }]))
+      .filter((request) => request.url.includes('searchNearby'))
+    expect(nearbyRequests.length).toBeGreaterThanOrEqual(6)
+    expect(
+      nearbyRequests.filter((request) => request.includedTypes === undefined),
+    ).toHaveLength(1)
+    expect(
+      nearbyRequests.some((request) =>
+        request.includedTypes?.includes('point_of_interest'),
+      ),
+    ).toBe(false)
   })
 })
 
@@ -158,10 +241,7 @@ describe('enrichRestaurantsForMeal', () => {
   }))
 
   it('resolves exactly 3 displayed restaurants for a meal plus 1 hidden reserve, each with rating, a maps link, and a photo', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', fetchFindingEverything())
 
     const excludeIds = new Set<string>()
     const restaurants = await enrichRestaurantsForMeal(
@@ -184,6 +264,7 @@ describe('enrichRestaurantsForMeal', () => {
     }
     expect(restaurants.slice(0, 3).every((r) => !r.reserve)).toBe(true)
     expect(restaurants[3].reserve).toBe(true)
+    expect(restaurants.slice(0, 3).every((r) => r.blurb === 'Good food.')).toBe(true)
   })
 
   it('never resolves a place already excluded by an earlier meal', async () => {
@@ -216,6 +297,165 @@ describe('enrichRestaurantsForMeal', () => {
     for (const name of dinnerNames) {
       expect(lunchNames.has(name)).toBe(false)
     }
+  })
+
+  /**
+   * The BIG Shopping case, end to end. A lunch stop was proposed as a named
+   * café; Places could not find it; the slot was filled by a category search
+   * that returned a shopping centre — 3.8 stars, 9,125 reviews, the most
+   * prominent thing in town — and the centre was written out still carrying
+   * the café's description.
+   *
+   * Three separate things must hold now: the mall loses to the better-rated
+   * kitchen, the café's words never travel to anything that isn't the café,
+   * and the card that does get shown admits it is a substitute.
+   */
+  it('does not serve a prominent shopping centre as lunch, and never with the café’s blurb', async () => {
+    const mall = namedPlace('BIG Shopping', { rating: 3.8, userRatingCount: 9125 })
+    const kitchen = namedPlace('Munkebo Køkken', { rating: 4.6, userRatingCount: 320 })
+    const bakery = namedPlace('Bageriet', { rating: 4.4, userRatingCount: 150 })
+    vi.stubGlobal('fetch', fetchFillingFrom([mall, kitchen, bakery]))
+
+    const restaurants = await enrichRestaurantsForMeal(
+      [
+        {
+          name: 'Café Sletten',
+          town: 'Vejle',
+          meal: 'lunch',
+          blurb: 'Charming lakeside café near the castle.',
+        },
+      ],
+      'lunch',
+      NEAR,
+      new Set<string>(),
+    )
+
+    expect(restaurants.map((r) => r.name)).not.toContain('BIG Shopping')
+    expect(restaurants[0].name).toBe('Munkebo Køkken')
+    for (const restaurant of restaurants) {
+      expect(restaurant.blurb).not.toContain('lakeside')
+      expect(restaurant.blurb).toBe('A well-rated spot for lunch.')
+      expect(restaurant.substitute).toBe(true)
+    }
+  })
+
+  /**
+   * "I want top rated alternatives!" — the fill is a ranking problem, and
+   * both naive answers are wrong: taking whatever Places listed first gives
+   * the mall (prominence is popularity), and sorting on rating alone gives
+   * the 5.0 that three friends and the owner left.
+   */
+  it('fills with the best-rated place that has enough reviews to mean it', async () => {
+    const prominent = namedPlace('Storcenter Grill', {
+      rating: 4.1,
+      userRatingCount: 9125,
+    })
+    const excellent = namedPlace('Spisehuset', { rating: 4.6, userRatingCount: 300 })
+    const noise = namedPlace('Nyt Sted', { rating: 5.0, userRatingCount: 6 })
+    vi.stubGlobal('fetch', fetchFillingFrom([prominent, excellent, noise]))
+
+    const restaurants = await enrichRestaurantsForMeal(
+      [],
+      'dinner',
+      NEAR,
+      new Set<string>(),
+    )
+
+    expect(restaurants[0].name).toBe('Spisehuset')
+    expect(restaurants.map((r) => r.name)).not.toContain('Nyt Sted')
+  })
+
+  /**
+   * The degradation the ladder exists for. Nothing here clears "4.3 with 100
+   * reviews", so the rungs relax — and once they do, the well-liked place
+   * with 12 reviews beats the merely-okay one with 40. A stretch of road
+   * with two restaurants should offer them, not offer nothing.
+   */
+  it('relaxes the review-count requirement rather than leaving a meal empty', async () => {
+    const okay = namedPlace('Vejkroen', { rating: 4.05, userRatingCount: 40 })
+    const loved = namedPlace('Fjordhytten', { rating: 4.2, userRatingCount: 12 })
+    vi.stubGlobal('fetch', fetchFillingFrom([okay, loved]))
+
+    const restaurants = await enrichRestaurantsForMeal(
+      [],
+      'dinner',
+      NEAR,
+      new Set<string>(),
+    )
+
+    expect(restaurants.map((r) => r.name)).toEqual(['Fjordhytten', 'Vejkroen'])
+  })
+
+  /**
+   * There is still a bottom to the ladder. A restaurant below
+   * MIN_RESTAURANT_RATING is not offered at all — filling the row is not
+   * worth answering "where should we eat?" with somewhere the reviews say
+   * not to.
+   */
+  it('leaves the meal short rather than offering a badly-rated restaurant', async () => {
+    vi.stubGlobal(
+      'fetch',
+      fetchFillingFrom([
+        namedPlace('Grillbaren', { rating: 3.4, userRatingCount: 400 }),
+        namedPlace('Pølsevognen', { rating: 3.9, userRatingCount: 80 }),
+      ]),
+    )
+
+    const restaurants = await enrichRestaurantsForMeal(
+      [],
+      'dinner',
+      NEAR,
+      new Set<string>(),
+    )
+
+    expect(restaurants).toEqual([])
+  })
+
+  /**
+   * Restaurants are held to a higher floor than sights — see
+   * MIN_RESTAURANT_RATING. A 3.9 restaurant Claude named is dropped and its
+   * slot refilled; a 3.9 museum is kept, because a 3.9 museum is fine.
+   */
+  it('drops a named restaurant below the restaurant floor that a sight would clear', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((url: string, init: { body: string }) => {
+        const request = requestOf([url, init])
+        if (request.url.includes('searchText') && request.textQuery?.includes(',')) {
+          return jsonResponse({
+            places: [
+              namedPlace(request.textQuery.split(',')[0], {
+                rating: 3.9,
+                userRatingCount: 500,
+              }),
+            ],
+          })
+        }
+        return jsonResponse({ places: [] })
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const restaurants = await enrichRestaurantsForMeal(
+      [{ name: 'Slagterens Bord', town: 'Vejle', meal: 'dinner', blurb: 'Meat.' }],
+      'dinner',
+      NEAR,
+      new Set<string>(),
+    )
+    const activities = await enrichActivities(
+      [
+        {
+          name: 'Byens Museum',
+          town: 'Vejle',
+          category: 'museum',
+          kidFriendly: false,
+          blurb: 'Local history.',
+        },
+      ],
+      NEAR,
+    )
+
+    expect(restaurants).toEqual([])
+    expect(activities.map((a) => a.name)).toContain('Byens Museum')
   })
 })
 

@@ -11,7 +11,24 @@ import type {
 
 export const googlePlacesApiKey = defineSecret('GOOGLE_PLACES_API_KEY')
 
+/**
+ * The floor a place Claude NAMED must clear to be accepted as itself.
+ *
+ * This gate exists to reject the wrong place, not to second-guess the
+ * suggestion: Claude picks from the traveler's interests and freeform notes,
+ * Places verifies that the named place exists, is where it should be, and
+ * isn't a dud. 3.8/50 is the long-standing figure and stays put for
+ * activities — a 3.8 hiking area or museum is a perfectly good day out.
+ *
+ * Restaurants get their own, higher floor. Google's restaurant ratings
+ * cluster high, so a 3.8 restaurant sits below the median and reads to a
+ * traveler as mediocre in a way a 3.8 museum does not — which is what "why
+ * so many with half good reviews if a top 3 is picked?" was about. Below 4.0
+ * we would rather drop the suggestion and fill the slot from the ladder
+ * below, which starts far higher.
+ */
 const MIN_RATING = 3.8
+const MIN_RESTAURANT_RATING = 4.0
 const MIN_RATING_COUNT = 50
 const SEARCH_RADIUS_METERS = 30_000
 const ACTIVITIES_PER_DAY = 5
@@ -103,10 +120,70 @@ function mapRawPlace(raw: RawPlace, apiKey: string): PlaceCandidate {
   }
 }
 
-function meetsQualityBar(candidate: PlaceCandidate): boolean {
+/** A rating floor paired with the number of reviews that floor is trusted at. */
+interface QualityBar {
+  minRating: number
+  minRatingCount: number
+}
+
+const PLACE_VERIFY_BAR: QualityBar = {
+  minRating: MIN_RATING,
+  minRatingCount: MIN_RATING_COUNT,
+}
+
+const RESTAURANT_VERIFY_BAR: QualityBar = {
+  minRating: MIN_RESTAURANT_RATING,
+  minRatingCount: MIN_RATING_COUNT,
+}
+
+/**
+ * What a slot is filled with when Claude's suggestion could not be verified.
+ *
+ * The traveler was asked whether an unfindable suggestion should become a
+ * generic stand-in or simply not appear, and answered: "Fill up with results
+ * from google, but I want top rated alternatives!" So every slot still gets
+ * filled — and since every filler is now chosen by this code rather than by
+ * anyone's judgement of the trip, the bar it is chosen against is the whole
+ * promise.
+ *
+ * Each rung is tried in order and the first one that yields anything wins,
+ * with `bestCandidate` ordering within it. The rungs trade review count away
+ * before they trade rating away, because the two numbers fail differently:
+ *
+ * - Rating is the thing being promised. 4.3 is meaningfully "top rated"
+ *   without being unreachable; the old 3.8 was picked as a bare floor when
+ *   it was one filter among several, and as the gate on every filled slot it
+ *   promises far too little.
+ * - Review count is a confidence requirement, not a quality one. A 5.0 from
+ *   six reviews is noise, so 100 reviews are demanded first; where a town
+ *   simply does not have places that busy, 30 and then 10 are accepted
+ *   rather than leaving a day with no dinner options at all. Note that more
+ *   reviews are never treated as BETTER — that assumption is exactly what
+ *   served a 9,125-review shopping mall as lunch.
+ *
+ * Restaurants keep their own ladder so nothing below MIN_RESTAURANT_RATING
+ * is ever offered: it would be incoherent to drop a named 3.9 restaurant for
+ * being under the floor and then fill its slot with a 3.8 one.
+ */
+const PLACE_QUALITY_LADDER: QualityBar[] = [
+  { minRating: 4.3, minRatingCount: 100 },
+  { minRating: 4.0, minRatingCount: 30 },
+  { minRating: MIN_RATING, minRatingCount: 10 },
+]
+
+const RESTAURANT_QUALITY_LADDER: QualityBar[] = [
+  { minRating: 4.3, minRatingCount: 100 },
+  { minRating: 4.1, minRatingCount: 30 },
+  { minRating: MIN_RESTAURANT_RATING, minRatingCount: 10 },
+]
+
+function meetsQualityBar(
+  candidate: PlaceCandidate,
+  bar: QualityBar = PLACE_VERIFY_BAR,
+): boolean {
   return (
-    (candidate.rating ?? 0) >= MIN_RATING &&
-    (candidate.ratingCount ?? 0) >= MIN_RATING_COUNT
+    (candidate.rating ?? 0) >= bar.minRating &&
+    (candidate.ratingCount ?? 0) >= bar.minRatingCount
   )
 }
 
@@ -181,13 +258,42 @@ function nameTokens(name: string): string[] {
  * those callers are asking for "a good museum near here", where any museum is
  * a correct answer.
  */
+function nameMatchHits(expected: string[], actual: string): number {
+  const found = new Set(nameTokens(actual))
+  return expected.filter((token) => found.has(token)).length
+}
+
 function nameLooksRight(expectedName: string | undefined, actual: string): boolean {
   if (!expectedName) return true
   const expected = nameTokens(expectedName)
   if (expected.length === 0) return true
-  const found = new Set(nameTokens(actual))
-  const hits = expected.filter((token) => found.has(token)).length
-  return hits >= Math.max(1, Math.ceil(expected.length / 2))
+  return nameMatchHits(expected, actual) >= Math.max(1, Math.ceil(expected.length / 2))
+}
+
+/**
+ * How closely a result's name matches the requested one, 0..1 — the same
+ * comparison nameLooksRight gates on, kept as a number so two results that
+ * both pass the gate can be ordered by how well they match.
+ *
+ * Shared words over ALL words (the union), not over the requested ones,
+ * because words the result adds are evidence against it: asked for
+ * "Restaurant Sletten", both "Sletten" and "Sletten Bageri og Konditori"
+ * contain every identifying word requested, but the bakery is a different
+ * business and scores 1/3 against the restaurant's 1. Without that, a
+ * well-rated namesake next door outranks the place actually asked for as
+ * soon as ratings enter the comparison.
+ *
+ * Asking for nothing identifiable (the category searches) scores everything
+ * equally, which leaves quality alone deciding — exactly what those callers
+ * want.
+ */
+function nameMatchScore(expectedName: string | undefined, actual: string): number {
+  if (!expectedName) return 1
+  const expected = nameTokens(expectedName)
+  if (expected.length === 0) return 1
+  const hits = nameMatchHits(expected, actual)
+  const union = expected.length + (new Set(nameTokens(actual)).size - hits)
+  return hits / union
 }
 
 /**
@@ -201,9 +307,10 @@ function isUsableMatch(
   near: LatLng,
   expectedName: string | undefined,
   excludeIds: Set<string>,
+  bar: QualityBar,
 ): boolean {
   return (
-    meetsQualityBar(candidate) &&
+    meetsQualityBar(candidate, bar) &&
     !excludeIds.has(candidate.id) &&
     haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
       MAX_MATCH_DISTANCE_KM &&
@@ -212,12 +319,87 @@ function isUsableMatch(
 }
 
 /**
+ * The best of the results Places returned, or undefined if none is usable.
+ *
+ * Every path used to take the FIRST result clearing the bar, which meant the
+ * bar was doing all the work and Places' own ordering decided the rest. That
+ * ordering is prominence — how well known a place is — so a lunch stop came
+ * back as "BIG Shopping": a shopping centre, 3.8 stars, 9,125 reviews, the
+ * single most prominent thing anywhere near the town. Prominence is
+ * popularity, and popularity is not quality; a mall out-ranks every small
+ * kitchen in the country and always will.
+ *
+ * Ordering, in priority order:
+ *
+ * 1. Name match, when a name was asked for. Identity beats quality: a
+ *    better-rated near-namesake is still the wrong place, and swapping it in
+ *    is the same class of bug as the Greek hotel and the Berlin outlet.
+ * 2. Rating, among places that match equally well.
+ * 3. Rating count, purely as a tie-break — of two 4.6s, the one with 800
+ *    reviews is the more certain 4.6.
+ *
+ * Rating count stays a hard floor (MIN_RATING_COUNT) rather than a term in a
+ * score, because the thing it excludes is noise, not mediocrity: a 5.0 from
+ * six reviews carries no information at all, and no amount of weighting
+ * turns six reviews into evidence. Above that floor, more reviews are not
+ * better — that is precisely the assumption that produced the mall.
+ */
+function bestCandidate(
+  candidates: PlaceCandidate[],
+  near: LatLng,
+  expectedName: string | undefined,
+  excludeIds: Set<string>,
+  bar: QualityBar,
+): PlaceCandidate | undefined {
+  return candidates
+    .filter((candidate) =>
+      isUsableMatch(candidate, near, expectedName, excludeIds, bar),
+    )
+    .sort(
+      (a, b) =>
+        nameMatchScore(expectedName, b.name) - nameMatchScore(expectedName, a.name) ||
+        (b.rating ?? 0) - (a.rating ?? 0) ||
+        (b.ratingCount ?? 0) - (a.ratingCount ?? 0),
+    )[0]
+}
+
+/**
+ * The best place in a pool, walking the ladder from "top rated" down and
+ * stopping at the first rung that has anything in it. Relaxing the rung only
+ * when the one above it is empty is what keeps a rural stretch of road from
+ * ending up with no dinner options while still handing a town with real
+ * choice its genuinely top-rated ones.
+ */
+function bestFromLadder(
+  pool: PlaceCandidate[],
+  near: LatLng,
+  excludeIds: Set<string>,
+  ladder: QualityBar[],
+): PlaceCandidate | undefined {
+  for (const bar of ladder) {
+    const match = bestCandidate(pool, near, undefined, excludeIds, bar)
+    if (match) return match
+  }
+  return undefined
+}
+
+/**
  * Exported for unit tests only. The matching gate is pure string/geometry
  * work with no network in it, which is exactly the part worth testing
  * directly — the wrong-place bugs it exists to stop were reported from
  * production, where reproducing them means a real Places round trip.
  */
-export const __testing = { nameTokens, nameLooksRight }
+export const __testing = {
+  nameTokens,
+  nameLooksRight,
+  nameMatchScore,
+  bestCandidate,
+  bestFromLadder,
+  PLACE_VERIFY_BAR,
+  RESTAURANT_VERIFY_BAR,
+  PLACE_QUALITY_LADDER,
+  RESTAURANT_QUALITY_LADDER,
+}
 
 const FIELD_MASK =
   'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel'
@@ -273,7 +455,11 @@ async function nearbySearch(
       },
       body: JSON.stringify({
         ...(includedType ? { includedTypes: [includedType] } : {}),
-        maxResultCount: 10,
+        // The API's maximum. A category search is a ranking problem, not a
+        // lookup: the more of the neighbourhood's cafés we can see at once,
+        // the better the top-rated one we can pick out of them, and 20
+        // results cost exactly the same request as 10.
+        maxResultCount: 20,
         locationRestriction: {
           circle: {
             center: { latitude: near.lat, longitude: near.lng },
@@ -293,58 +479,75 @@ async function nearbySearch(
   return (data.places ?? []).map((place) => mapRawPlace(place, apiKey))
 }
 
-async function resolveOne(
+/**
+ * Everything Places knows about one KIND of place near a point — "cafés
+ * around here" — from both searches at once, deduped.
+ *
+ * Fetched once per category and then ranked, rather than a fresh search per
+ * slot that takes the first acceptable answer and throws the rest away.
+ * Filling three lunch slots used to mean three identical text searches, each
+ * picking one more of the same prominence-ordered list; now it is one pair
+ * of requests and one pool to choose the top-rated three from. Both searches
+ * are used because they disagree usefully: text search understands the word
+ * "restaurant", nearby search is bounded by an actual radius rather than a
+ * preference, and a well-rated place missing from one is regularly in the
+ * other.
+ */
+async function categoryPool(
   query: string,
-  fallbackType: string | undefined,
+  includedType: string | undefined,
   near: LatLng,
-  excludeIds: Set<string>,
   apiKey: string,
-  expectedName?: string,
-): Promise<PlaceCandidate | null> {
-  const textResults = await textSearch(query, near, apiKey)
-  let match = textResults.find((candidate) =>
-    isUsableMatch(candidate, near, expectedName, excludeIds),
-  )
-
-  if (!match) {
-    const nearbyResults = await nearbySearch(fallbackType, near, apiKey)
-    match = nearbyResults.find(
-      (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
-    )
-  }
-
-  if (!match) return null
-  excludeIds.add(match.id)
-  return match
+): Promise<PlaceCandidate[]> {
+  const [textResults, nearbyResults] = await Promise.all([
+    textSearch(query, near, apiKey),
+    nearbySearch(includedType, near, apiKey),
+  ])
+  const seen = new Set<string>()
+  return [...textResults, ...nearbyResults].filter((candidate) => {
+    if (seen.has(candidate.id)) return false
+    seen.add(candidate.id)
+    return true
+  })
 }
 
 /**
- * Same per-item resolution as resolveOne (text search first, nearby-search
- * fallback second, first not-yet-excluded quality match wins), but resolves
- * a whole batch of items at once. The text search — always run for every
- * item — fires for the whole batch in parallel instead of one round trip
- * per item; only the (typically rare) nearby-search fallback stays
- * sequential, since which items still need it, and which ids are already
- * taken, both depend on how earlier items in the batch resolved. Picking is
- * still done strictly in `items` order so the resulting excludeIds
- * mutations — and thus which item "wins" a contested place — match
- * resolveOne's own one-at-a-time behavior exactly, just with the network
- * calls overlapped.
+ * Resolves a batch of places the plan asked for BY NAME — verification, not
+ * selection. Each item either resolves to the place it named or resolves to
+ * nothing; there is deliberately no fallback here.
+ *
+ * There used to be one, and it is how a lunch stop for a lakeside café came
+ * back as "BIG Shopping", a shopping centre with 9,125 reviews, still
+ * carrying Claude's description of the café ("Charming lakeside café near
+ * the castle"). The name check correctly rejected the wrong place; the
+ * fallback then ran a category search that by design does not check names,
+ * and the caller attached the original blurb to whatever it returned. The
+ * verification succeeded and the fallback silently undid it. A description
+ * of a different place is worse than no description, and a substitute
+ * pretending to be the recommendation is worse than an admitted substitute.
+ *
+ * Callers that still want something in an empty slot ask backfillActivities
+ * / backfillRestaurantsForMeal for it explicitly, and get an honest generic
+ * blurb and a `substitute` flag with it.
+ *
+ * The text search — one per item — fires for the whole batch in parallel
+ * rather than one round trip at a time, but picking is done strictly in
+ * `items` order, so which item "wins" a place both of them matched does not
+ * depend on network timing.
  */
-async function resolveBatch(
+async function resolveNamedBatch(
   items: {
     query: string
-    fallbackType: string | undefined
     /**
-     * The place name this item actually asked for, when it asked for one.
-     * `query` carries the town too, so it cannot be compared against a
-     * result's name directly.
+     * The place name this item actually asked for. `query` carries the town
+     * too, so it cannot be compared against a result's name directly.
      */
-    expectedName?: string
+    expectedName: string
   }[],
   near: LatLng,
   excludeIds: Set<string>,
   apiKey: string,
+  bar: QualityBar,
 ): Promise<(PlaceCandidate | null)[]> {
   const textResultsByIndex = await Promise.all(
     items.map((item) => textSearch(item.query, near, apiKey)),
@@ -352,20 +555,12 @@ async function resolveBatch(
 
   const picks: (PlaceCandidate | null)[] = new Array(items.length).fill(null)
   for (let i = 0; i < items.length; i++) {
-    const match = textResultsByIndex[i].find((candidate) =>
-      isUsableMatch(candidate, near, items[i].expectedName, excludeIds),
-    )
-    if (match) {
-      excludeIds.add(match.id)
-      picks[i] = match
-    }
-  }
-
-  for (let i = 0; i < items.length; i++) {
-    if (picks[i]) continue
-    const nearbyResults = await nearbySearch(items[i].fallbackType, near, apiKey)
-    const match = nearbyResults.find(
-      (candidate) => meetsQualityBar(candidate) && !excludeIds.has(candidate.id),
+    const match = bestCandidate(
+      textResultsByIndex[i],
+      near,
+      items[i].expectedName,
+      excludeIds,
+      bar,
     )
     if (match) {
       excludeIds.add(match.id)
@@ -488,8 +683,8 @@ export async function searchPlacesByQuery(
 
 /**
  * Resolves a free-text place query (e.g. "Lillehammer Camping, Lillehammer,
- * NO") to coordinates, biased near a reference point. Unlike resolveOne,
- * this applies no quality bar — a town/campsite name isn't a "tourist
+ * NO") to coordinates, biased near a reference point. Unlike the resolvers
+ * above, this applies no quality bar — a town/campsite name isn't a "tourist
  * attraction" and may have few or no ratings; the first match is enough
  * since only its location is needed, not its quality.
  */
@@ -517,12 +712,19 @@ export interface ProposedActivity {
 }
 
 /**
- * Resolves `count` generic activities via Places, rotating through every
+ * Resolves `count` top-rated activities via Places, rotating through every
  * category so a single exhausted category can't stall the whole backfill.
  * Shared by enrichActivities's own backfill (filling up to the displayed
  * count) and researchMoreAlternativesCallable.ts (topping the pool back up
  * once both the displayed items and their reserve are gone) — same logic,
  * different caller, not a hand-rolled second copy.
+ *
+ * Everything this produces is flagged `substitute` and given a generic
+ * blurb. Nobody chose these places for this trip; they are the best-rated
+ * things of their kind nearby, and the traveler is entitled to know which of
+ * the two a card is (see PlaceCard's "Top-rated nearby" chip). Never inherit
+ * a proposal's blurb here — that is how a shopping centre ended up described
+ * as "Charming lakeside café near the castle".
  */
 export async function backfillActivities(
   near: LatLng,
@@ -533,20 +735,28 @@ export async function backfillActivities(
 ): Promise<Activity[]> {
   const categories = Object.keys(ACTIVITY_PLACE_TYPE) as ActivityCategory[]
   const resolved: Activity[] = []
+  // One pool per category, fetched at most once however many slots that
+  // category ends up filling — see categoryPool.
+  const pools = new Map<ActivityCategory, PlaceCandidate[]>()
   for (
     let attempt = 0;
     resolved.length < count && attempt < MAX_BACKFILL_ATTEMPTS;
     attempt++
   ) {
     const category = categories[attempt % categories.length]
-    const match = await resolveOne(
-      category,
-      ACTIVITY_PLACE_TYPE[category],
-      near,
-      excludeIds,
-      apiKey,
-    )
+    let pool = pools.get(category)
+    if (!pool) {
+      pool = await categoryPool(
+        category,
+        ACTIVITY_PLACE_TYPE[category],
+        near,
+        apiKey,
+      )
+      pools.set(category, pool)
+    }
+    const match = bestFromLadder(pool, near, excludeIds, PLACE_QUALITY_LADDER)
     if (match) {
+      excludeIds.add(match.id)
       resolved.push({
         name: match.name,
         category,
@@ -560,6 +770,7 @@ export async function backfillActivities(
         blurb: `A well-rated local ${category}.`,
         kidFriendly: false,
         status: 'suggested',
+        substitute: true,
         ...(reserve ? { reserve: true } : {}),
         placeId: match.id,
       })
@@ -573,6 +784,10 @@ export async function backfillActivities(
  * exactly `ACTIVITIES_PER_DAY` are found, then resolves `RESERVE_ACTIVITY_COUNT`
  * more on top — invisible until dismiss-and-requeue needs one (see
  * activitySchema's own comment).
+ *
+ * A proposal that Places cannot verify does not degrade into a nearby place
+ * wearing its description: it drops out entirely, and the slot is refilled
+ * from the quality ladder as an admitted substitute.
  */
 export async function enrichActivities(
   proposed: ProposedActivity[],
@@ -588,17 +803,17 @@ export async function enrichActivities(
   const excludeIds = new Set<string>()
   const resolved: Activity[] = []
 
-  const matches = await resolveBatch(
+  const matches = await resolveNamedBatch(
     proposed.map((item) => ({
       query: `${item.name}, ${item.town}`,
       // What was actually asked for, so a famous unrelated landmark cannot
       // answer for a small named place — see nameLooksRight.
       expectedName: item.name,
-      fallbackType: ACTIVITY_PLACE_TYPE[item.category],
     })),
     near,
     excludeIds,
     apiKey,
+    PLACE_VERIFY_BAR,
   )
   for (let i = 0; i < proposed.length; i++) {
     const match = matches[i]
@@ -651,9 +866,16 @@ export interface ProposedRestaurant {
 }
 
 /**
- * Resolves `count` generic restaurants for one meal via Places. Shared by
+ * Resolves `count` top-rated restaurants for one meal via Places. Shared by
  * enrichRestaurantsForMeal's own backfill and researchMoreAlternativesCallable.ts
- * — see backfillActivities's own comment for why this isn't duplicated.
+ * — see backfillActivities's own comment for why this isn't duplicated, and
+ * for why everything here is flagged `substitute` with a generic blurb.
+ *
+ * One pool, ranked, rather than one search per slot: every slot here asks
+ * Places the identical question ("restaurants near this point"), so the old
+ * loop paid for the same list up to eight times and skimmed one more result
+ * off the top of it each time — which is to say it filled a meal with the
+ * three most PROMINENT places, not the three best.
  */
 export async function backfillRestaurantsForMeal(
   meal: Meal,
@@ -663,36 +885,39 @@ export async function backfillRestaurantsForMeal(
   count: number,
   reserve: boolean,
 ): Promise<Restaurant[]> {
+  if (count <= 0) return []
+  const pool = await categoryPool(
+    MEAL_PLACE_TYPE[meal],
+    MEAL_PLACE_TYPE[meal],
+    near,
+    apiKey,
+  )
   const resolved: Restaurant[] = []
-  for (
-    let attempt = 0;
-    resolved.length < count && attempt < MAX_BACKFILL_ATTEMPTS;
-    attempt++
-  ) {
-    const match = await resolveOne(
-      MEAL_PLACE_TYPE[meal],
-      MEAL_PLACE_TYPE[meal],
+  while (resolved.length < count) {
+    const match = bestFromLadder(
+      pool,
       near,
       excludeIds,
-      apiKey,
+      RESTAURANT_QUALITY_LADDER,
     )
-    if (match) {
-      resolved.push({
-        name: match.name,
-        meal,
-        lat: match.lat,
-        lng: match.lng,
-        rating: match.rating,
-        ratingCount: match.ratingCount,
-        googleMapsUrl: match.googleMapsUrl,
-        photoUrl: match.photoUrl,
-        priceLevel: match.priceLevel,
-        blurb: `A well-rated spot for ${meal}.`,
-        status: 'suggested',
-        ...(reserve ? { reserve: true } : {}),
-        placeId: match.id,
-      })
-    }
+    if (!match) break
+    excludeIds.add(match.id)
+    resolved.push({
+      name: match.name,
+      meal,
+      lat: match.lat,
+      lng: match.lng,
+      rating: match.rating,
+      ratingCount: match.ratingCount,
+      googleMapsUrl: match.googleMapsUrl,
+      photoUrl: match.photoUrl,
+      priceLevel: match.priceLevel,
+      blurb: `A well-rated spot for ${meal}.`,
+      status: 'suggested',
+      substitute: true,
+      ...(reserve ? { reserve: true } : {}),
+      placeId: match.id,
+    })
   }
   return resolved
 }
@@ -701,7 +926,8 @@ export async function backfillRestaurantsForMeal(
  * Resolves proposed restaurants for one meal, backfilling until exactly
  * `RESTAURANTS_PER_MEAL` are found, then resolves
  * `RESERVE_RESTAURANTS_PER_MEAL` more on top — same reserve mechanism as
- * enrichActivities.
+ * enrichActivities, and the same rule about unverifiable proposals: they
+ * drop rather than lend their description to a stand-in.
  */
 export async function enrichRestaurantsForMeal(
   proposed: ProposedRestaurant[],
@@ -718,17 +944,17 @@ export async function enrichRestaurantsForMeal(
 
   const resolved: Restaurant[] = []
 
-  const matches = await resolveBatch(
+  const matches = await resolveNamedBatch(
     proposed.map((item) => ({
       query: `${item.name}, ${item.town}`,
       // What was actually asked for, so a famous unrelated landmark cannot
       // answer for a small named place — see nameLooksRight.
       expectedName: item.name,
-      fallbackType: MEAL_PLACE_TYPE[meal],
     })),
     near,
     excludeIds,
     apiKey,
+    RESTAURANT_VERIFY_BAR,
   )
   for (let i = 0; i < proposed.length; i++) {
     const match = matches[i]
@@ -838,10 +1064,14 @@ export async function findNearbyCampsites(
     // Quality first, then distance: unlike stellplatz and free parking,
     // commercial campsites carry ratings, and a well-reviewed site 15km out
     // beats an unrated one at 4km for somewhere you are paying to sleep.
+    // Deliberately the verification bar rather than the quality ladder the
+    // activity/restaurant fills use: this is a two-way sort that keeps
+    // everything it finds, so it wants the modest "not a dud" line, and the
+    // property that makes the default defensible is still nearness.
     .sort(
       (a, b) =>
-        Number(meetsQualityBar(b.candidate)) -
-          Number(meetsQualityBar(a.candidate)) || a.km - b.km,
+        Number(meetsQualityBar(b.candidate, PLACE_VERIFY_BAR)) -
+          Number(meetsQualityBar(a.candidate, PLACE_VERIFY_BAR)) || a.km - b.km,
     )
 
   return byDistance.slice(0, limit).map(({ candidate }) => ({

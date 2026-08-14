@@ -167,6 +167,7 @@ function PlaceCardSection({
               rating={place.rating}
               ratingCount={place.ratingCount}
               blurb={place.blurb}
+              substitute={place.substitute}
               photoUrl={place.photoUrl}
               googleMapsUrl={place.googleMapsUrl}
               status={place.status}
