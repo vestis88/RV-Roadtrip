@@ -286,16 +286,44 @@ export async function searchOvernightOsmAlongRoute(
           `Overnight OSM lookup: batch of ${batch.length} point(s) failed`,
           error,
         )
-        return [] as OsmOvernightPlace[]
+        return null
       }),
     ),
   )
+
+  // The silence this replaces is the reason a total outage ran for three
+  // days unnoticed (2026-08-10 to 2026-08-13). Every batch was being refused
+  // with a 406, each one logged as a lone WARNING among a generation's worth
+  // of chatter, and the traveler simply saw a picker with no Stellplatz and
+  // no Wild camping section — indistinguishable from a stretch of road that
+  // genuinely has neither. North Zealand plainly has caravan sites, so that
+  // empty section should have been a signal rather than a shrug.
+  //
+  // Logged at ERROR precisely so it is greppable on its own: "no OSM results
+  // anywhere on this route" is a statement about our access to OpenStreetMap,
+  // not about the route.
+  const failed = results.filter((result) => result === null).length
+  if (failed === batches.length) {
+    console.error(
+      `Overnight OSM lookup UNAVAILABLE: all ${batches.length} batch(es) covering ` +
+        `${unique.length} point(s) were refused. Every day of this trip will be ` +
+        `missing its Stellplatz and free-parking options; campsites from Places ` +
+        `are unaffected. See the per-batch warnings above for the endpoints and ` +
+        `status codes.`,
+    )
+  } else if (failed > 0) {
+    console.error(
+      `Overnight OSM lookup DEGRADED: ${failed} of ${batches.length} batch(es) ` +
+        `were refused, so part of the route has no Stellplatz or free-parking ` +
+        `options for reasons that are ours, not the route's.`,
+    )
+  }
 
   // The same site legitimately answers for several days' circles where they
   // overlap; keep one copy and let the per-day assignment decide who gets it.
   const byLocation = new Map<string, OsmOvernightPlace>()
   for (const place of results.flat()) {
-    byLocation.set(`${place.lat},${place.lng}`, place)
+    if (place) byLocation.set(`${place.lat},${place.lng}`, place)
   }
   return [...byLocation.values()]
 }
@@ -350,16 +378,28 @@ export function osmPlaceToCandidate(
 /**
  * Single-point stellplatz lookup, kept for the on-demand "find more" path in
  * the overnight picker — one day, resolved live, when the traveler wants
- * options beyond the ones already stored for that day. Shares the corridor
- * query's relaxed tag filter and ranking so the two can never disagree about
- * what counts as a stellplatz.
+ * options beyond the ones already stored for that day. Shares `runOverpassQuery`
+ * (and through it `overpassClauses`) and `nearestOsmPlaces` with the corridor
+ * path, so the two can never disagree about what counts as a stellplatz.
+ *
+ * Deliberately NOT routed through searchOvernightOsmAlongRoute, which absorbs
+ * a refused batch into an empty list. That absorption is right for a whole
+ * corridor — one bad stretch must not cost the other fifty-nine days their
+ * results — and wrong here, where the batch IS the request: swallowing it
+ * hands the caller "no stellplatz near this town" when the truth is "OSM
+ * never answered". Letting it throw is what puts the endpoint and status back
+ * in the log line the callable already writes ("stellplatz search (Overpass)
+ * failed"), which is the line the 2026-08-13 diagnosis was made from and
+ * which routing through the corridor helper had quietly removed. The caller
+ * still degrades to its Claude fallback either way — see
+ * overnightCandidatesCallable's withDeadline.
  */
 export async function searchStellplatzCandidates(
   near: LatLng,
   country: string,
   limit: number,
 ): Promise<OvernightStopCandidate[]> {
-  const places = await searchOvernightOsmAlongRoute([near])
+  const places = await runOverpassQuery([near])
   return nearestOsmPlaces(places, near, 'stellplatz', limit).map((place) =>
     osmPlaceToCandidate(place, country),
   )
