@@ -380,6 +380,22 @@ export const activitySchema = z.object({
   // paths that don't know about reserves, e.g. AddCustomStopForm) is a real,
   // displayed item by default.
   reserve: z.boolean().optional(),
+  // Nobody chose this place for this trip: Places found it by category
+  // ("a well-rated museum near here") rather than by name, either because
+  // the plan's own suggestion couldn't be verified or because the traveler
+  // asked for more options than the plan proposed.
+  //
+  // It exists because the two used to be indistinguishable on screen, in the
+  // worst possible way: when a named lookup failed, the nearby fallback's
+  // result was written out carrying the ORIGINAL suggestion's blurb, so a
+  // shopping centre with 9,125 reviews was served as lunch under the words
+  // "Charming lakeside café near the castle". Substitutes now get a generic
+  // blurb of their own and this flag, and PlaceCard labels them — "we found
+  // the place the plan meant" and "we couldn't, here's a top-rated
+  // alternative" are different claims and should read differently. Absent
+  // means false: everything predating this, and everything a traveler adds
+  // by hand, is a real pick.
+  substitute: z.boolean().optional(),
   // The Places (New) place ID the item resolved to — internal-use only,
   // never rendered. Lets a later "research more alternatives" call (once
   // both the displayed item AND its reserve are exhausted) exclude every
@@ -409,6 +425,9 @@ export const restaurantSchema = z.object({
   diaryNote: z.string().optional(),
   // See activitySchema's own comment — same dismiss-and-requeue mechanism.
   reserve: z.boolean().optional(),
+  // See activitySchema's own comment. The reported case was a restaurant:
+  // "BIG Shopping", a shopping centre, offered for lunch.
+  substitute: z.boolean().optional(),
   placeId: z.string().optional(),
 })
 

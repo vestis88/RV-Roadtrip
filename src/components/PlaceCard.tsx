@@ -15,6 +15,17 @@ interface PlaceCardProps {
   rating?: number
   ratingCount?: number
   blurb: string
+  /**
+   * This is not the place the plan named — Places couldn't find that one (or
+   * the traveler asked for more options than were planned), so this is the
+   * best-rated thing of its kind nearby instead.
+   *
+   * Worth a chip of its own because the card otherwise reads identically to
+   * a curated pick, which is how a shopping centre passed for "Charming
+   * lakeside café near the castle". The blurb is generic now, but a generic
+   * blurb alone doesn't tell the traveler WHY it's generic.
+   */
+  substitute?: boolean
   photoUrl?: string
   googleMapsUrl?: string
   selected?: boolean
@@ -49,6 +60,7 @@ export function PlaceCard({
   rating,
   ratingCount,
   blurb,
+  substitute,
   photoUrl,
   googleMapsUrl,
   selected,
@@ -97,9 +109,18 @@ export function PlaceCard({
         <p className="text-sm leading-snug font-semibold text-neutral-900 dark:text-white">
           {name}
         </p>
-        {(category || rating != null) && (
+        {(category || substitute || rating != null) && (
           <div className="flex flex-wrap items-center gap-1.5">
             {category && <span className="chip chip-neutral">{category}</span>}
+            {substitute && (
+              <span
+                data-testid={`${testId}-substitute`}
+                className="chip chip-amber"
+                title="Not one of the plan's own suggestions — the best-rated place of this kind we could find nearby."
+              >
+                Top-rated nearby
+              </span>
+            )}
             {rating != null && (
               <span className="text-xs font-medium text-neutral-700 dark:text-neutral-200">
                 <span aria-hidden className="text-amber-500">
