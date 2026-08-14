@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { isoDate } from '@rv/shared'
+import { isoDate, sightTimeNeededSchema } from '@rv/shared'
 
 const skeletonPointSchema = z.object({
   name: z.string(),
@@ -74,9 +74,10 @@ export type PlanTripSkeleton = z.infer<typeof planTripSkeletonSchema>
 // the response validates (generateRegionHighlights), so the review UI can
 // draw the candidates on a map and estimate each one's detour off the
 // ideal route. They are the SIGHT's coordinates, verified by name and
-// distance against the base town (see resolveSightLocation): a named sight,
-// unlike a town, routinely has no match where it was asked for, and Places
-// answers that with a plausible namesake somewhere else entirely. Optional
+// distance against the base town (see locateCandidateSight in planTrip.ts):
+// a named sight, unlike a town, routinely has no match where it was asked
+// for, and Places answers that with a plausible namesake somewhere else
+// entirely. Optional
 // because resolution is best-effort — a sight that can't be located
 // confidently must degrade to "no coordinates for this one" (and is then
 // dropped rather than mapped to a guess), never to a failed generation.
@@ -107,9 +108,11 @@ export const regionHighlightCandidateSchema = z.object({
   // no duration behind it, and guessing one would put a fabricated figure
   // straight into the pacing rules that read it.
   interest: z.string().optional(),
-  timeNeeded: z
-    .enum(['couple-of-hours', 'half-day', 'full-day'])
-    .optional(),
+  // The shared enum rather than a second copy of the same three strings:
+  // this value is written straight onto a corridorStop and read back off it,
+  // so the two lists drifting apart would mean a candidate that validates
+  // here and fails there.
+  timeNeeded: sightTimeNeededSchema.optional(),
   source: z.enum(['curated', 'search']).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
