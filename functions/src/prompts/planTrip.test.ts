@@ -641,6 +641,44 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(highlights.regions[0].candidateStops[0].lat).toBeUndefined()
   })
 
+  // The prompt encourages several sights to share one base town, and that
+  // town is the anchor every one of them is verified against — so without
+  // this, a pass proposing three things to do around one town pays for three
+  // identical geocodes of it, on the call the traveler is waiting for.
+  it('geocodes a shared base town once, however many sights name it', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(
+      textResponse(`{
+        "regions": [
+          {
+            "region": "North Zealand",
+            "country": "DK",
+            "reasoning": "r",
+            "candidateStops": [
+              { "sight": "Kronborg Castle", "town": "Helsingør", "country": "DK", "why": "w", "priority": "must-see" },
+              { "sight": "M/S Maritime Museum", "town": "Helsingør", "country": "DK", "why": "w", "priority": "worth-a-detour" }
+            ]
+          }
+        ]
+      }`),
+    )
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockResolvedValue({ lat: 56.03, lng: 12.61 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock.mockImplementation((_query: string, name: string) =>
+      Promise.resolve({ name, lat: 56.04, lng: 12.62 }),
+    )
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    expect(geocodeQueryMock).toHaveBeenCalledTimes(1)
+    expect(verifyPlaceLocationMock).toHaveBeenCalledTimes(2)
+  })
+
   it('skips location lookups entirely when the trip has no start point to bias from', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))

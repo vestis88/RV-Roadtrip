@@ -413,6 +413,13 @@ const MAX_SIGHT_FROM_BASE_TOWN_KM = 30
  * Biased near startPoint for the town lookup: a single global bias point is
  * enough to disambiguate town names at this scale, and the query carries the
  * country too.
+ *
+ * Each town is looked up once no matter how many sights name it as their
+ * base — which is the common case, since the prompt explicitly encourages
+ * several sights to share one town. Without that, a curation pass that
+ * proposes three things to do around Helsingør pays for three identical
+ * geocodes of Helsingør, on the call the traveler is sitting and waiting
+ * for.
  */
 async function geocodeHighlights(
   highlights: RegionHighlightsResponse,
@@ -421,11 +428,24 @@ async function geocodeHighlights(
   const near = settings.startPoint
   if (!near) return highlights
 
+  const townPoints = new Map<string, Promise<LatLng | null>>()
+  const townPointOf = (town: string, country: string) => {
+    const key = `${town}, ${country}`
+    let point = townPoints.get(key)
+    if (!point) {
+      point = geocodeQuery(key, near)
+      townPoints.set(key, point)
+    }
+    return point
+  }
+
   const located = await Promise.all(
     highlights.regions.map(async (region) => ({
       ...region,
       candidateStops: await Promise.all(
-        region.candidateStops.map((stop) => locateCandidateSight(stop, near)),
+        region.candidateStops.map((stop) =>
+          locateCandidateSight(stop, townPointOf),
+        ),
       ),
     })),
   )
@@ -435,10 +455,10 @@ async function geocodeHighlights(
 
 async function locateCandidateSight(
   stop: RegionHighlightCandidate,
-  near: LatLng,
+  townPointOf: (town: string, country: string) => Promise<LatLng | null>,
 ): Promise<RegionHighlightCandidate> {
   try {
-    const townPoint = await geocodeQuery(`${stop.town}, ${stop.country}`, near)
+    const townPoint = await townPointOf(stop.town, stop.country)
     if (!townPoint) {
       console.info(
         `Highlight candidate "${stop.sight}" dropped — its base town "${stop.town}, ${stop.country}" did not resolve, so there is nothing to check the sight against`,
