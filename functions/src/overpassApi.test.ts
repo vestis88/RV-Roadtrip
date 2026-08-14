@@ -105,16 +105,72 @@ describe('searchStellplatzCandidates', () => {
     expect(body).toContain(`${NEAR.lng}`)
   })
 
-  it('throws with a descriptive error on a non-ok response', async () => {
+  // Regression for the outage of 2026-08-10..13: overpass-api.de answered
+  // 406 to every request, and because this path had been routed through the
+  // corridor helper (which absorbs a refused batch into an empty list) the
+  // callable logged nothing and the traveler saw a picker with no Stellplatz
+  // section — identical to "there are none near this town".
+  it('rejects rather than reporting no stellplatz when Overpass refuses', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockImplementation(() => jsonResponse({}, false, 429)),
+      vi.fn().mockImplementation(() => jsonResponse({}, false, 406)),
     )
 
-    // The corridor helper swallows a failed batch so one bad stretch cannot
-    // sink a whole trip's lookup; the single-point path surfaces it, since
-    // there is nothing else for the caller to show.
-    await expect(searchStellplatzCandidates(NEAR, 'NO', 5)).resolves.toEqual([])
+    await expect(searchStellplatzCandidates(NEAR, 'NO', 5)).rejects.toThrow(
+      /406/,
+    )
+  })
+
+  it('names every endpoint it tried, and its status, when all of them refuse', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => jsonResponse({}, false, 406)),
+    )
+
+    // The diagnosis is "which host turned us down, and how" — a bare "OSM
+    // returned nothing" is what kept this invisible for three days.
+    await expect(searchStellplatzCandidates(NEAR, 'NO', 5)).rejects.toThrow(
+      /overpass-api\.de.*overpass\.kumi\.systems/s,
+    )
+  })
+
+  // The whole point of a second endpoint: one instance blocking us must not
+  // empty the Stellplatz section of every day of every trip.
+  it('falls back to the mirror when the primary endpoint refuses', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => jsonResponse({}, false, 406))
+      .mockImplementationOnce(() => jsonResponse({ elements: [site(1)] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const candidates = await searchStellplatzCandidates(NEAR, 'NO', 5)
+
+    expect(candidates).toHaveLength(1)
+    expect(fetchMock.mock.calls[0][0]).toContain('overpass-api.de')
+    expect(fetchMock.mock.calls[1][0]).toContain('overpass.kumi.systems')
+  })
+
+  // The actual root cause. Node's global fetch sends `user-agent: node` when
+  // nothing sets one, and that is what overpass-api.de's front end answered
+  // 406 to; the OSM API usage policy requires an agent that identifies the
+  // application and gives its operator a way to make contact.
+  it('identifies the application to Overpass', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => jsonResponse({ elements: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await searchStellplatzCandidates(NEAR, 'NO', 5)
+
+    const headers = (fetchMock.mock.calls[0][1] as {
+      headers: Record<string, string>
+    }).headers
+    expect(headers['User-Agent']).toMatch(/RV-Roadtrip/)
+    expect(headers['User-Agent']).not.toBe('node')
+    // A contact route, which is the part of the policy a bare product name
+    // would still be missing.
+    expect(headers['User-Agent']).toMatch(/https?:\/\//)
+    expect(headers.Accept).toBe('application/json')
   })
 })
 
@@ -154,11 +210,15 @@ describe('searchOvernightOsmAlongRoute', () => {
 
   // One failed batch costs that stretch its OSM results. Campsites come from
   // Places and are unaffected, so those days still get options.
-  it('keeps the rest of the route when one batch fails', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => jsonResponse({}, false, 504))
-      .mockImplementationOnce(() => jsonResponse({ elements: [site(1)] }))
+  it('keeps the rest of the route when one batch fails at every endpoint', async () => {
+    // Batch 1 (the first 20 points) is refused wherever it is sent; batch 2
+    // answers. Keyed on the query body rather than call order because the
+    // batches are issued in parallel and each may be retried on the mirror.
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: { body: string }) =>
+      init.body.includes(encodeURIComponent('45,12'))
+        ? jsonResponse({}, false, 504)
+        : jsonResponse({ elements: [site(1)] }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const places = await searchOvernightOsmAlongRoute(
@@ -166,6 +226,50 @@ describe('searchOvernightOsmAlongRoute', () => {
     )
 
     expect(places).toHaveLength(1)
+  })
+
+  // The defect that let a total outage run for three days: every batch was
+  // refused, each one logged as a lone warning, and the caller got back a
+  // plain empty list — the same value a route with genuinely no caravan
+  // sites on it produces. "We cannot reach OpenStreetMap" has to be loud and
+  // greppable on its own, because it is a statement about our access rather
+  // than about the route.
+  it('reports an error, not just warnings, when every batch is refused', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => jsonResponse({}, false, 406)),
+    )
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const places = await searchOvernightOsmAlongRoute(
+      Array.from({ length: 25 }, (_, i) => ({ lat: 45 + i, lng: 12 })),
+    )
+
+    expect(places).toEqual([])
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(error.mock.calls[0][0]).toMatch(/UNAVAILABLE/)
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('says nothing when the route genuinely has no OSM overnight places on it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => jsonResponse({ elements: [] })),
+    )
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // An honest empty answer. The whole point of the error above is that this
+    // case and a refusal must not look the same.
+    expect(
+      await searchOvernightOsmAlongRoute([{ lat: 45, lng: 12 }]),
+    ).toEqual([])
+    expect(error).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    error.mockRestore()
+    warn.mockRestore()
   })
 
   it('returns one copy of a site that answered for several overlapping days', async () => {
