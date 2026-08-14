@@ -1,5 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { searchOvernightOsmAlongRoute, searchStellplatzCandidates } from './overpassApi.js'
+
+// The suite-wide OVERPASS_DISABLED (see vitest.config.ts) exists to stop
+// tests making real calls to a public OSM endpoint. Every test in this file
+// stubs fetch, so none of them can — and they are the one place where the
+// request this module actually builds is the thing under test. Cleared per
+// test rather than once, so a future test that wants to assert the disabled
+// path can set it back without leaking into its neighbours.
+beforeEach(() => {
+  vi.stubEnv('OVERPASS_DISABLED', '')
+})
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 const NEAR = { lat: 61.1, lng: 10.5 }
 
@@ -285,5 +298,45 @@ describe('searchOvernightOsmAlongRoute', () => {
     ])
 
     expect(places).toHaveLength(1)
+  })
+})
+
+describe('OVERPASS_DISABLED', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('makes no request at all, and says so, when the flag is set', async () => {
+    // The flag has to keep the socket shut rather than merely returning an
+    // empty list: the point of it is that a test run never touches a public
+    // OSM endpoint, and "no results" would hide a request that still went
+    // out. Asserting on fetch is therefore the assertion that matters here.
+    vi.stubEnv('OVERPASS_DISABLED', '1')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(searchStellplatzCandidates({ lat: 61.1, lng: 10.5 }, 'NO', 3)).rejects.toThrow(
+      /OVERPASS_DISABLED/,
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('leaves the corridor search with no results rather than an error', async () => {
+    // searchOvernightOsmAlongRoute absorbs a refused batch by design, so the
+    // flag reaches generation as "this stretch has no OSM places" — which is
+    // what the e2e suite asserts against.
+    vi.stubEnv('OVERPASS_DISABLED', '1')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(
+      searchOvernightOsmAlongRoute([{ lat: 61.1, lng: 10.5 }]),
+    ).resolves.toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    warn.mockRestore()
+    error.mockRestore()
   })
 })
