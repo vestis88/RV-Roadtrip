@@ -51,6 +51,31 @@ const OVERPASS_USER_AGENT =
  */
 const OVERPASS_HTTP_TIMEOUT_MS = 75_000
 
+/**
+ * Opt-out switch for the end-to-end suite (added 2026-08-14).
+ *
+ * The e2e specs run the real functions against the emulator with no Claude
+ * or Places credentials, so every other external source is already
+ * unavailable and the suite asserts on that honest degraded state. Overpass
+ * was the odd one out: it needs no credentials, so on a CI runner with real
+ * internet the overnight picker started returning genuine Norwegian
+ * stellplatz the moment the User-Agent fix above made the API answer us at
+ * all — turning a deterministic assertion into one that depended on a free
+ * third-party service's mood and latency inside a 30s test timeout.
+ *
+ * Pointing the suite at a public, best-effort, no-SLA endpoint on every push
+ * is also not a reasonable thing to do to the people who run it. So CI sets
+ * this and the source reports itself unavailable, exactly like the others.
+ * It is never set in production or in a normal local emulator run.
+ */
+const OVERPASS_DISABLED_MESSAGE =
+  'Overpass disabled by OVERPASS_DISABLED — no OSM lookups in this environment.'
+
+function overpassDisabled(): boolean {
+  const flag = process.env.OVERPASS_DISABLED
+  return flag === '1' || flag === 'true'
+}
+
 const SEARCH_RADIUS_METERS = 30_000
 
 /**
@@ -281,6 +306,8 @@ async function postOverpass(
  * bounded at two requests per batch, inside the callers' own deadlines.
  */
 async function runOverpassQuery(points: LatLng[]): Promise<OsmOvernightPlace[]> {
+  if (overpassDisabled()) throw new Error(OVERPASS_DISABLED_MESSAGE)
+
   const query = `[out:json][timeout:${OVERPASS_QUERY_TIMEOUT_S}];(${points
     .map((point) => overpassClauses(point, SEARCH_RADIUS_METERS))
     .join('')});out center;`

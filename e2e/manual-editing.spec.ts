@@ -194,8 +194,11 @@ test('opening "Change overnight stop" degrades to "nothing found" without Claude
   page,
 }) => {
   // CLAUDE_API_KEY/GOOGLE_PLACES_API_KEY aren't configured and Overpass is
-  // network-blocked in this sandbox (same caveat as T-14/T-16/T-18/T-22/
-  // countries.spec.ts's refresh test) — getOvernightCandidates has no
+  // off (network-blocked in the development sandbox; OVERPASS_DISABLED=1 on
+  // CI, which has real internet and would otherwise return genuine Norwegian
+  // stellplatz here — see the flag's note in overpassApi.ts). Same caveat as
+  // T-14/T-16/T-18/T-22/countries.spec.ts's refresh test —
+  // getOvernightCandidates has no
   // synthetic fallback by design. Each of its 3 sources now fails
   // independently (see overnightCandidatesCallable.ts's safe() helper) rather
   // than one unreachable source taking the whole call down, so with every

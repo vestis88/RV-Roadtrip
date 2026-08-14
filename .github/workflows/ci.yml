@@ -51,7 +51,15 @@ jobs:
       - run: npm run build -w functions
       - run: npm run test:functions
       - run: npx playwright install --with-deps chromium
+      # Overpass needs no credentials, so unlike Claude and Places it would
+      # answer for real from a CI runner — making the overnight specs depend
+      # on a free third-party service's latency inside a 30s test timeout,
+      # and pointing the suite at a public no-SLA endpoint on every push.
+      # Off here, so every external source is uniformly unavailable and the
+      # specs assert on the degraded state they were written for.
       - run: npm run test:e2e
+        env:
+          OVERPASS_DISABLED: '1'
 
       - name: Print Playwright error-context (page snapshot at failure) to the job log
         if: failure()
