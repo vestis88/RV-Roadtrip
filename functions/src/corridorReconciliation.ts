@@ -305,16 +305,29 @@ export async function computeCorridorReconciliation(
       const newIndex = finalDays.length
       const newDate = orderedDates[newIndex]
 
+      // A sights-led candidate names a sight, and sleeping at one is not a
+      // thing — `baseTown` is where the curation phase said to spend the
+      // night while seeing it (see corridorStopSchema). Absent, the stop's
+      // own name is the place, which is what every stop meant before sights
+      // led the route and what a hand-dropped pin still means. The sight is
+      // handed to the detail phase as the day's own `sights` entry, so the
+      // day the traveler added it for actually contains it.
+      const overnightTown = stop.baseTown ?? stop.name
       const syntheticDay: RouteOutlineDay = {
         index: newIndex,
         date: newDate,
         type: 'drive',
-        overnight: { name: stop.name, town: stop.name, country: stop.country },
+        overnight: {
+          name: overnightTown,
+          town: overnightTown,
+          country: stop.country,
+        },
         drive: {
           fromTown: previousOvernight.name,
-          toTown: stop.name,
+          toTown: overnightTown,
           slot: 'evening',
         },
+        sights: [stop.name],
         highlightReason: stop.why || `${stop.name}, added directly to the route.`,
       }
 

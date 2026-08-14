@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { defineSecret } from 'firebase-functions/params'
-import type { TripSettings } from '@rv/shared'
-import { geocodeQuery } from '../placesApi.js'
+import type { LatLng, TripSettings } from '@rv/shared'
+import { geocodeQuery, verifyPlaceLocation } from '../placesApi.js'
 import { logClaudeUsage, type ClaudeCallType } from '../claudeUsageLogger.js'
 import {
   buildChunkDetailPrompt,
@@ -16,6 +16,7 @@ import {
   type ChunkDetailResponse,
   type PlanTripSkeleton,
   type PlanTripSkeletonDay,
+  type RegionHighlightCandidate,
   type RegionHighlightsResponse,
   type RouteOutline,
   type RouteOutlineDay,
@@ -353,7 +354,14 @@ export async function generateRegionHighlights(input: {
     client,
     system,
     user,
-    8000,
+    // Raised from 8000 when curation moved from towns to sights
+    // (2026-08-13): a candidate now carries a sight name, a base town, the
+    // interest it serves and a duration on top of the same 2-4 sentence
+    // "why", and there are more of them, since a single town can be worth
+    // stopping in for three different reasons. The salvage path below
+    // recovers a truncated answer, but it recovers it by throwing away
+    // whatever came after the cut — cheaper to not hit the ceiling.
+    12000,
     parseRegionHighlights,
     { callType: 'highlights', tripId: input.tripId },
     // The only call given a salvage path — a curation shortlist stays a
@@ -365,19 +373,53 @@ export async function generateRegionHighlights(input: {
 }
 
 /**
- * Resolves every candidate town to coordinates so the review UI can map the
- * candidates and estimate each one's detour off the ideal route. Claude is
- * deliberately not asked for coordinates (models invent plausible-looking
- * wrong ones); these come from Places.
+ * How far a sight may sit from the town proposed as its base and still be
+ * accepted as that candidate's location.
  *
- * Best-effort by design: geocodeQuery throws when GOOGLE_PLACES_API_KEY is
- * unset and can fail per-town on a bad name or transient error, and none of
- * that is worth failing a whole trip generation over — a candidate that
- * can't be located simply keeps its other fields and carries no lat/lng,
- * which the review panel renders without a detour badge. Biased near
- * startPoint rather than per-region: a single global bias point is enough
- * to disambiguate town names at this scale, and text search already carries
- * the country in the query.
+ * Doing double duty. It is the promise the candidate makes — "sleep here,
+ * see this" — so a match half a country away is not the sight that was
+ * asked for even if it shares the name. And it is the fraud check: Places'
+ * locationBias will happily answer a query for a place that doesn't exist
+ * with the best-known namesake anywhere on earth, which is how a Helsingør
+ * dinner stop became a hotel in Greece (see MAX_MATCH_DISTANCE_KM in
+ * placesApi.ts). Half an hour's drive, the same distance the curation prompt
+ * asks for when it says "nearest sensible town".
+ */
+const MAX_SIGHT_FROM_BASE_TOWN_KM = 30
+
+/**
+ * Resolves each candidate SIGHT to coordinates, so the explore map pins the
+ * thing the traveler is deciding on and the detour estimate measures the
+ * drive they would actually make. Claude is deliberately not asked for
+ * coordinates (models invent plausible-looking wrong ones); these come from
+ * Places.
+ *
+ * Two lookups, not one, and the order matters. The base town is geocoded
+ * first because towns resolve reliably and unambiguously — that is the
+ * anchor. The sight is then looked up against that anchor and must clear
+ * both a distance bound and a name check (verifyPlaceLocation) before it is
+ * believed. A named sight is nothing like a town here: it may not exist, may
+ * be spelled a way Places doesn't know, or may share its name with something
+ * famous elsewhere, and a plain first-result geocode answers all three with
+ * a confident pin in the wrong place.
+ *
+ * Best-effort by design, per candidate: geocodeQuery throws when
+ * GOOGLE_PLACES_API_KEY is unset and either lookup can fail on a transient
+ * error, and none of that is worth failing a whole trip generation over. A
+ * candidate that can't be pinned down keeps its other fields and carries no
+ * lat/lng — which buildExploreCandidateWrites drops rather than writes,
+ * deliberately: an unverifiable sight is exactly the one whose location
+ * would be wrong, and a wrong pin is worse than a missing suggestion.
+ * Biased near startPoint for the town lookup: a single global bias point is
+ * enough to disambiguate town names at this scale, and the query carries the
+ * country too.
+ *
+ * Each town is looked up once no matter how many sights name it as their
+ * base — which is the common case, since the prompt explicitly encourages
+ * several sights to share one town. Without that, a curation pass that
+ * proposes three things to do around Helsingør pays for three identical
+ * geocodes of Helsingør, on the call the traveler is sitting and waiting
+ * for.
  */
 async function geocodeHighlights(
   highlights: RegionHighlightsResponse,
@@ -386,30 +428,66 @@ async function geocodeHighlights(
   const near = settings.startPoint
   if (!near) return highlights
 
+  const townPoints = new Map<string, Promise<LatLng | null>>()
+  const townPointOf = (town: string, country: string) => {
+    const key = `${town}, ${country}`
+    let point = townPoints.get(key)
+    if (!point) {
+      point = geocodeQuery(key, near)
+      townPoints.set(key, point)
+    }
+    return point
+  }
+
   const located = await Promise.all(
     highlights.regions.map(async (region) => ({
       ...region,
       candidateStops: await Promise.all(
-        region.candidateStops.map(async (stop) => {
-          try {
-            const point = await geocodeQuery(
-              `${stop.town}, ${stop.country}`,
-              near,
-            )
-            return point ? { ...stop, lat: point.lat, lng: point.lng } : stop
-          } catch (error) {
-            console.warn(
-              `Geocoding highlight candidate "${stop.town}, ${stop.country}" failed — continuing without coordinates`,
-              error,
-            )
-            return stop
-          }
-        }),
+        region.candidateStops.map((stop) =>
+          locateCandidateSight(stop, townPointOf),
+        ),
       ),
     })),
   )
 
   return { regions: located }
+}
+
+async function locateCandidateSight(
+  stop: RegionHighlightCandidate,
+  townPointOf: (town: string, country: string) => Promise<LatLng | null>,
+): Promise<RegionHighlightCandidate> {
+  try {
+    const townPoint = await townPointOf(stop.town, stop.country)
+    if (!townPoint) {
+      console.info(
+        `Highlight candidate "${stop.sight}" dropped — its base town "${stop.town}, ${stop.country}" did not resolve, so there is nothing to check the sight against`,
+      )
+      return stop
+    }
+    const sight = await verifyPlaceLocation(
+      `${stop.sight}, ${stop.town}, ${stop.country}`,
+      stop.sight,
+      townPoint,
+      MAX_SIGHT_FROM_BASE_TOWN_KM,
+    )
+    if (!sight) {
+      console.info(
+        `Highlight candidate "${stop.sight}" dropped — no place by that name within ${MAX_SIGHT_FROM_BASE_TOWN_KM} km of ${stop.town}, ${stop.country}`,
+      )
+      return stop
+    }
+    // Places' own spelling wins from here on: it is what the traveler will
+    // see on the map, and it gives the sight one stable identity across
+    // repeated curation passes (see buildExploreCandidateWrites' merge).
+    return { ...stop, sight: sight.name, lat: sight.lat, lng: sight.lng }
+  } catch (error) {
+    console.warn(
+      `Locating highlight candidate "${stop.sight}, ${stop.town}, ${stop.country}" failed — continuing without coordinates`,
+      error,
+    )
+    return stop
+  }
 }
 
 /**

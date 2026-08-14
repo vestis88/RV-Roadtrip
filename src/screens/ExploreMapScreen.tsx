@@ -13,7 +13,7 @@ import {
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
 import {
-  deleteCorridorStop,
+  rejectCorridorStop,
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
@@ -65,6 +65,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   })
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // What the last refresh actually did. Worth saying out loud now that a
+  // refresh merges: a run that finds ten sights the traveler already has
+  // adds nothing to the list, and without a word from the app that is
+  // indistinguishable from the button being broken.
+  const [genSummary, setGenSummary] = useState<string | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
   // Real driving totals for the kept-stop route, or null while unknown.
   // Stable identity via useCallback because DirectionsRoute lists this in
@@ -215,6 +220,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
 
   async function runFindStops() {
     setGenError(null)
+    setGenSummary(null)
     // See src/lib/validateRoute.ts's own doc comment: a blank start/finish
     // point still looks like a real (0, 0) coordinate downstream, so this
     // must be caught here rather than relying on the Claude call itself to
@@ -225,7 +231,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
     setGenerating(true)
     try {
-      await generateExploreHighlights(tripId)
+      const { candidateCount, alreadyKnown } = await generateExploreHighlights(tripId)
+      setGenSummary(
+        candidateCount > 0
+          ? `Added ${candidateCount} new ${candidateCount === 1 ? 'find' : 'finds'}${
+              alreadyKnown > 0 ? ` — the other ${alreadyKnown} you already had` : ''
+            }.`
+          : alreadyKnown > 0
+            ? `Nothing new this time — all ${alreadyKnown} suggestions are already on your list.`
+            : 'Nothing new turned up along this route.',
+      )
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
       setGenError(describeExploreHighlightsError(error))
@@ -300,6 +315,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         {genError && (
           <p data-testid="explore-find-stops-error" className="text-sm text-red-600">
             {genError}
+          </p>
+        )}
+        {genSummary && !genError && (
+          <p
+            data-testid="explore-find-stops-summary"
+            className="text-sm text-neutral-600 dark:text-neutral-300"
+          >
+            {genSummary}
           </p>
         )}
         {actionError && (
@@ -483,7 +506,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 }
                 onReject={() => {
                   runStopAction(
-                    deleteCorridorStop(tripId, stop.id),
+                    // Kept as a tombstone rather than deleted, so the next
+                    // "Find more stops" doesn't hand it straight back —
+                    // see rejectCorridorStop.
+                    rejectCorridorStop(tripId, stop.id),
                     'Could not remove that stop — please try again.',
                   )
                   if (selectedId === stop.id) setSelectedId(null)

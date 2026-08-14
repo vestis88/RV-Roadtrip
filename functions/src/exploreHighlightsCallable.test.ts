@@ -28,7 +28,17 @@ const FIXTURE_HIGHLIGHTS = {
       country: 'NO',
       reasoning: 'r',
       candidateStops: [
-        { town: 'Otta', country: 'NO', why: 'w', priority: 'must-see' as const, lat: 61.77, lng: 9.54 },
+        {
+          sight: 'Otta Church',
+          town: 'Otta',
+          country: 'NO',
+          why: 'w',
+          priority: 'must-see' as const,
+          interest: 'hiking',
+          timeNeeded: 'couple-of-hours' as const,
+          lat: 61.77,
+          lng: 9.54,
+        },
       ],
     },
   ],
@@ -50,7 +60,10 @@ describe('generateExploreHighlightsForTrip', () => {
     const stops = snap.docs.map((d) => d.data() as CorridorStop)
     expect(stops).toHaveLength(1)
     expect(stops[0]).toMatchObject({
-      name: 'Otta',
+      name: 'Otta Church',
+      baseTown: 'Otta',
+      interest: 'hiking',
+      timeNeeded: 'couple-of-hours',
       status: 'candidate',
       priority: 'must-see',
       region: 'Gudbrandsdalen',
@@ -96,8 +109,8 @@ describe('generateExploreHighlightsForTrip', () => {
           country: 'SE',
           reasoning: 'r',
           candidateStops: [
-            { town: 'Helsingborg', country: 'SE', why: 'w', priority: 'must-see' as const },
-            { town: 'Malmö', country: 'SE', why: 'w', priority: 'must-see' as const },
+            { sight: 'Kärnan', town: 'Helsingborg', country: 'SE', why: 'w', priority: 'must-see' as const },
+            { sight: 'Turning Torso', town: 'Malmö', country: 'SE', why: 'w', priority: 'must-see' as const },
           ],
         },
       ],
@@ -134,7 +147,101 @@ describe('generateExploreHighlightsForTrip', () => {
     )
     await expect(generateExploreHighlightsForTrip(tripId)).resolves.toEqual({
       candidateCount: 0,
+      alreadyKnown: 0,
     })
+  })
+
+  // Reported 2026-08-13: pressing "Generate overview" mid-trip wiped out
+  // weeks of curation. A refresh used to delete every candidate stop before
+  // writing its own pass, which was harmless only while candidates were
+  // consumed at generation — they are durable now, and every interest level
+  // the traveler had set went with them.
+  it('keeps existing candidates, and the interest levels set on them, through a refresh', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenMerge')
+    const stops = db.collection('trips').doc(tripId).collection('corridorStops')
+    const curated = await stops.add({
+      name: 'Jotunheimen National Park',
+      lat: 61.5,
+      lng: 8.3,
+      country: 'NO',
+      status: 'candidate',
+      linkedDayIds: [],
+      // Claude called it worth-a-detour; the traveler disagreed.
+      priority: 'must-see',
+      region: 'Gudbrandsdalen',
+      rank: 0,
+    })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    const result = await generateExploreHighlightsForTrip(tripId)
+
+    expect(result).toEqual({ candidateCount: 1, alreadyKnown: 0 })
+    const after = await curated.get()
+    expect(after.exists).toBe(true)
+    expect(after.data()?.priority).toBe('must-see')
+    expect((await stops.get()).size).toBe(2)
+  })
+
+  it('does not propose a sight the traveler already rejected, and reports it as already known', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenNoResurrect')
+    const stops = db.collection('trips').doc(tripId).collection('corridorStops')
+    await stops.add({
+      name: 'Otta Church',
+      lat: 61.77,
+      lng: 9.54,
+      country: 'NO',
+      status: 'rejected',
+      linkedDayIds: [],
+      priority: 'must-see',
+    })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    const result = await generateExploreHighlightsForTrip(tripId)
+
+    expect(result).toEqual({ candidateCount: 0, alreadyKnown: 1 })
+    const after = await stops.get()
+    expect(after.size).toBe(1)
+    expect(after.docs[0].data().status).toBe('rejected')
+  })
+
+  // A run that finds only what the traveler already has writes nothing —
+  // which is a healthy result, not the total-lookup-failure the guard above
+  // is for. Before the merge those two were the same observation.
+  it('does not mistake "you already have all of these" for a lookup outage', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenAllKnown')
+    await db
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Otta Church',
+        lat: 61.77,
+        lng: 9.54,
+        country: 'NO',
+        status: 'candidate',
+        linkedDayIds: [],
+        priority: 'must-see',
+      })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).resolves.toEqual({
+      candidateCount: 0,
+      alreadyKnown: 1,
+    })
+    const snap = await db.collection('trips').doc(tripId).get()
+    expect(snap.data()?.planMeta?.exploreLastRunAt).toBeTruthy()
   })
 
   it('does not set planMeta.exploreLastRunAt when the run fails', async () => {

@@ -24,8 +24,8 @@ describe('buildExploreCandidateWrites', () => {
           country: 'DE',
           reasoning: 'r',
           candidateStops: [
-            { town: 'A', country: 'DE', why: 'w', priority: 'must-see', lat: 1, lng: 1 },
-            { town: 'B', country: 'DE', why: 'w', priority: 'worth-a-detour', lat: 2, lng: 2 },
+            { sight: 'A', town: 'Munich', country: 'DE', why: 'w', priority: 'must-see', lat: 1, lng: 1 },
+            { sight: 'B', town: 'Munich', country: 'DE', why: 'w', priority: 'worth-a-detour', lat: 2, lng: 2 },
           ],
         },
         {
@@ -33,15 +33,16 @@ describe('buildExploreCandidateWrites', () => {
           country: 'AT',
           reasoning: 'r',
           candidateStops: [
-            { town: 'C', country: 'AT', why: 'w', priority: 'must-see', lat: 3, lng: 3 },
+            { sight: 'C', town: 'Innsbruck', country: 'AT', why: 'w', priority: 'must-see', lat: 3, lng: 3 },
           ],
         },
       ],
     }
 
-    const writes = buildExploreCandidateWrites(tripRef, highlights, [])
+    const { writes, added } = buildExploreCandidateWrites(tripRef, highlights, [])
     const sets = writes.filter((w) => w.op === 'set')
     expect(sets).toHaveLength(3)
+    expect(added).toBe(3)
 
     const byName = new Map(sets.map((w) => [w.data.name as string, w.data]))
     expect(byName.get('A')).toMatchObject({
@@ -64,7 +65,51 @@ describe('buildExploreCandidateWrites', () => {
     })
   })
 
-  it('drops candidates that never geocoded', () => {
+  // The sight is the unit now: its own name and coordinates are the stop,
+  // and the town rides along as where to sleep while seeing it.
+  it('writes the sight as the stop, with its base town, interest and duration', () => {
+    const db = getFirestore()
+    const tripRef = db.collection('trips').doc('trip1')
+    const { writes } = buildExploreCandidateWrites(
+      tripRef,
+      {
+        regions: [
+          {
+            region: 'North Zealand',
+            country: 'DK',
+            reasoning: 'r',
+            candidateStops: [
+              {
+                sight: 'Kronborg Castle',
+                town: 'Helsingør',
+                country: 'DK',
+                why: 'Hamlet lived here.',
+                priority: 'must-see',
+                interest: 'castles',
+                timeNeeded: 'half-day',
+                lat: 56.04,
+                lng: 12.62,
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    )
+
+    const sets = writes.filter((w) => w.op === 'set')
+    expect(sets).toHaveLength(1)
+    expect(sets[0].data).toMatchObject({
+      name: 'Kronborg Castle',
+      baseTown: 'Helsingør',
+      interest: 'castles',
+      timeNeeded: 'half-day',
+      lat: 56.04,
+      lng: 12.62,
+    })
+  })
+
+  it('drops candidates whose sight never resolved to a location', () => {
     const db = getFirestore()
     const tripRef = db.collection('trips').doc('trip1')
     const highlights: RegionHighlightsResponse = {
@@ -74,24 +119,152 @@ describe('buildExploreCandidateWrites', () => {
           country: 'DE',
           reasoning: 'r',
           candidateStops: [
-            { town: 'Ungeocoded', country: 'DE', why: 'w', priority: 'must-see' },
+            { sight: 'Unfindable', town: 'Munich', country: 'DE', why: 'w', priority: 'must-see' },
           ],
         },
       ],
     }
 
-    const writes = buildExploreCandidateWrites(tripRef, highlights, [])
-    expect(writes.filter((w) => w.op === 'set')).toHaveLength(0)
+    const { writes, added, unlocated } = buildExploreCandidateWrites(
+      tripRef,
+      highlights,
+      [],
+    )
+    expect(writes).toHaveLength(0)
+    expect(added).toBe(0)
+    expect(unlocated).toBe(1)
   })
 
-  it('deletes every existing candidate ref passed in', () => {
-    const db = getFirestore()
-    const tripRef = db.collection('trips').doc('trip1')
-    const existingRef = tripRef.collection('corridorStops').doc('old1')
-    const highlights: RegionHighlightsResponse = { regions: [] }
+  // The change this file exists to protect (2026-08-13): a refresh used to
+  // delete every candidate first, so pressing "Find more stops" after weeks
+  // of curating threw away every interest level the traveler had set.
+  describe('merging with what the traveler already has', () => {
+    const FRESH_PASS: RegionHighlightsResponse = {
+      regions: [
+        {
+          region: 'North Zealand',
+          country: 'DK',
+          reasoning: 'r',
+          candidateStops: [
+            { sight: 'Kronborg Castle', town: 'Helsingør', country: 'DK', why: 'w', priority: 'must-see', lat: 56.04, lng: 12.62 },
+            { sight: 'Louisiana Museum', town: 'Humlebæk', country: 'DK', why: 'w', priority: 'worth-a-detour', lat: 55.97, lng: 12.54 },
+          ],
+        },
+      ],
+    }
 
-    const writes = buildExploreCandidateWrites(tripRef, highlights, [existingRef])
-    expect(writes).toEqual([{ op: 'delete', ref: existingRef }])
+    it('writes nothing for a sight already in the corridor, and deletes nothing', () => {
+      const db = getFirestore()
+      const tripRef = db.collection('trips').doc('trip1')
+
+      const { writes, added, alreadyKnown } = buildExploreCandidateWrites(
+        tripRef,
+        FRESH_PASS,
+        [{ name: 'Kronborg Castle', priority: 'nice-if-convenient' }],
+      )
+
+      const sets = writes.filter((w) => w.op === 'set')
+      expect(writes.every((w) => w.op === 'set')).toBe(true)
+      expect(sets).toHaveLength(1)
+      expect(sets[0].data.name).toBe('Louisiana Museum')
+      expect(added).toBe(1)
+      expect(alreadyKnown).toBe(1)
+    })
+
+    // Rejections are tombstones precisely so this can happen — without them a
+    // rejected stop is indistinguishable from one never suggested.
+    it('does not resurrect a sight the traveler turned down', () => {
+      const db = getFirestore()
+      const tripRef = db.collection('trips').doc('trip1')
+
+      const { writes, alreadyKnown } = buildExploreCandidateWrites(
+        tripRef,
+        FRESH_PASS,
+        [
+          { name: 'Kronborg Castle', priority: 'must-see' },
+          { name: 'Louisiana Museum', priority: 'worth-a-detour' },
+        ],
+      )
+
+      expect(writes).toHaveLength(0)
+      expect(alreadyKnown).toBe(2)
+    })
+
+    // Places' own spelling is what gets stored, but Claude's varies between
+    // passes and the traveler's own pins are typed by hand.
+    it('matches known stops regardless of case, accents and punctuation', () => {
+      const db = getFirestore()
+      const tripRef = db.collection('trips').doc('trip1')
+
+      const { added } = buildExploreCandidateWrites(
+        tripRef,
+        {
+          regions: [
+            {
+              region: 'Møn',
+              country: 'DK',
+              reasoning: 'r',
+              candidateStops: [
+                { sight: 'Møns Klint', town: 'Borre', country: 'DK', why: 'w', priority: 'must-see', lat: 55, lng: 12 },
+              ],
+            },
+          ],
+        },
+        [{ name: 'mons-klint', priority: 'must-see' }],
+      )
+
+      expect(added).toBe(0)
+    })
+
+    it('ranks new finds after the stops already in their tier', () => {
+      const db = getFirestore()
+      const tripRef = db.collection('trips').doc('trip1')
+
+      const { writes } = buildExploreCandidateWrites(tripRef, FRESH_PASS, [
+        { name: 'Frederiksborg Castle', priority: 'must-see' },
+        { name: 'Roskilde Cathedral', priority: 'must-see' },
+      ])
+
+      const sets = writes.filter((w) => w.op === 'set')
+      const kronborg = sets.find((w) => w.data.name === 'Kronborg Castle')
+      expect(kronborg?.data.rank).toBe(2)
+      // A tier nobody has anything in yet still starts at zero.
+      const louisiana = sets.find((w) => w.data.name === 'Louisiana Museum')
+      expect(louisiana?.data.rank).toBe(0)
+    })
+
+    it('writes a sight only once when two regions both propose it', () => {
+      const db = getFirestore()
+      const tripRef = db.collection('trips').doc('trip1')
+
+      const { writes, added } = buildExploreCandidateWrites(
+        tripRef,
+        {
+          regions: [
+            {
+              region: 'North Zealand',
+              country: 'DK',
+              reasoning: 'r',
+              candidateStops: [
+                { sight: 'Kronborg Castle', town: 'Helsingør', country: 'DK', why: 'w', priority: 'must-see', lat: 56.04, lng: 12.62 },
+              ],
+            },
+            {
+              region: 'Öresund',
+              country: 'DK',
+              reasoning: 'r',
+              candidateStops: [
+                { sight: 'Kronborg Castle', town: 'Helsingborg', country: 'DK', why: 'w', priority: 'worth-a-detour', lat: 56.04, lng: 12.62 },
+              ],
+            },
+          ],
+        },
+        [],
+      )
+
+      expect(writes).toHaveLength(1)
+      expect(added).toBe(1)
+    })
   })
 })
 
@@ -105,7 +278,47 @@ describe('buildRegionHighlightsFromCandidates', () => {
 
     expect(result.regions).toHaveLength(2)
     const bavaria = result.regions.find((r) => r.region === 'Bavaria')
-    expect(bavaria?.candidateStops.map((c) => c.town)).toEqual(['A', 'B'])
+    expect(bavaria?.candidateStops.map((c) => c.sight)).toEqual(['A', 'B'])
+  })
+
+  // The reverse of the write above: the outline phase has to see the sight,
+  // where to sleep for it, and what it costs in time, or a curated trip
+  // would be paced as if every stop were free.
+  it('hands the sight, its base town, interest and duration back to the outline', () => {
+    const result = buildRegionHighlightsFromCandidates([
+      {
+        name: 'Kronborg Castle',
+        lat: 56.04,
+        lng: 12.62,
+        country: 'DK',
+        region: 'North Zealand',
+        priority: 'must-see',
+        baseTown: 'Helsingør',
+        interest: 'castles',
+        timeNeeded: 'half-day',
+      },
+    ])
+
+    expect(result.regions[0].candidateStops[0]).toMatchObject({
+      sight: 'Kronborg Castle',
+      town: 'Helsingør',
+      interest: 'castles',
+      timeNeeded: 'half-day',
+    })
+  })
+
+  // Every stop curated before sights led the route is a town whose own name
+  // is the whole story — it stands as both rather than having a base town
+  // invented for it, and carries no fabricated duration into the pacing.
+  it('treats a stop with no base town as its own sight, with nothing invented', () => {
+    const result = buildRegionHighlightsFromCandidates([
+      { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO', region: 'Gudbrandsdalen' },
+    ])
+
+    const candidate = result.regions[0].candidateStops[0]
+    expect(candidate).toMatchObject({ sight: 'Otta', town: 'Otta' })
+    expect(candidate.timeNeeded).toBeUndefined()
+    expect(candidate.interest).toBeUndefined()
   })
 
   it('falls back to a per-country catch-all region when no region is recorded', () => {
@@ -116,7 +329,7 @@ describe('buildRegionHighlightsFromCandidates', () => {
     expect(result.regions).toHaveLength(1)
     expect(result.regions[0].region).toBe('Added stops (NO)')
     expect(result.regions[0].candidateStops[0]).toMatchObject({
-      town: 'Rescan find',
+      sight: 'Rescan find',
       country: 'NO',
       priority: 'worth-a-detour',
     })
@@ -128,8 +341,10 @@ describe('buildRegionHighlightsFromCandidates', () => {
       { name: 'Has country', lat: 2, lng: 2, country: 'FR' },
     ])
 
-    const allTowns = result.regions.flatMap((r) => r.candidateStops.map((c) => c.town))
-    expect(allTowns).toEqual(['Has country'])
+    const allSights = result.regions.flatMap((r) =>
+      r.candidateStops.map((c) => c.sight),
+    )
+    expect(allSights).toEqual(['Has country'])
   })
 
   it('returns no regions for an empty candidate list', () => {

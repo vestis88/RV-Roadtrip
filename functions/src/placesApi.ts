@@ -703,6 +703,71 @@ export async function geocodeQuery(
   return first ? { lat: first.lat, lng: first.lng } : null
 }
 
+export interface VerifiedPlace {
+  /** Places' own name for the match — see verifyPlaceLocation on why this is returned. */
+  name: string
+  lat: number
+  lng: number
+}
+
+/**
+ * Locates a place that was asked for BY NAME, and refuses to answer with
+ * something else.
+ *
+ * geocodeQuery is deliberately unfussy — it takes the first result, because
+ * a town or a campsite has one obvious answer and only its position is
+ * wanted. That is exactly wrong for a named sight. `locationBias` is a
+ * preference rather than a bound, so a sight that doesn't exist where it was
+ * asked for is answered with a namesake somewhere else entirely: the same
+ * mechanism that put a dinner stop for Helsingør at a hotel in Greece (see
+ * MAX_MATCH_DISTANCE_KM). A candidate the curation phase invented, or spelled
+ * in a way Places doesn't recognise, would otherwise land on the map as a
+ * confident pin in the wrong country — and be routed through.
+ *
+ * So a result must be BOTH near the anchor and plausibly the thing that was
+ * asked for (nameLooksRight), the same pair of checks isUsableMatch applies
+ * to a plan's activities. No quality bar: a small trailhead or a village
+ * church may have almost no ratings and still be exactly right, and unlike
+ * the activity path there is no backfill here that a low-rated match would
+ * be crowding out.
+ *
+ * Returns Places' own spelling of the name, which is worth more than it
+ * looks: it collapses the model's variations ("Kronborg", "Kronborg Slot",
+ * "Kronborg Castle") onto one stable identity, which is what lets a repeated
+ * curation pass recognise a sight it has already proposed instead of adding
+ * it again.
+ *
+ * NOTE for whoever merges this against the reworked resolution (the
+ * quality-ladder/bestCandidate change landing in parallel): this is
+ * deliberately the same shape as `bestCandidate` with the quality bar
+ * dropped to zero and the distance bound made a parameter, and should become
+ * a call to it rather than a second copy of the checks. The one behaviour
+ * worth carrying over in the process is that ordering: `find` here takes
+ * Places' first passing result, and Places orders by prominence, so a
+ * well-known near-namesake ("Kronborg Bageri") can outrank the sight itself.
+ * `nameMatchScore` already fixes exactly that, and is not duplicated here.
+ */
+export async function verifyPlaceLocation(
+  query: string,
+  expectedName: string,
+  near: LatLng,
+  maxDistanceKm: number = MAX_MATCH_DISTANCE_KM,
+): Promise<VerifiedPlace | null> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — place verification requires real data and has no synthetic fallback.',
+    )
+  }
+  const results = await textSearch(query, near, apiKey)
+  const match = results.find(
+    (candidate) =>
+      haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
+        maxDistanceKm && nameLooksRight(expectedName, candidate.name),
+  )
+  return match ? { name: match.name, lat: match.lat, lng: match.lng } : null
+}
+
 export interface ProposedActivity {
   name: string
   town: string

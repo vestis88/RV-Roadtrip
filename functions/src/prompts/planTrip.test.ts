@@ -15,8 +15,8 @@ const RECORDED_HIGHLIGHTS = `\`\`\`json
       "country": "NO",
       "reasoning": "Dramatic scenery and family-friendly Olympic-era attractions, great for active families with kids.",
       "candidateStops": [
-        { "town": "Lillehammer", "country": "NO", "why": "Olympic sights and the Hunderfossen family theme park.", "priority": "must-see" },
-        { "town": "Geiranger", "country": "NO", "why": "World-famous fjord viewpoints.", "priority": "worth-a-detour" }
+        { "sight": "Hunderfossen Familiepark", "town": "Lillehammer", "country": "NO", "interest": "theme parks", "timeNeeded": "full-day", "why": "Olympic sights and the Hunderfossen family theme park.", "priority": "must-see" },
+        { "sight": "Geiranger Skywalk", "town": "Geiranger", "country": "NO", "interest": "viewpoints", "timeNeeded": "couple-of-hours", "why": "World-famous fjord viewpoints.", "priority": "worth-a-detour" }
       ]
     }
   ]
@@ -32,6 +32,7 @@ const RECORDED_OUTLINE = `\`\`\`json
       "type": "drive",
       "overnight": { "name": "Lillehammer Camping", "town": "Lillehammer", "country": "NO", "campsiteSuggestion": "Lillehammer Camping" },
       "drive": { "fromTown": "Oslo", "toTown": "Lillehammer", "slot": "morning" },
+      "sights": ["Hunderfossen Familiepark"],
       "highlightReason": "Gateway to the Olympic sights and Hunderfossen family park, matching the kids' interest in theme parks."
     },
     {
@@ -262,13 +263,19 @@ vi.mock('@anthropic-ai/sdk', () => ({
 // (rather than lazily inside a class body, the way the Anthropic one does),
 // so the binding has to be hoisted with it.
 const geocodeQueryMock = vi.hoisted(() => vi.fn())
+const verifyPlaceLocationMock = vi.hoisted(() => vi.fn())
 
 // placesApi also exports the googlePlacesApiKey secret constant, which
 // planTrip.ts's own module graph pulls in — spreading the real module keeps
-// that (and every other export) intact while swapping only geocodeQuery.
+// that (and every other export) intact while swapping only the two lookups
+// the curation phase makes: the base town, then the sight against it.
 vi.mock('../placesApi.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../placesApi.js')>()
-  return { ...actual, geocodeQuery: geocodeQueryMock }
+  return {
+    ...actual,
+    geocodeQuery: geocodeQueryMock,
+    verifyPlaceLocation: verifyPlaceLocationMock,
+  }
 })
 
 const SETTINGS_WITH_START = {
@@ -514,13 +521,25 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(onProgress).not.toHaveBeenCalledWith({ phase: 'highlights' })
   })
 
-  it('attaches geocoded lat/lng to every candidate stop', async () => {
+  it("locates each candidate at its SIGHT, verified against the base town", async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
     geocodeQueryMock.mockReset()
     geocodeQueryMock
       .mockResolvedValueOnce({ lat: 61.1153, lng: 10.4662 })
       .mockResolvedValueOnce({ lat: 62.1008, lng: 7.2064 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock
+      .mockResolvedValueOnce({
+        name: 'Hunderfossen Eventyrpark',
+        lat: 61.2426,
+        lng: 10.4185,
+      })
+      .mockResolvedValueOnce({
+        name: 'Geiranger Skywalk - Dalsnibba',
+        lat: 62.0433,
+        lng: 7.2686,
+      })
 
     const { generateRegionHighlights } = await import('./planTrip.js')
     const highlights = await generateRegionHighlights({
@@ -528,32 +547,68 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
       notesFreeText: '',
     })
 
-    const [lillehammer, geiranger] = highlights.regions[0].candidateStops
-    expect(lillehammer).toMatchObject({
+    const [hunderfossen, skywalk] = highlights.regions[0].candidateStops
+    // The sight's own coordinates, not the town's — the pin points at the
+    // thing the traveler is deciding on.
+    expect(hunderfossen).toMatchObject({
       town: 'Lillehammer',
-      lat: 61.1153,
-      lng: 10.4662,
+      lat: 61.2426,
+      lng: 10.4185,
+      // Places' spelling replaces Claude's, which is what gives a sight one
+      // stable identity across repeated curation passes.
+      sight: 'Hunderfossen Eventyrpark',
     })
-    expect(geiranger).toMatchObject({
-      town: 'Geiranger',
-      lat: 62.1008,
-      lng: 7.2064,
-    })
-    // Queried by "town, country", biased near the trip's start point.
+    expect(skywalk.lat).toBe(62.0433)
+
+    // The town is looked up first, biased near the trip's start point…
     expect(geocodeQueryMock).toHaveBeenCalledWith('Lillehammer, NO', {
       name: 'Oslo, Norway',
       lat: 59.9139,
       lng: 10.7522,
     })
+    // …and the sight is then checked against that town, by name and distance.
+    expect(verifyPlaceLocationMock).toHaveBeenCalledWith(
+      'Hunderfossen Familiepark, Lillehammer, NO',
+      'Hunderfossen Familiepark',
+      { lat: 61.1153, lng: 10.4662 },
+      30,
+    )
   })
 
-  it('degrades to a candidate with no coordinates when geocoding throws (e.g. no Places key)', async () => {
+  // The Helsingør-dinner-stop-in-Greece failure, applied to curation: a
+  // sight Places cannot find near the town it was claimed to be near is
+  // dropped, not pinned wherever the best namesake happens to be.
+  it('leaves a sight it cannot verify without coordinates, rather than guessing', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockResolvedValue({ lat: 61.1153, lng: 10.4662 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock.mockResolvedValue(null)
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    const [hunderfossen] = highlights.regions[0].candidateStops
+    // Everything else survives — only the coordinates are missing, which is
+    // what buildExploreCandidateWrites drops on.
+    expect(hunderfossen.sight).toBe('Hunderfossen Familiepark')
+    expect(hunderfossen.priority).toBe('must-see')
+    expect(hunderfossen.lat).toBeUndefined()
+    expect(hunderfossen.lng).toBeUndefined()
+  })
+
+  it('degrades to a candidate with no coordinates when the lookup throws (e.g. no Places key)', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
     geocodeQueryMock.mockReset()
     geocodeQueryMock.mockRejectedValue(
       new Error('GOOGLE_PLACES_API_KEY is not configured'),
     )
+    verifyPlaceLocationMock.mockReset()
 
     const { generateRegionHighlights } = await import('./planTrip.js')
     const highlights = await generateRegionHighlights({
@@ -561,23 +616,18 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
       notesFreeText: '',
     })
 
-    const [lillehammer] = highlights.regions[0].candidateStops
-    // Everything else survives — only the coordinates are missing.
-    expect(lillehammer.town).toBe('Lillehammer')
-    expect(lillehammer.priority).toBe('must-see')
-    expect(lillehammer.why).toContain('Olympic')
-    expect(lillehammer.lat).toBeUndefined()
-    expect(lillehammer.lng).toBeUndefined()
+    const [hunderfossen] = highlights.regions[0].candidateStops
+    expect(hunderfossen.town).toBe('Lillehammer')
+    expect(hunderfossen.why).toContain('Olympic')
+    expect(hunderfossen.lat).toBeUndefined()
   })
 
-  it('degrades to a candidate with no coordinates when the town does not resolve', async () => {
+  it('does not even look for the sight when its base town does not resolve', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
     geocodeQueryMock.mockReset()
-    // First town resolves, second returns no match at all.
-    geocodeQueryMock
-      .mockResolvedValueOnce({ lat: 61.1153, lng: 10.4662 })
-      .mockResolvedValueOnce(null)
+    geocodeQueryMock.mockResolvedValue(null)
+    verifyPlaceLocationMock.mockReset()
 
     const { generateRegionHighlights } = await import('./planTrip.js')
     const highlights = await generateRegionHighlights({
@@ -585,16 +635,55 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
       notesFreeText: '',
     })
 
-    const [lillehammer, geiranger] = highlights.regions[0].candidateStops
-    expect(lillehammer.lat).toBe(61.1153)
-    expect(geiranger.town).toBe('Geiranger')
-    expect(geiranger.lat).toBeUndefined()
+    // With no anchor there is nothing to check a match against, and an
+    // unchecked match is exactly the wrong-country pin this guards against.
+    expect(verifyPlaceLocationMock).not.toHaveBeenCalled()
+    expect(highlights.regions[0].candidateStops[0].lat).toBeUndefined()
   })
 
-  it('skips geocoding entirely when the trip has no start point to bias from', async () => {
+  // The prompt encourages several sights to share one base town, and that
+  // town is the anchor every one of them is verified against — so without
+  // this, a pass proposing three things to do around one town pays for three
+  // identical geocodes of it, on the call the traveler is waiting for.
+  it('geocodes a shared base town once, however many sights name it', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(
+      textResponse(`{
+        "regions": [
+          {
+            "region": "North Zealand",
+            "country": "DK",
+            "reasoning": "r",
+            "candidateStops": [
+              { "sight": "Kronborg Castle", "town": "Helsingør", "country": "DK", "why": "w", "priority": "must-see" },
+              { "sight": "M/S Maritime Museum", "town": "Helsingør", "country": "DK", "why": "w", "priority": "worth-a-detour" }
+            ]
+          }
+        ]
+      }`),
+    )
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockResolvedValue({ lat: 56.03, lng: 12.61 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock.mockImplementation((_query: string, name: string) =>
+      Promise.resolve({ name, lat: 56.04, lng: 12.62 }),
+    )
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    expect(geocodeQueryMock).toHaveBeenCalledTimes(1)
+    expect(verifyPlaceLocationMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('skips location lookups entirely when the trip has no start point to bias from', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
     geocodeQueryMock.mockReset()
+    verifyPlaceLocationMock.mockReset()
 
     const { generateRegionHighlights } = await import('./planTrip.js')
     const highlights = await generateRegionHighlights({
@@ -603,6 +692,7 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     })
 
     expect(geocodeQueryMock).not.toHaveBeenCalled()
+    expect(verifyPlaceLocationMock).not.toHaveBeenCalled()
     expect(highlights.regions[0].candidateStops[0].lat).toBeUndefined()
   })
 
@@ -635,9 +725,10 @@ const HIGHLIGHTS_WITH_BROKEN_TAIL = `{
       "country": "DK",
       "reasoning": "Mostly transit, but the belt bridges are a genuine sight in themselves.",
       "candidateStops": [
-        { "town": "Middelfart", "country": "DK", "why": "Bridge views over the Little Belt, and a harbour the kids can swim off.", "priority": "worth-a-detour" },
-        { "town": "Ribe", "country": "DK", "why": "Denmark's oldest town: cobbled lanes, storks on the rooftops, a Viking museum built for children.", "priority": "must-see" },
+        { "sight": "Lillebæltsbroen", "town": "Middelfart", "country": "DK", "why": "Bridge views over the Little Belt, and a harbour the kids can swim off.", "priority": "worth-a-detour" },
+        { "sight": "Ribe VikingeCenter", "town": "Ribe", "country": "DK", "why": "Denmark's oldest town: cobbled lanes, storks on the rooftops, a Viking museum built for children.", "priority": "must-see" },
         {
+          "sight": "Ch\u00e2teau de Bouillon",
           "town": "Bouillon",
           "country": "BE",
           "why "
@@ -657,8 +748,8 @@ describe('salvageJsonPrefix', () => {
     // Everything Claude finished writing survives; only the half-written
     // trailing candidate is lost.
     expect(
-      parsed.regions[0].candidateStops.map((s: { town: string }) => s.town),
-    ).toEqual(['Middelfart', 'Ribe'])
+      parsed.regions[0].candidateStops.map((s: { sight: string }) => s.sight),
+    ).toEqual(['Lillebæltsbroen', 'Ribe VikingeCenter'])
   })
 
   it('leaves valid JSON exactly as it found it', async () => {
@@ -734,9 +825,9 @@ describe('salvage on the highlights call', () => {
     })
 
     expect(createMock).toHaveBeenCalledTimes(2)
-    expect(highlights.regions[0].candidateStops.map((s) => s.town)).toEqual([
-      'Middelfart',
-      'Ribe',
+    expect(highlights.regions[0].candidateStops.map((s) => s.sight)).toEqual([
+      'Lillebæltsbroen',
+      'Ribe VikingeCenter',
     ])
   })
 

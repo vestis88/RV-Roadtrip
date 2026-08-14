@@ -134,6 +134,12 @@ export async function loadSharedTripView(
   // same derivation OverviewMapScreen uses). Stops with no day yet sort last.
   const dayIndexById = new Map(days.map((day) => [day.id, day.index]))
   const corridorStops: SharedTripStop[] = stopsSnap.docs
+    // A stop the travelers turned down is not part of their trip and never
+    // renders anywhere — it only exists so a later refresh doesn't suggest
+    // it again (see corridorStopStatusSchema). Dropped here rather than
+    // shipped to a guest who has no way to see it: the view filters to
+    // committed/locked anyway, so this is payload nobody reads.
+    .filter((doc) => (doc.data() as CorridorStop).status !== 'rejected')
     .map((doc) => {
       const stop = doc.data() as CorridorStop
       return {

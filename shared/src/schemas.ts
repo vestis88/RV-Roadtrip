@@ -289,11 +289,22 @@ export const tripDaySchema = z.object({
 // buildRegionHighlightsFromCandidates in functions/src/exploreCandidates.ts)
 // — 'locked' already means "the traveler wants this in the route" whether
 // it came from explore mode or a manual pin, so both count.
+//
+// 'rejected' (2026-08-13) is a sixth status and exists purely so a refresh
+// can be a merge. "Not interested" used to delete the doc, which was fine
+// while a refresh replaced the whole candidate set anyway; now that a
+// refresh keeps what's already there and only adds what's new, a deleted
+// stop is indistinguishable from one that was never proposed, so the very
+// next "Find more stops" would hand the traveler back everything they had
+// just turned down. A rejected stop is a tombstone: hidden everywhere a
+// candidate is shown, never seeded into a generation, and matched against
+// so the same place is not proposed twice.
 export const corridorStopStatusSchema = z.enum([
   'proposed',
   'committed',
   'locked',
   'candidate',
+  'rejected',
 ])
 
 export const corridorStopPrioritySchema = z.enum([
@@ -302,7 +313,23 @@ export const corridorStopPrioritySchema = z.enum([
   'nice-if-convenient',
 ])
 
+/**
+ * Roughly how much of a day a sight takes. Three buckets rather than a
+ * number of hours, because that is the honest resolution of the estimate and
+ * because it is what the routing actually needs: a full-day sight is a day
+ * that cannot also be a long drive.
+ */
+export const sightTimeNeededSchema = z.enum([
+  'couple-of-hours',
+  'half-day',
+  'full-day',
+])
+
 export const corridorStopSchema = z.object({
+  // For a sight-led candidate (2026-08-13, see below) this is the SIGHT's
+  // own name and coordinates, not the town's — the sight is what the
+  // traveler is deciding on, what the map pin should point at, and what the
+  // detour estimate should be measured to.
   name: z.string(),
   lat: z.number(),
   lng: z.number(),
@@ -315,6 +342,22 @@ export const corridorStopSchema = z.object({
   priority: corridorStopPrioritySchema.optional(),
   region: z.string().optional(),
   rank: z.number().optional(),
+  // Sights-led curation (2026-08-13). Curation now answers "what shouldn't
+  // we miss", so a candidate is a sight/activity with a town attached to
+  // sleep in, rather than a town with a reason attached. All three are
+  // optional and stay that way: every stop written before this existed is a
+  // town whose own name is the whole story (`baseTown` undefined means "this
+  // IS the place"), and a hand-dropped pin or a rescan find has no interest
+  // or duration behind it either.
+  //
+  // `baseTown` is the nearest sensible town to sleep in — the outline phase
+  // derives overnights from it. `interest` is the traveler's own stated
+  // interest (or a phrase from their notes) that this sight serves, so the
+  // match is visible on the card instead of something they take on trust.
+  // `timeNeeded` feeds pacing: see sightTimeNeededSchema.
+  baseTown: z.string().optional(),
+  interest: z.string().optional(),
+  timeNeeded: sightTimeNeededSchema.optional(),
 })
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per
@@ -648,6 +691,7 @@ export type DriveLeg = z.infer<typeof driveLegSchema>
 export type TripDay = z.infer<typeof tripDaySchema>
 export type CorridorStopStatus = z.infer<typeof corridorStopStatusSchema>
 export type CorridorStopPriority = z.infer<typeof corridorStopPrioritySchema>
+export type SightTimeNeeded = z.infer<typeof sightTimeNeededSchema>
 export type CorridorStop = z.infer<typeof corridorStopSchema>
 export type ReconcileDayChange = z.infer<typeof reconcileDayChangeSchema>
 export type ActivityCategory = z.infer<typeof activityCategorySchema>

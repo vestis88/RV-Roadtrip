@@ -1,5 +1,5 @@
 import { estimateDriveMinutes } from '@rv/shared'
-import type { CorridorStopPriority } from '@rv/shared'
+import type { CorridorStopPriority, SightTimeNeeded } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { googleMapsSearchUrl } from '../lib/mapLinks'
@@ -29,6 +29,19 @@ interface ExploreCandidateCardProps {
  * colours the level always had; only where they appear changed, from a
  * section heading the card sat under to the card itself.
  */
+/**
+ * How long a sight takes, in words a traveler reads rather than the enum
+ * the routing reasons with. It is on the card because it is the single
+ * fact that decides whether a stop fits the day it lands on — see
+ * PACING_RULES in functions/src/prompts/planTripPrompt.ts, which paces the
+ * day's driving against exactly this.
+ */
+const TIME_NEEDED_LABEL: Record<SightTimeNeeded, string> = {
+  'couple-of-hours': 'A couple of hours',
+  'half-day': 'Half a day',
+  'full-day': 'A full day',
+}
+
 const TIER_STYLE: Record<CorridorStopPriority, string> = {
   'must-see': 'bg-orange-600 text-white',
   'worth-a-detour': 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-50',
@@ -56,6 +69,10 @@ export function ExploreCandidateCard({
   onReject,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
+  // A sight whose base town is its own name is a place that IS the stop (a
+  // town curated before sights led the route, or a pin dropped by hand) —
+  // "Sleep in Otta" under a card headed "Otta" says nothing.
+  const showBaseTown = !!stop.baseTown && stop.baseTown !== stop.name
   return (
     <div
       ref={innerRef}
@@ -123,6 +140,43 @@ export function ExploreCandidateCard({
             <span className="chip chip-accent px-2 py-0.5 text-xs">Keeping</span>
           )}
         </div>
+        {/* What this stop actually is, now that a candidate is a sight
+          * rather than a town: where you'd sleep to see it, which of your
+          * own interests it answers, and how much of a day it takes. The
+          * interest in particular is the whole promise of the curation
+          * phase — showing it turns "trust us, this suits you" into
+          * something the traveler can check at a glance. All three are
+          * absent on a stop curated before sights led the route, and on a
+          * pin the traveler dropped themselves, so each stands alone. */}
+        {(showBaseTown || stop.interest || stop.timeNeeded) && (
+          <div
+            data-testid={`explore-candidate-facts-${stop.id}`}
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {showBaseTown && (
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                Sleep in {stop.baseTown}
+              </span>
+            )}
+            {stop.interest && (
+              <span
+                data-testid={`explore-candidate-serves-${stop.id}`}
+                className="chip chip-neutral px-2 py-0.5 text-xs"
+                title="The interest you named in Trip Setup that this stop is here for"
+              >
+                For: {stop.interest}
+              </span>
+            )}
+            {stop.timeNeeded && (
+              <span
+                data-testid={`explore-candidate-time-${stop.id}`}
+                className="chip chip-neutral px-2 py-0.5 text-xs"
+              >
+                {TIME_NEEDED_LABEL[stop.timeNeeded]}
+              </span>
+            )}
+          </div>
+        )}
         {stop.why && (
           <p className="text-xs leading-relaxed text-neutral-600 dark:text-neutral-300">
             {stop.why}

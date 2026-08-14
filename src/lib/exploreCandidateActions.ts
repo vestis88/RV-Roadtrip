@@ -128,15 +128,22 @@ export function describeExploreHighlightsError(error: unknown): string {
   return message
 }
 
-/** Triggers the cheap, repeatable highlights-only curation pass. */
+/**
+ * Triggers the cheap, repeatable highlights-only curation pass. The result
+ * is merged into the corridor, so `candidateCount` is what was ADDED and
+ * `alreadyKnown` is how much of the answer was already on the list — an
+ * older deployment returns only the former, hence the fallback.
+ */
 export async function generateExploreHighlights(
   tripId: string,
-): Promise<{ candidateCount: number }> {
-  const call = httpsCallable<{ tripId: string }, { candidateCount: number }>(
-    functions,
-    'generateExploreHighlights',
-    { timeout: LONG_CALLABLE_TIMEOUT_MS },
-  )
+): Promise<{ candidateCount: number; alreadyKnown: number }> {
+  const call = httpsCallable<
+    { tripId: string },
+    { candidateCount: number; alreadyKnown?: number }
+  >(functions, 'generateExploreHighlights', { timeout: LONG_CALLABLE_TIMEOUT_MS })
   const result = await call({ tripId })
-  return result.data
+  return {
+    candidateCount: result.data.candidateCount,
+    alreadyKnown: result.data.alreadyKnown ?? 0,
+  }
 }

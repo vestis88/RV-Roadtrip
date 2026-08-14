@@ -6,6 +6,7 @@ import {
   findNearbyCampsites,
   type ProposedActivity,
   type ProposedRestaurant,
+  verifyPlaceLocation,
 } from './placesApi.js'
 
 const NEAR = { lat: 61.1, lng: 10.5 }
@@ -619,5 +620,119 @@ describe('findNearbyCampsites — ordering', () => {
     )
 
     expect((await findNearbyCampsites(NEAR, 'NO', 1))[0] ?? null).toBeNull()
+  })
+})
+
+/**
+ * The gate that lets a named sight be trusted as a map pin. Curation now
+ * proposes sights rather than towns, and a sight — unlike a town — routinely
+ * doesn't exist where it was claimed to, at which point Places answers with
+ * whatever famous namesake it does know.
+ */
+describe('verifyPlaceLocation', () => {
+  const TOWN = { lat: 56.03, lng: 12.61 }
+
+  beforeEach(() => {
+    vi.stubEnv('GOOGLE_PLACES_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  function place(overrides: Record<string, unknown>) {
+    return {
+      id: 'p1',
+      displayName: { text: 'Kronborg Castle' },
+      location: { latitude: 56.038, longitude: 12.621 },
+      ...overrides,
+    }
+  }
+
+  it("accepts a nearby match under Places' own fuller name, and returns that name", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => jsonResponse({ places: [place({})] })),
+    )
+
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.toMatchObject({ name: 'Kronborg Castle', lat: 56.038 })
+  })
+
+  // Precisely the Helsingør-to-Greece shape: the right name, 2,000 km away,
+  // because locationBias is a preference and not a bound.
+  it('rejects a same-named match that is nowhere near the anchor', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        jsonResponse({
+          places: [place({ location: { latitude: 37.98, longitude: 23.72 } })],
+        }),
+      ),
+    )
+
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.toBeNull()
+  })
+
+  // The local version of the same failure: something well-known and close by
+  // that simply isn't the thing that was asked for.
+  it('rejects a nearby place whose name is nothing like the request', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        jsonResponse({
+          places: [place({ displayName: { text: 'Bilka Hypermarket' } })],
+        }),
+      ),
+    )
+
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.toBeNull()
+  })
+
+  // A trailhead or a village church can be exactly right with four reviews.
+  it('does not apply the quality bar that activity resolution uses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        jsonResponse({
+          places: [
+            place({
+              displayName: { text: 'Kronborg Castle' },
+              rating: undefined,
+              userRatingCount: undefined,
+            }),
+          ],
+        }),
+      ),
+    )
+
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.not.toBeNull()
+  })
+
+  it('honours a tighter distance bound than the default', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        jsonResponse({
+          places: [place({ location: { latitude: 56.2, longitude: 12.61 } })],
+        }),
+      ),
+    )
+
+    // ~19 km from the town: inside the default, outside a 5 km bound.
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.not.toBeNull()
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN, 5),
+    ).resolves.toBeNull()
   })
 })
