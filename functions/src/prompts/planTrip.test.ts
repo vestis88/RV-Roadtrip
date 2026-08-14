@@ -679,6 +679,42 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(verifyPlaceLocationMock).toHaveBeenCalledTimes(2)
   })
 
+  it('spends nothing on a candidate that already carries coordinates', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(
+      textResponse(`{
+        "regions": [
+          {
+            "region": "North Zealand",
+            "country": "DK",
+            "reasoning": "r",
+            "candidateStops": [
+              { "sight": "Kronborg Castle", "town": "Helsingør", "country": "DK", "why": "w", "priority": "must-see", "lat": 56.039, "lng": 12.621 },
+              { "sight": "M/S Maritime Museum", "town": "Helsingør", "country": "DK", "why": "w", "priority": "worth-a-detour" }
+            ]
+          }
+        ]
+      }`),
+    )
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockResolvedValue({ lat: 56.03, lng: 12.61 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock.mockImplementation((_query: string, name: string) =>
+      Promise.resolve({ name, lat: 56.04, lng: 12.62 }),
+    )
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
+    const highlights = await generateRegionHighlights({
+      settings: SETTINGS_WITH_START,
+      notesFreeText: '',
+    })
+
+    // Only the unlocated one is looked up, and the located one keeps the
+    // coordinates it arrived with rather than being re-resolved.
+    expect(verifyPlaceLocationMock).toHaveBeenCalledTimes(1)
+    expect(highlights.regions[0].candidateStops[0].lat).toBe(56.039)
+  })
+
   it('skips location lookups entirely when the trip has no start point to bias from', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))

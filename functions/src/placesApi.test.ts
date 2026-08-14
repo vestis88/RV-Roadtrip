@@ -717,6 +717,40 @@ describe('verifyPlaceLocation', () => {
     ).resolves.not.toBeNull()
   })
 
+  // The reason this routes through bestCandidate rather than taking Places'
+  // first passing result: Places orders by prominence, and a busy bakery
+  // named after the castle is more prominent than the castle. Both clear the
+  // name gate, so without nameMatchScore ordering the sight loses to its own
+  // namesake — and with no quality bar here, ratings must not rescue it
+  // either.
+  it('prefers the sight itself over a better-known near-namesake listed first', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        jsonResponse({
+          places: [
+            place({
+              id: 'bakery',
+              displayName: { text: 'Kronborg Bageri og Konditori' },
+              rating: 4.8,
+              userRatingCount: 2400,
+            }),
+            place({
+              id: 'castle',
+              displayName: { text: 'Kronborg Castle' },
+              rating: 4.5,
+              userRatingCount: 900,
+            }),
+          ],
+        }),
+      ),
+    )
+
+    await expect(
+      verifyPlaceLocation('Kronborg, Helsingør, DK', 'Kronborg', TOWN),
+    ).resolves.toMatchObject({ name: 'Kronborg Castle' })
+  })
+
   it('honours a tighter distance bound than the default', async () => {
     vi.stubGlobal(
       'fetch',

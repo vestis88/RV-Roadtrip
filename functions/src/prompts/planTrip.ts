@@ -457,6 +457,12 @@ async function locateCandidateSight(
   stop: RegionHighlightCandidate,
   townPointOf: (town: string, country: string) => Promise<LatLng | null>,
 ): Promise<RegionHighlightCandidate> {
+  // Already located — a candidate rebuilt from stored curation carries the
+  // coordinates a previous pass paid for, and Places has nothing to add.
+  // Today only the explore-commit path can supply those, and it doesn't come
+  // through here; the guard is what keeps that true for the next caller, on
+  // the one call the traveler sits and waits for.
+  if (stop.lat != null && stop.lng != null) return stop
   try {
     const townPoint = await townPointOf(stop.town, stop.country)
     if (!townPoint) {
@@ -571,6 +577,7 @@ export async function generateSkeletonFromHighlights(input: {
       summary: detail.summary,
       extraTimeReason: detail.extraTimeReason,
       highlightReason: outlineDay.highlightReason,
+      sights: outlineDay.sights,
       activities: detail.activities,
       restaurants: detail.restaurants,
     }

@@ -256,3 +256,107 @@ describe('pacingWarnings', () => {
     expect(warnings[0]).toContain('day 3')
   })
 })
+
+describe('pacingWarnings — sight load (rule 7)', () => {
+  const CASTLE = new Map<string, 'full-day' | 'half-day' | 'couple-of-hours'>([
+    ['Kronborg Castle', 'full-day'],
+    ['Frederiksborg Castle', 'full-day'],
+    ['Louisiana Museum', 'half-day'],
+    ['Rundetaarn', 'couple-of-hours'],
+  ])
+
+  /** Six even 200 km days: the trip average is 200 km. */
+  function evenTrip(): TripDay[] {
+    return evenDays(0, 6, 200)
+  }
+
+  it('says nothing when no day carries a sight', () => {
+    expect(pacingWarnings(evenTrip(), CASTLE)).toEqual([])
+  })
+
+  it('flags a full-day sight scheduled behind a full day of driving', () => {
+    const days = evenTrip()
+    days[2] = { ...days[2], sights: ['Kronborg Castle'] }
+
+    const warnings = pacingWarnings(days, CASTLE)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Kronborg Castle')
+    expect(warnings[0]).toContain('full-day')
+    // 200 km driven against the 100 km a full-day sight leaves room for.
+    expect(warnings[0]).toContain('200 km')
+    expect(warnings[0]).toContain('100 km')
+  })
+
+  it('accepts the same sight on a short day', () => {
+    const days = evenTrip()
+    days[2] = { ...driveDay(2, 'Helsingor', 60), sights: ['Kronborg Castle'] }
+
+    expect(pacingWarnings(days, CASTLE)).toEqual([])
+  })
+
+  // Exactly what rule 7 asks for: give the full-day sight a day that drives
+  // nothing at all.
+  it('accepts a full-day sight on a rest day', () => {
+    const days = evenTrip()
+    days[2] = day({
+      index: 2,
+      type: 'rest',
+      overnight: { name: 'Stop 2', lat: 0, lng: 0, country: 'SE' },
+      sights: ['Kronborg Castle'],
+    })
+
+    expect(pacingWarnings(days, CASTLE)).toEqual([])
+  })
+
+  it('flags two full-day sights on one day even where the driving is fine', () => {
+    const days = evenTrip()
+    days[2] = {
+      ...driveDay(2, 'Helsingor', 10),
+      sights: ['Kronborg Castle', 'Frederiksborg Castle'],
+    }
+
+    const warnings = pacingWarnings(days, CASTLE)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Kronborg Castle and Frederiksborg Castle')
+  })
+
+  // The heaviest sight sets the allowance — a full day doesn't get cheaper
+  // because something quick is scheduled beside it.
+  it('paces a mixed day against its heaviest sight', () => {
+    const days = evenTrip()
+    days[2] = {
+      ...driveDay(2, 'Helsingor', 190),
+      sights: ['Rundetaarn', 'Kronborg Castle'],
+    }
+
+    const warnings = pacingWarnings(days, CASTLE)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Kronborg Castle')
+  })
+
+  it('leaves a couple-of-hours sight to the ordinary per-day ceiling', () => {
+    const days = evenTrip()
+    days[2] = { ...driveDay(2, 'Kobenhavn', 260), sights: ['Rundetaarn'] }
+
+    expect(pacingWarnings(days, CASTLE)).toEqual([])
+  })
+
+  // A sight the traveler added themselves has no estimate; rule 7 reads that
+  // as half a day rather than as no constraint at all.
+  it('treats a sight with no estimate as a half-day', () => {
+    const days = evenTrip()
+    days[2] = { ...driveDay(2, 'Somewhere', 260), sights: ['A place they added'] }
+
+    const warnings = pacingWarnings(days, CASTLE)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('half-day')
+  })
+
+  it('reports each offending day, since each has its own fix', () => {
+    const days = evenTrip()
+    days[1] = { ...days[1], sights: ['Kronborg Castle'] }
+    days[4] = { ...days[4], sights: ['Frederiksborg Castle'] }
+
+    expect(pacingWarnings(days, CASTLE)).toHaveLength(2)
+  })
+})

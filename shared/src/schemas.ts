@@ -251,6 +251,14 @@ export const tripDaySchema = z.object({
   summary: z.string(),
   extraTimeReason: z.string().optional(),
   highlightReason: z.string().optional(),
+  // The curated sights this day was routed for, carried down from the route
+  // outline (see routeOutlineDaySchema.sights). The day's activities already
+  // contain them by name, but as five entries with no marker saying which
+  // two are the reason the trip comes here at all — so pacing cannot tell a
+  // day built around a full-day castle from a day with five nearby
+  // diversions. Absent on a plain connecting overnight, and on every day
+  // written before this existed.
+  sights: z.array(z.string()).optional(),
 })
 
 // Persistent, always-editable route corridor (2026-07-29): one entry per

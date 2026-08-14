@@ -1,4 +1,5 @@
-import type { TripDay } from '@rv/shared'
+import type { SightTimeNeeded, TripDay } from '@rv/shared'
+import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
 
 export interface PacingViolation {
   reason: string
@@ -110,7 +111,14 @@ const MIN_REMAINING_DRIVE_DAYS = 3
  * MAX_DRIVE_HOURS_TOLERANCE above), and the traveler is the one who knows
  * whether the stop was worth what it cost the end of the trip.
  */
-export function pacingWarnings(days: TripDay[]): string[] {
+export function pacingWarnings(
+  days: TripDay[],
+  sightTime: ReadonlyMap<string, SightTimeNeeded> = new Map(),
+): string[] {
+  return [...backloadWarnings(days), ...sightLoadWarnings(days, sightTime)]
+}
+
+function backloadWarnings(days: TripDay[]): string[] {
   const driveDays = days.filter((day) => day.type === 'drive' && day.drive)
   if (driveDays.length < MIN_DRIVE_DAYS_FOR_WARNING) return []
 
@@ -140,4 +148,115 @@ export function pacingWarnings(days: TripDay[]): string[] {
   return [
     `By the end of day ${worst.day.index + 1} (${worst.day.date}) this trip still has ${Math.round(worst.requiredKm)} km a day left to drive across its remaining ${worst.remainingDays} driving days — well above the ${Math.round(targetKm)} km a day it needs on average. The early stops are worth what they cost only if you're happy with that finish; otherwise this is the point to drop one or add a day.`,
   ]
+}
+
+/**
+ * The share of the trip's average day a sight of each size leaves free to
+ * drive — PACING_RULES rule 7, which until now existed only as instructions
+ * to the model with nothing checking the result.
+ *
+ * A day is made of driving AND seeing things, and the outline decides both,
+ * so the two can disagree: a castle that takes all day, scheduled behind a
+ * 350 km drive, is a castle the travelers arrive too late to walk into. The
+ * cost of that is entirely invisible in drive hours, which is what every
+ * other check here looks at.
+ */
+const SIGHT_DRIVE_ALLOWANCE: Record<SightTimeNeeded, number> = {
+  'full-day': 0.5,
+  'half-day': 1.0,
+  // Rule 3's ordinary per-day ceiling — a couple of hours constrains nothing
+  // beyond what already applies to every day, so this never fires on its own.
+  'couple-of-hours': 1.4,
+}
+
+/**
+ * A sight the traveler added themselves has no estimate attached, and rule 7
+ * says to read that as half a day: the middle bucket, so an unlabelled sight
+ * neither silently excuses a long drive nor blocks one.
+ */
+const DEFAULT_TIME_NEEDED: SightTimeNeeded = 'half-day'
+
+/**
+ * Advisory, like the back-loading measure above and for the same reason:
+ * whether a shorter visit is an acceptable price for reaching the next stop
+ * is the traveler's call, and a hard failure here would throw away an
+ * otherwise complete two-month generation over one day's ordering.
+ *
+ * One warning per offending day rather than one per trip — unlike
+ * back-loading, which is a single fact about the whole shape, each of these
+ * is a specific day with a specific fix (move the sight, shorten the drive,
+ * make it a rest day).
+ */
+function sightLoadWarnings(
+  days: TripDay[],
+  sightTime: ReadonlyMap<string, SightTimeNeeded>,
+): string[] {
+  const driveDays = days.filter((day) => day.type === 'drive' && day.drive)
+  if (driveDays.length === 0) return []
+  const totalKm = driveDays.reduce(
+    (sum, day) => sum + (day.drive?.distanceKm ?? 0),
+    0,
+  )
+  if (totalKm <= 0) return []
+  const targetKm = totalKm / driveDays.length
+
+  const warnings: string[] = []
+  for (const day of days) {
+    const sights = day.sights ?? []
+    if (sights.length === 0) continue
+    const needs = sights.map(
+      (sight) => sightTime.get(sight) ?? DEFAULT_TIME_NEEDED,
+    )
+
+    const fullDays = sights.filter((_, i) => needs[i] === 'full-day')
+    if (fullDays.length > 1) {
+      warnings.push(
+        `Day ${day.index + 1} (${day.date}) is built around ${fullDays.length} full-day sights — ${fullDays.join(' and ')}. Only one of them will actually get a day; the rest of that day is already spoken for.`,
+      )
+    }
+
+    // Rest days drive nothing, so the allowance is satisfied by construction
+    // — a full-day sight on a rest day is exactly what rule 7 asks for.
+    if (day.type === 'rest' || !day.drive) continue
+
+    const distanceKm = day.drive.distanceKm ?? 0
+    // The heaviest sight sets the day's allowance: a full-day sight does not
+    // become cheaper because something quick is scheduled beside it.
+    const tightest = needs.reduce(
+      (lowest, need) =>
+        SIGHT_DRIVE_ALLOWANCE[need] < SIGHT_DRIVE_ALLOWANCE[lowest]
+          ? need
+          : lowest,
+      'couple-of-hours' as SightTimeNeeded,
+    )
+    const allowanceKm = targetKm * SIGHT_DRIVE_ALLOWANCE[tightest]
+    if (distanceKm > allowanceKm) {
+      const heaviest = sights[needs.indexOf(tightest)]
+      warnings.push(
+        `Day ${day.index + 1} (${day.date}) drives ${Math.round(distanceKm)} km and is also the day for ${heaviest}, a ${tightest} sight — that leaves room for about ${Math.round(allowanceKm)} km. Either the drive moves to another day or the sight does, or it stops being the reason to come here.`,
+      )
+    }
+  }
+  return warnings
+}
+
+/**
+ * The timeNeeded lookup sightLoadWarnings wants, keyed by the sight name the
+ * outline copies verbatim onto each day. Built from the curation the
+ * generation already holds, so the check costs nothing beyond a map walk —
+ * the estimates were paid for in the highlights pass.
+ *
+ * A candidate with no estimate is simply absent, which sightLoadWarnings
+ * reads as the default half-day rather than as "no constraint".
+ */
+export function sightTimeFromHighlights(
+  highlights: RegionHighlightsResponse | undefined,
+): Map<string, SightTimeNeeded> {
+  const map = new Map<string, SightTimeNeeded>()
+  for (const region of highlights?.regions ?? []) {
+    for (const candidate of region.candidateStops) {
+      if (candidate.timeNeeded) map.set(candidate.sight, candidate.timeNeeded)
+    }
+  }
+  return map
 }

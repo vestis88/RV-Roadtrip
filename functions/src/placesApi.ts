@@ -137,6 +137,16 @@ const RESTAURANT_VERIFY_BAR: QualityBar = {
 }
 
 /**
+ * Admits everything, for the one caller that must not judge quality:
+ * verifyPlaceLocation is locating a named sight, and a small trailhead or a
+ * village church may have no ratings at all and still be exactly right.
+ * Expressed as a bar rather than as a branch so that path shares one
+ * definition of "usable match" with every other, instead of drifting into a
+ * second copy of the distance and name checks — which is what it was.
+ */
+const NO_QUALITY_BAR: QualityBar = { minRating: 0, minRatingCount: 0 }
+
+/**
  * What a slot is filled with when Claude's suggestion could not be verified.
  *
  * The traveler was asked whether an unfindable suggestion should become a
@@ -308,12 +318,13 @@ function isUsableMatch(
   expectedName: string | undefined,
   excludeIds: Set<string>,
   bar: QualityBar,
+  maxDistanceKm: number = MAX_MATCH_DISTANCE_KM,
 ): boolean {
   return (
     meetsQualityBar(candidate, bar) &&
     !excludeIds.has(candidate.id) &&
     haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
-      MAX_MATCH_DISTANCE_KM &&
+      maxDistanceKm &&
     nameLooksRight(expectedName, candidate.name)
   )
 }
@@ -350,10 +361,11 @@ function bestCandidate(
   expectedName: string | undefined,
   excludeIds: Set<string>,
   bar: QualityBar,
+  maxDistanceKm: number = MAX_MATCH_DISTANCE_KM,
 ): PlaceCandidate | undefined {
   return candidates
     .filter((candidate) =>
-      isUsableMatch(candidate, near, expectedName, excludeIds, bar),
+      isUsableMatch(candidate, near, expectedName, excludeIds, bar, maxDistanceKm),
     )
     .sort(
       (a, b) =>
@@ -737,15 +749,12 @@ export interface VerifiedPlace {
  * curation pass recognise a sight it has already proposed instead of adding
  * it again.
  *
- * NOTE for whoever merges this against the reworked resolution (the
- * quality-ladder/bestCandidate change landing in parallel): this is
- * deliberately the same shape as `bestCandidate` with the quality bar
- * dropped to zero and the distance bound made a parameter, and should become
- * a call to it rather than a second copy of the checks. The one behaviour
- * worth carrying over in the process is that ordering: `find` here takes
- * Places' first passing result, and Places orders by prominence, so a
- * well-known near-namesake ("Kronborg Bageri") can outrank the sight itself.
- * `nameMatchScore` already fixes exactly that, and is not duplicated here.
+ * Ordering is `bestCandidate`'s, which is the point of routing through it
+ * rather than keeping a second copy of the checks: this used to take Places'
+ * first passing result, and Places orders by prominence, so a well-known
+ * near-namesake ("Kronborg Bageri") outranked the sight itself. Identity
+ * decides here, and with NO_QUALITY_BAR admitting everything, nothing else
+ * can override it.
  */
 export async function verifyPlaceLocation(
   query: string,
@@ -760,10 +769,13 @@ export async function verifyPlaceLocation(
     )
   }
   const results = await textSearch(query, near, apiKey)
-  const match = results.find(
-    (candidate) =>
-      haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
-        maxDistanceKm && nameLooksRight(expectedName, candidate.name),
+  const match = bestCandidate(
+    results,
+    near,
+    expectedName,
+    new Set<string>(),
+    NO_QUALITY_BAR,
+    maxDistanceKm,
   )
   return match ? { name: match.name, lat: match.lat, lng: match.lng } : null
 }

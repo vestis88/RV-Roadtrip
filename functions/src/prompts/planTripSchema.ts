@@ -39,6 +39,11 @@ export const planTripSkeletonDaySchema = z.object({
   summary: z.string(),
   extraTimeReason: z.string().optional(),
   highlightReason: z.string().optional(),
+  // Carried straight from the outline day (see routeOutlineDaySchema.sights)
+  // so it survives the detail phase and reaches the TripDay — pacing needs to
+  // know how much of the day the sights themselves eat, and the detail call
+  // neither knows nor echoes that back.
+  sights: z.array(z.string()).optional(),
   activities: z.array(skeletonActivitySchema).length(5),
   restaurants: z.array(skeletonRestaurantSchema).length(9),
 })

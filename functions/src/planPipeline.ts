@@ -159,6 +159,7 @@ export async function resolveSkeletonDay(
         ...(skDay.highlightReason
           ? { highlightReason: skDay.highlightReason }
           : {}),
+        ...(skDay.sights?.length ? { sights: skDay.sights } : {}),
       },
       activities,
       restaurants: [...breakfast, ...lunch, ...dinner],
