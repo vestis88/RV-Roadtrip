@@ -69,6 +69,10 @@ export function ExploreCandidateCard({
   onReject,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
+  // A sight whose base town is its own name is a place that IS the stop (a
+  // town curated before sights led the route, or a pin dropped by hand) —
+  // "Sleep in Otta" under a card headed "Otta" says nothing.
+  const showBaseTown = !!stop.baseTown && stop.baseTown !== stop.name
   return (
     <div
       ref={innerRef}
@@ -144,12 +148,12 @@ export function ExploreCandidateCard({
           * something the traveler can check at a glance. All three are
           * absent on a stop curated before sights led the route, and on a
           * pin the traveler dropped themselves, so each stands alone. */}
-        {(stop.baseTown || stop.interest || stop.timeNeeded) && (
+        {(showBaseTown || stop.interest || stop.timeNeeded) && (
           <div
             data-testid={`explore-candidate-facts-${stop.id}`}
             className="flex flex-wrap items-center gap-1.5"
           >
-            {stop.baseTown && stop.baseTown !== stop.name && (
+            {showBaseTown && (
               <span className="text-xs text-neutral-500 dark:text-neutral-400">
                 Sleep in {stop.baseTown}
               </span>
