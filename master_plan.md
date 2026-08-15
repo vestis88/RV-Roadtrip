@@ -523,6 +523,45 @@ candidate list below **in route order** (2026-08-12).
 
 ---
 
+## 8a. DEBUGGING AGAINST THE REAL APIS
+
+Every model-facing behaviour in this app is decided by a prompt plus two
+third-party lookups, and for a long time the only way to see what any of it
+actually did was to run the deployed app from a phone, against the traveler's
+own trip. That is why the downhill-biking miss (2026-08-15) was diagnosed by
+reading the prompt and reasoning about what it must have done: the two
+hypotheses that mattered — the bike parks were never proposed, versus they
+were proposed and Places verification threw them away — produce identical
+symptoms on screen and have completely different fixes.
+
+`npm run debug:curate` answers that question directly. It calls
+`generateRegionHighlights` with the same prompt, model and Places
+verification production uses, and prints every candidate with whether it
+located. No Firestore, no trip, no emulator, nothing written anywhere.
+
+```
+cp .env.debug.local.example .env.debug.local     # then fill in the two keys
+npm run debug:curate -- --to "Sundsvall, Sweden" \
+  --interests "downhill mountain biking" \
+  --notes "we want lift-served downhill riding"
+```
+
+A `📍` candidate was proposed and found; a `❌` was proposed and rejected by
+verification, with the reason logged above the report; a place that appears
+in neither list was never proposed at all, which points at the prompt rather
+than at Places.
+
+It reads `CLAUDE_API_KEY` and `GOOGLE_PLACES_API_KEY` through the same
+`defineSecret(...).value()` the deployed functions use — which falls back to
+`process.env` outside a deployed runtime — so there is no test-only branch
+anywhere in the pipeline it exercises. Both keys already exist in Google
+Secret Manager for the deployed functions.
+
+It costs real money: one Claude call plus one Places text search per distinct
+base town and per candidate sight. Cents per run, but not something to loop.
+
+---
+
 ## 9. SEQUENTIAL TASK LIST WITH TEST GATES
 
 **Rules for implementation models:**

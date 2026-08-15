@@ -15,6 +15,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+# The debug tools' key template — the template only, never the filled-in
+# .env.debug.local beside it, which the line above keeps out.
+!.env.debug.local.example
 .firebase/
 test-results/
 playwright-report/

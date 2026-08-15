@@ -17,6 +17,7 @@ const skeletonActivitySchema = z.object({
     'museum',
     'beach',
     'playground',
+    'bike',
     'ski',
     'other',
   ]),

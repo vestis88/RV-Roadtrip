@@ -208,12 +208,12 @@ describe('enrichActivities', () => {
 
     // One slot per category, so the rotation has to reach 'other' — which is
     // last. Keep this at the number of categories in ACTIVITY_PLACE_TYPE.
-    await backfillActivities(NEAR, new Set<string>(), 'test-key', 7, false)
+    await backfillActivities(NEAR, new Set<string>(), 'test-key', 8, false)
 
     const nearbyRequests = fetchMock.mock.calls
       .map((call) => requestOf(call as [string, { body: string }]))
       .filter((request) => request.url.includes('searchNearby'))
-    expect(nearbyRequests.length).toBeGreaterThanOrEqual(7)
+    expect(nearbyRequests.length).toBeGreaterThanOrEqual(8)
     expect(
       nearbyRequests.filter((request) => request.includedTypes === undefined),
     ).toHaveLength(1)

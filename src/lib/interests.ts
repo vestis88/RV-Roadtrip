@@ -9,9 +9,11 @@ export const PRESET_INTERESTS = [
   'lakes',
   'wildlife',
   'cycling',
-  // Added after a downhill-focused trip came back with no ski resorts:
-  // free entry always accepted it, but nothing on the list suggested that
-  // an activity — a thing you travel somewhere to DO — was a kind of
-  // interest this planner takes.
+  // Added after a trip whose whole point was downhill mountain biking came
+  // back with none of the bike parks. Free entry always accepted the word;
+  // nothing on the list suggested that an activity — a thing you travel
+  // somewhere to DO, rather than to look at — was a kind of interest this
+  // planner takes at all.
+  'mountain biking',
   'skiing',
 ] as const

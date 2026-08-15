@@ -33,7 +33,20 @@ const MIN_RATING_COUNT = 50
 const SEARCH_RADIUS_METERS = 30_000
 const ACTIVITIES_PER_DAY = 5
 const RESTAURANTS_PER_MEAL = 3
-const MAX_BACKFILL_ATTEMPTS = 8
+/**
+ * How many category slots backfillActivities may try before giving up.
+ *
+ * Must comfortably exceed the number of categories, not merely match it.
+ * The loop takes one category per attempt and a category with nothing usable
+ * nearby costs an attempt without filling a slot — which is the normal case
+ * inland, where there is no beach and often no museum. At exactly one
+ * rotation, a rural day that misses on three categories can only ever return
+ * five of its seven slots, and adding a category (bike, ski) would silently
+ * make that worse rather than better. Two rotations cost nothing in API
+ * calls, since each category's pool is fetched at most once however many
+ * attempts land on it.
+ */
+const MAX_BACKFILL_ATTEMPTS = 16
 // Dismiss-and-requeue (implemented 2026-07-30): a couple of extra
 // activities/restaurants resolved at generation time, alongside the
 // displayed count, and stored with reserve: true (see activitySchema's own
@@ -57,6 +70,7 @@ const ACTIVITY_PLACE_TYPE: Record<ActivityCategory, string | undefined> = {
   museum: 'museum',
   beach: 'beach',
   playground: 'playground',
+  bike: 'cycling_park',
   ski: 'ski_resort',
   other: undefined,
 }

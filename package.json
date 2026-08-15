@@ -15,7 +15,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:functions": "npm run build -w functions && firebase emulators:exec --project demo-rv-trip-planner --only firestore,auth,functions \"npm run test -w functions\"",
-    "test:e2e": "npm run build -w functions && playwright test"
+    "test:e2e": "npm run build -w functions && playwright test",
+    "debug:curate": "npm run build -w shared && npm run debug:curate -w functions --"
   },
   "dependencies": {
     "@rv/shared": "*",

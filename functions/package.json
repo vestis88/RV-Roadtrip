@@ -15,7 +15,8 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "test": "vitest run"
+    "test": "vitest run",
+    "debug:curate": "esbuild src/debug/curate.ts --bundle --platform=node --target=node20 --format=esm --outfile=lib/debug-curate.mjs --external:firebase-admin --external:firebase-admin/* --external:firebase-functions --external:firebase-functions/* --external:@anthropic-ai/sdk --external:zod && node lib/debug-curate.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
