@@ -22,6 +22,7 @@ const ACTIVITY_CATEGORIES: ActivityCategory[] = [
   'museum',
   'beach',
   'playground',
+  'ski',
   'other',
 ]
 

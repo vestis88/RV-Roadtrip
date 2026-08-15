@@ -11,7 +11,15 @@ const skeletonPointSchema = z.object({
 const skeletonActivitySchema = z.object({
   name: z.string(),
   town: z.string(),
-  category: z.enum(['sight', 'hike', 'museum', 'beach', 'playground', 'other']),
+  category: z.enum([
+    'sight',
+    'hike',
+    'museum',
+    'beach',
+    'playground',
+    'ski',
+    'other',
+  ]),
   kidFriendly: z.boolean(),
   blurb: z.string(),
 })

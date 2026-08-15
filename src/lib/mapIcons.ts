@@ -6,6 +6,7 @@ export const CATEGORY_ICON: Record<ActivityCategory, string> = {
   museum: '🏛️',
   beach: '🌊',
   playground: '🎈',
+  ski: '⛷️',
   other: '📍',
 }
 export const RESTAURANT_ICON = '🍴'

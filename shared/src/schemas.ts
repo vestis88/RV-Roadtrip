@@ -388,6 +388,13 @@ export const activityCategorySchema = z.enum([
   'museum',
   'beach',
   'playground',
+  // Places people travel TO DO something, rather than to look at (added
+  // 2026-08-15). Reported as "a search focused on downhill returned none of
+  // the big resorts": with no category for it, a ski area could only be
+  // filed as 'other', which sends no type filter at all to the nearby
+  // search — so a day at a resort was backfilled with whatever museums and
+  // playgrounds happened to be within 30 km.
+  'ski',
   'other',
 ])
 

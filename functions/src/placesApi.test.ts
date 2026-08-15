@@ -206,12 +206,14 @@ describe('enrichActivities', () => {
       .mockImplementation(() => jsonResponse({ places: [goodPlace()] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await backfillActivities(NEAR, new Set<string>(), 'test-key', 6, false)
+    // One slot per category, so the rotation has to reach 'other' — which is
+    // last. Keep this at the number of categories in ACTIVITY_PLACE_TYPE.
+    await backfillActivities(NEAR, new Set<string>(), 'test-key', 7, false)
 
     const nearbyRequests = fetchMock.mock.calls
       .map((call) => requestOf(call as [string, { body: string }]))
       .filter((request) => request.url.includes('searchNearby'))
-    expect(nearbyRequests.length).toBeGreaterThanOrEqual(6)
+    expect(nearbyRequests.length).toBeGreaterThanOrEqual(7)
     expect(
       nearbyRequests.filter((request) => request.includedTypes === undefined),
     ).toHaveLength(1)
@@ -220,6 +222,63 @@ describe('enrichActivities', () => {
         request.includedTypes?.includes('point_of_interest'),
       ),
     ).toBe(false)
+  })
+
+  // The 'point_of_interest' 400 above was found in production, by a day that
+  // came back with no activities at all — one wrong type in the category
+  // table took the whole backfill down with it. Types are added to that
+  // table by hand (see ACTIVITY_PLACE_TYPE) and cannot be checked from the
+  // development sandbox, so the next wrong one is a question of when. It
+  // should cost that category its nearby results and nothing else: the text
+  // search asks the same question in words and still answers.
+  it('degrades one rejected category to text search instead of failing the day', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes('searchNearby')) {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          text: async () => 'Invalid includedTypes',
+          json: async () => ({}),
+        })
+      }
+      return jsonResponse({ places: [goodPlace()] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const filled = await backfillActivities(
+      NEAR,
+      new Set<string>(),
+      'test-key',
+      3,
+      false,
+    )
+
+    expect(filled).toHaveLength(3)
+    // Loudly, so a bad mapping is greppable rather than a quiet shortfall.
+    expect(error).toHaveBeenCalled()
+    error.mockRestore()
+  })
+
+  // Anything that isn't our own malformed request is a fact about the key,
+  // not about one category — swallowing it is how an outage turns into "the
+  // app just stopped suggesting things".
+  it('still fails loudly when the whole key is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          ok: false,
+          status: 403,
+          text: async () => 'PERMISSION_DENIED',
+          json: async () => ({}),
+        }),
+      ),
+    )
+
+    await expect(
+      backfillActivities(NEAR, new Set<string>(), 'test-key', 3, false),
+    ).rejects.toThrow(/403/)
   })
 })
 

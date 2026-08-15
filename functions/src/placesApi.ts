@@ -57,6 +57,7 @@ const ACTIVITY_PLACE_TYPE: Record<ActivityCategory, string | undefined> = {
   museum: 'museum',
   beach: 'beach',
   playground: 'playground',
+  ski: 'ski_resort',
   other: undefined,
 }
 
@@ -483,6 +484,21 @@ async function nearbySearch(
   )
   if (!response.ok) {
     const body = await response.text().catch(() => '')
+    // A 400 here is our own request being wrong, and in practice that means
+    // one thing: `includedTypes` carrying a value this API doesn't recognise
+    // (see ACTIVITY_PLACE_TYPE's note on why 'other' sends none at all).
+    // That is a bug in a single category's mapping, and it must not cost a
+    // day every activity it was going to get — the text-search half of
+    // categoryPool asks the same question in words and still answers. Every
+    // other status still throws: a 401, 403 or 429 is a fact about the whole
+    // key, not about this category, and silently degrading it is how an
+    // outage becomes "the app just stopped suggesting things".
+    if (response.status === 400) {
+      console.error(
+        `Places nearby search rejected includedTypes "${includedType}" — that category will fall back to text search alone until the mapping is fixed. ${body.slice(0, 500)}`,
+      )
+      return []
+    }
     throw new Error(
       `Places nearby search failed with ${response.status}: ${body.slice(0, 500)}`,
     )

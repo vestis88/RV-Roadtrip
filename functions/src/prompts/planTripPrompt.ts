@@ -16,25 +16,27 @@ const PACING_RULES = `Pacing rules (follow exactly):
 
 const HIGHLIGHTS_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families. Your ONLY job right now is curation, not scheduling: figure out what these travelers genuinely shouldn't miss along this trip, before anyone worries about dates or drive times.
 
-You are choosing SIGHTS, not towns. Each candidate is one specific thing to see or do — a castle, a museum, a marked trail, a beach, a viewpoint, a theme park, a boat trip, a cave, a market — that matches these travelers' stated interests or something they wrote in their notes. Every candidate also names the nearest sensible town to sleep in while seeing it, but that town is logistics, not the choice: the route will be built around the sights, and somewhere to spend the night is found near them.
+You are choosing SIGHTS, not towns. Each candidate is one specific thing to see or do — a castle, a museum, a marked trail, a beach, a viewpoint, a theme park, a boat trip, a cave, a market, a ski area, a bike park, a climbing crag, a surf break, a spa, a national park — that matches these travelers' stated interests or something they wrote in their notes. Places people GO SOMEWHERE TO DO count exactly as much as places people go to look at; an interest like skiing, riding or paddling is answered by the resort or the centre that is genuinely the best one, not by a viewpoint near it. Every candidate also names the nearest sensible town to sleep in while seeing it, but that town is logistics, not the choice: the route will be built around the sights, and somewhere to spend the night is found near them.
 
 You will be given the trip's settings (start/finish points, preferred countries, travelers, interests) and the traveler's freeform notes. ALWAYS take the freeform notes into account — they may name specific places, regions, or must-sees that override the defaults.
 
-Step 1: work out the rough geographic corridor of countries/regions the trip is likely to pass through, from startPoint to endPoint (favoring preferredCountries where given).
+Step 1: take the stated interests and notes ONE AT A TIME and ask where that interest is genuinely best served within reach of this trip. Name the places that are the real answer — the ones someone who knows the subject would name if asked "where do you go for this?" — regardless of whether they sit on the direct line from startPoint to endPoint. If an interest has famous, obvious answers in this part of the world, they belong on the list; omitting them because they are off to one side is the single worst thing you can do here, because the later scheduling step can only choose from what you list. It cannot rediscover what you left out.
 
-Step 2: for each region/country in that corridor, THINK about what this specific group of travelers — given their interests, ages, and any freeform notes — would consider the best things to see. Write a short "reasoning" sentence per region explaining what kind of traveler it's good for and why. This is you actually reasoning about the region's character (e.g. "fjord country, best for hiking and dramatic viewpoints" or "big cities with world-class museums, best for older kids"), not a generic list.
+Step 2: work out the trip's geographic corridor — but derive it from the places step 1 found, plus whatever is worth seeing on the way between them and the endPoint, NOT from the shortest line between startPoint and endPoint. The corridor is a budget, not a boundary: on a trip of any length a detour of a few hours to reach the best example of what these travelers came for is exactly the trade the next step exists to weigh, and "must-see" is how you tell it the detour is worth paying. A trip whose stated interest lives 200 km off the direct route and which lists only what happens to sit beside the motorway has answered the wrong question.
 
-Step 3: for each region, list candidate sights as a ranked shortlist:
+Step 3: group what you found into regions/countries (favoring preferredCountries where given) and write a short "reasoning" sentence per region explaining what kind of traveler it's good for and why. This is you actually reasoning about the region's character (e.g. "fjord country, best for hiking and dramatic viewpoints", "the Swedish mountain resorts, where the country's real downhill skiing is", or "big cities with world-class museums, best for older kids"), not a generic list.
+
+Step 4: for each region, list candidate sights as a ranked shortlist:
 - "must-see": genuinely exceptional and worth real detour/time cost for these travelers' interests.
 - "worth-a-detour": strong candidates if the schedule allows.
 - "nice-if-convenient": fine to include only if it's already roughly on the way.
 
 Rules for each candidate:
-1. "sight" MUST be the real, searchable name of a real place, spelled the way Google Maps would have it (e.g. "Kronborg Castle", "Møns Klint", "Hunderfossen Eventyrpark"). It is looked up against real map data afterwards and DISCARDED if it can't be found where you said it is, so a generic activity ("hiking in the mountains", "a fjord cruise") is a wasted candidate — name the trail, the pier, the operator's departure point.
+1. "sight" MUST be the real, searchable name of a real place, spelled the way Google Maps would have it (e.g. "Kronborg Castle", "Møns Klint", "Hunderfossen Eventyrpark", "Åre Skistar", "Vemdalsskalet"). It is looked up against real map data afterwards and DISCARDED if it can't be found where you said it is, so a generic activity ("hiking in the mountains", "a fjord cruise", "skiing in the mountains") is a wasted candidate — name the trail, the pier, the operator's departure point, the resort's own base area.
 2. "town" is the nearest town with somewhere an RV could realistically spend the night, close enough to the sight to be a sensible base — roughly within half an hour's drive. Several sights may share the same base town; that is normal and good.
 3. "interest" names WHICH of this group's stated interests the sight serves. Use the traveler's own wording from "interests" verbatim when one matches; otherwise quote the short phrase from their notes that it answers. One sight, one interest — the strongest one.
 4. "timeNeeded" is roughly how much of a day it eats, as one of "couple-of-hours", "half-day" or "full-day". Be honest: this is used to stop a full-day sight being scheduled on top of a long drive, and inflating or deflating it directly produces a day the travelers cannot actually complete.
-5. Cover the stated interests broadly rather than returning ten variations of the same one. If an interest has nothing to offer along this corridor, leave it out rather than padding it.
+5. Cover the stated interests broadly rather than returning ten variations of the same one. Leave an interest out only if this part of the world genuinely has nothing to offer it — "nothing close to the direct route" is not the same thing and is not a reason to drop it. Where an interest is the clear focus of the trip, the best places for it must be present even if they cost a detour; mark them "must-see" and let the scheduling step decide what fits.
 
 The "why" is what the traveler actually reads when deciding whether to keep or drop this, so make it substantial: 2-4 sentences that first describe what is genuinely there — what you see and do, how long it takes, what the setting is like — and then connect that to THESE travelers' stated interests, ages, and freeform notes. Write it so someone who has never heard of the place could decide on it from your description alone, without going and looking it up elsewhere. Do not write a single generic sentence.
 
@@ -157,7 +159,7 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
       "index": number,
       "summary": string,
       "extraTimeReason"?: string,
-      "activities": [ { "name": string, "town": string, "category": "sight"|"hike"|"museum"|"beach"|"playground"|"other", "kidFriendly": boolean, "blurb": string } ] (exactly 5),
+      "activities": [ { "name": string, "town": string, "category": "sight"|"hike"|"museum"|"beach"|"playground"|"ski"|"other", "kidFriendly": boolean, "blurb": string } ] (exactly 5),
       "restaurants": [ { "name": string, "town": string, "meal": "breakfast"|"lunch"|"dinner", "cuisine"?: string, "blurb": string } ] (exactly 9, 3 per meal)
     }
   ]
