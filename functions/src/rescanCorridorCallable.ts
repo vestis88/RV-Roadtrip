@@ -8,6 +8,7 @@ import { googlePlacesApiKey } from './placesApi.js'
 import {
   MAX_RESCAN_RADIUS_KM,
   claudeApiKey,
+  droppedForDistance,
   generateRescanCandidates,
 } from './prompts/rescanCorridor.js'
 import { findStopsForQuery } from './querySearch.js'
@@ -62,7 +63,7 @@ export async function runRescanCorridor(
   centerName?: string,
   waypointNames?: string[],
   deadlineMs?: number,
-): Promise<number> {
+): Promise<{ stopsWritten: number; droppedTooFar: number }> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
   const tripSnap = await tripRef.get()
@@ -129,7 +130,7 @@ export async function runRescanCorridor(
     ),
   )
 
-  return finds.length
+  return { stopsWritten: finds.length, droppedTooFar: droppedForDistance(finds) }
 }
 
 export const rescanCorridor = onCall(
@@ -218,7 +219,7 @@ export const rescanCorridor = onCall(
       'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
     })
     try {
-      const stopsWritten = await runRescanCorridor(
+      const { stopsWritten, droppedTooFar } = await runRescanCorridor(
         tripId,
         center,
         radiusKm,
@@ -232,8 +233,11 @@ export const rescanCorridor = onCall(
         'planMeta.rescanStatus': 'idle',
         'planMeta.rescanLastRunAt': new Date().toISOString(),
         'planMeta.rescanLastFoundCount': stopsWritten,
+        // Recorded so "nothing found" can stop being said when it isn't
+        // true — see droppedForDistance.
+        'planMeta.rescanLastDroppedTooFar': droppedTooFar,
       })
-      return { stopsWritten }
+      return { stopsWritten, droppedTooFar }
     } catch (error) {
       // Cleared on the way out either way: a status left at 'generating' by a
       // failed run would show a spinner forever, which is a worse lie than

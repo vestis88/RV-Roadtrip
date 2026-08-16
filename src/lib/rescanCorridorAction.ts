@@ -1,11 +1,50 @@
 import { httpsCallable } from 'firebase/functions'
-import type { LatLng } from '@rv/shared'
+import { haversineDistanceKm, type LatLng } from '@rv/shared'
 import { functions } from './firebase'
 import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 
-/** A fixed, conservative default — comfortably under the callable's own
- * MAX_RESCAN_RADIUS_KM cap. No radius picker anywhere this is used yet. */
+/**
+ * The fallback when the map hasn't reported its bounds yet. Everything else
+ * uses the viewport — see visibleRadiusKm.
+ */
 export const RESCAN_RADIUS_KM = 25
+
+/** The callable's own cap, mirrored so the client can say when it bites. */
+export const MAX_RESCAN_RADIUS_KM = 50
+
+/**
+ * How far "this area" actually reaches, from what the traveler can see.
+ *
+ * The button says "Rescan this area" over a map, and the area it searched
+ * was a fixed 25 km circle around the centre no matter what was on screen.
+ * On the report that prompted this the visible map ran from Båstad to
+ * Markaryd — some 80 km across — so most of what the traveler was pointing
+ * at was never searched, and any find from the visible-but-unsearched part
+ * was discarded on arrival. A search that runs for minutes and then answers
+ * "nothing nearby" about ground it never looked at is not a slow search; it
+ * is the wrong search.
+ *
+ * Measured to the corner rather than the edge, so everything visible is
+ * inside it, and capped at the server's own limit — with the cap reported
+ * rather than applied quietly, because silently searching less than the
+ * traveler is looking at is the bug being fixed.
+ */
+export function visibleRadiusKm(bounds: {
+  north: number
+  south: number
+  east: number
+  west: number
+}): { radiusKm: number; cappedFrom?: number } {
+  const center = {
+    lat: (bounds.north + bounds.south) / 2,
+    lng: (bounds.east + bounds.west) / 2,
+  }
+  const corner = { lat: bounds.north, lng: bounds.east }
+  const radiusKm = Math.max(1, Math.round(haversineDistanceKm(center, corner)))
+  return radiusKm > MAX_RESCAN_RADIUS_KM
+    ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: radiusKm }
+    : { radiusKm }
+}
 
 /**
  * Searches near `center` for stops worth adding to the corridor, writing

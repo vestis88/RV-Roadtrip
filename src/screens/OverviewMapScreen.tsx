@@ -51,6 +51,12 @@ export function OverviewMapScreen() {
   const { days } = useTripDays(tripId)
   const { corridorStops } = useCorridorStops(tripId)
   const [zoom, setZoom] = useState(6)
+  // The visible map rectangle, so "Rescan this area" can search the area
+  // the traveler is actually looking at rather than a fixed circle around
+  // its centre. Undefined until the map reports its first camera change.
+  const [bounds, setBounds] = useState<
+    { north: number; south: number; east: number; west: number } | undefined
+  >(undefined)
   const [center, setCenter] = useState<LatLng>({
     lat: trip.settings.startPoint.lat,
     lng: trip.settings.startPoint.lng,
@@ -388,6 +394,18 @@ export function OverviewMapScreen() {
             gestureHandling="greedy"
             onCameraChanged={(event: MapCameraChangedEvent) => {
               setZoom(event.detail.zoom)
+              // What "this area" means — see visibleRadiusKm. Stored as the
+              // four numbers rather than the object, which arrives fresh
+              // every frame of a drag.
+              setBounds((prev) =>
+                prev &&
+                prev.north === event.detail.bounds.north &&
+                prev.south === event.detail.bounds.south &&
+                prev.east === event.detail.bounds.east &&
+                prev.west === event.detail.bounds.west
+                  ? prev
+                  : event.detail.bounds,
+              )
               // Fires every frame of a drag, and the centre arrives as a
               // fresh object each time — storing it unconditionally
               // re-rendered this whole screen (map + candidate list) per
@@ -546,6 +564,7 @@ export function OverviewMapScreen() {
           <RescanCorridorButton
             tripId={tripId}
             center={center}
+            bounds={bounds}
             planMeta={trip.planMeta}
           />
         </div>

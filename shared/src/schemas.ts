@@ -170,6 +170,12 @@ export const planMetaSchema = z.object({
   // component that started it.
   rescanLastRunAt: isoDateTime.optional(),
   rescanLastFoundCount: z.number().int().nonnegative().optional(),
+  // Real places the search found, geocoded successfully, and then discarded
+  // for sitting outside the area it was told to search. Recorded because
+  // "Nothing new found nearby" was being said in exactly this case, which
+  // describes a different failure from the one that happened and is what
+  // made a narrow search look like a broken one.
+  rescanLastDroppedTooFar: z.number().int().nonnegative().optional(),
   // Heartbeat for the `status` busy guard — refreshed whenever a running
   // generation writes progress, so a claim left behind by a killed
   // container can be reclaimed instead of wedging the trip forever. See

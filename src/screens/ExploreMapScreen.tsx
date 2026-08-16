@@ -54,6 +54,12 @@ interface ExploreMapScreenProps {
 export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const { corridorStops } = useCorridorStops(tripId)
   const [zoom, setZoom] = useState(6)
+  // The visible map rectangle, so "Rescan this area" can search the area
+  // the traveler is actually looking at rather than a fixed circle around
+  // its centre. Undefined until the map reports its first camera change.
+  const [bounds, setBounds] = useState<
+    { north: number; south: number; east: number; west: number } | undefined
+  >(undefined)
   // "Rescan this area"/"Add stop" both anchor to wherever the traveler is
   // actually looking, not a fixed point — OverviewMapScreen already tracks
   // this the same way; this screen previously didn't, so both actions
@@ -409,6 +415,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             gestureHandling="greedy"
             onCameraChanged={(event: MapCameraChangedEvent) => {
               setZoom(event.detail.zoom)
+              // What "this area" means — see visibleRadiusKm. Stored as the
+              // four numbers rather than the object, which arrives fresh
+              // every frame of a drag.
+              setBounds((prev) =>
+                prev &&
+                prev.north === event.detail.bounds.north &&
+                prev.south === event.detail.bounds.south &&
+                prev.east === event.detail.bounds.east &&
+                prev.west === event.detail.bounds.west
+                  ? prev
+                  : event.detail.bounds,
+              )
               // Fires every frame of a drag, and the centre arrives as a
               // fresh object each time — storing it unconditionally
               // re-rendered this whole screen (map + candidate list) per
@@ -472,6 +490,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           <RescanCorridorButton
             tripId={tripId}
             center={center}
+            bounds={bounds}
             planMeta={trip.planMeta}
           />
         </div>

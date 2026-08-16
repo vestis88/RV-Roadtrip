@@ -44,9 +44,9 @@ describe('runRescanCorridor', () => {
     ])
 
     const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
-    const count = await runRescanCorridor(tripId, CENTER, 25)
+    const { stopsWritten } = await runRescanCorridor(tripId, CENTER, 25)
 
-    expect(count).toBe(2)
+    expect(stopsWritten).toBe(2)
 
     const snap = await getFirestore()
       .collection('trips')
@@ -73,9 +73,9 @@ describe('runRescanCorridor', () => {
     ])
 
     const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
-    const count = await runRescanCorridor(tripId, CENTER, 25)
+    const { stopsWritten } = await runRescanCorridor(tripId, CENTER, 25)
 
-    expect(count).toBe(2)
+    expect(stopsWritten).toBe(2)
 
     const snap = await getFirestore()
       .collection('trips')
@@ -179,9 +179,9 @@ describe('runRescanCorridor', () => {
     generateRescanCandidatesMock.mockReset().mockResolvedValue([])
 
     const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
-    const count = await runRescanCorridor(tripId, CENTER, 25)
+    const { stopsWritten } = await runRescanCorridor(tripId, CENTER, 25)
 
-    expect(count).toBe(0)
+    expect(stopsWritten).toBe(0)
     const snap = await getFirestore()
       .collection('trips')
       .doc(tripId)
@@ -226,5 +226,45 @@ describe('rescanCorridor callable', () => {
       } as never),
     ).rejects.toThrow('does not have access to this app')
     expect(generateRescanCandidatesMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('runRescanCorridor — what it discarded', () => {
+  // A search that found real places and threw them all away for distance
+  // was reported to the traveler as "Nothing new found nearby". The count
+  // has to reach the surface, or that sentence keeps being said about a
+  // completely different failure.
+  it('reports finds discarded for sitting outside the area', async () => {
+    const { tripId } = await createTripForUser('uidRescanDropped')
+    const near = {
+      name: 'Close by',
+      country: 'NO',
+      why: 'Right here.',
+      lat: CENTER.lat,
+      lng: CENTER.lng,
+    }
+    const far = {
+      name: 'Miles away',
+      country: 'NO',
+      why: 'Not here.',
+      lat: CENTER.lat + 3,
+      lng: CENTER.lng,
+    }
+    const { filterFindsToCorridor } = await import('./prompts/rescanCorridor.js')
+    generateRescanCandidatesMock
+      .mockReset()
+      .mockResolvedValue(
+        filterFindsToCorridor([near, far], { center: CENTER, radiusKm: 25 }),
+      )
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    const { stopsWritten, droppedTooFar } = await runRescanCorridor(
+      tripId,
+      CENTER,
+      25,
+    )
+
+    expect(stopsWritten).toBe(1)
+    expect(droppedTooFar).toBe(1)
   })
 })

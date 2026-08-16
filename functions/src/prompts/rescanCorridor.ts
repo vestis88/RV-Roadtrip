@@ -288,6 +288,9 @@ export function filterFindsToCorridor(
   finds: (RescanFind | null)[],
   bounds: { center: LatLng; radiusKm: number; backbone?: LatLng[] },
 ): RescanFind[] {
+  // Kept as a property on the returned array rather than changing the return
+  // type: every caller wants the finds, and only the one that reports back to
+  // the traveler wants the count. See droppedForDistance().
   const useBackbone = bounds.backbone && bounds.backbone.length >= 2
   const filtered = finds.filter((find): find is RescanFind => {
     if (!find) return false
@@ -311,5 +314,31 @@ export function filterFindsToCorridor(
     return true
   })
 
-  return filtered.slice(0, MAX_RESCAN_RESULTS)
+  const kept = filtered.slice(0, MAX_RESCAN_RESULTS)
+  const located = finds.filter((find) => find !== null).length
+  return withDroppedCount(kept, located - filtered.length)
+}
+
+const DROPPED_FOR_DISTANCE = Symbol('droppedForDistance')
+
+function withDroppedCount(finds: RescanFind[], dropped: number): RescanFind[] {
+  return Object.defineProperty(finds, DROPPED_FOR_DISTANCE, {
+    value: dropped,
+    enumerable: false,
+  })
+}
+
+/**
+ * How many real, locatable places this search found and then threw away for
+ * being outside the area it was told to search.
+ *
+ * Reported as a search that ran for minutes and "came up empty". Empty was
+ * only ever half true: the model found places, they geocoded fine, and then
+ * the radius check discarded them — server-side, at console.info, while the
+ * traveler was told "Nothing new found nearby". That sentence is the part
+ * that made this look broken rather than merely narrow, because it describes
+ * a completely different failure from the one that happened.
+ */
+export function droppedForDistance(finds: RescanFind[]): number {
+  return (finds as unknown as Record<symbol, number>)[DROPPED_FOR_DISTANCE] ?? 0
 }

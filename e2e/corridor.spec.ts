@@ -322,6 +322,57 @@ test('a scan the server cannot still be running stops blocking the button', asyn
 
 // The counterpart: a scan that started moments ago is slow, not abandoned,
 // and cutting it off early would be the worse error.
+// "Nothing new found nearby" was said even when the search had found real
+// places and thrown every one of them away for sitting outside the area —
+// a sentence describing a different failure from the one that happened, and
+// the reason a narrow search read as a broken one.
+test('a scan that found places outside the area says so, not "nothing"', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 0,
+      'planMeta.rescanLastDroppedTooFar': 4,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  const status = page.getByTestId('rescan-corridor-status')
+  await expect(status).toContainText('4 places')
+  await expect(status).toContainText('zoom out')
+  await expect(status).not.toContainText('Nothing new found')
+})
+
+// A search that genuinely found nothing still says so — the honest case has
+// to survive the fix for the dishonest one.
+test('a scan that truly found nothing still says nothing', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 0,
+      'planMeta.rescanLastDroppedTooFar': 0,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+    'Nothing new found nearby',
+  )
+})
+
 test('a scan that only just started is left alone', async ({ page }) => {
   const tripId = await createTripWithPlan(page)
 

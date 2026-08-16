@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import type { LatLng, PlanMeta } from '@rv/shared'
-import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import {
+  RESCAN_RADIUS_KM,
+  rescanCorridorArea,
+  visibleRadiusKm,
+} from '../lib/rescanCorridorAction'
 import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 import { reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
   tripId: string
   center: LatLng
+  /**
+   * The visible map rectangle. "This area" means what the traveler can see,
+   * not a fixed circle around the centre — see visibleRadiusKm.
+   */
+  bounds?: { north: number; south: number; east: number; west: number }
   /** Live from the trip doc — see the note on durable status below. */
   planMeta: PlanMeta
 }
@@ -45,6 +54,25 @@ function isStale(startedAt: string | undefined, now: number): boolean {
   return Number.isFinite(started) && now - started > STALE_SCAN_MS
 }
 
+/**
+ * What to say when a search comes back.
+ *
+ * "Nothing new found nearby" was said even when the search had found real
+ * places and discarded every one of them for sitting outside the area — a
+ * sentence describing a completely different failure from the one that
+ * happened, and the reason a narrow search read as a broken one. When
+ * something was thrown away, say that instead, and name the fix.
+ */
+function describeResult(found: number, droppedTooFar: number): string {
+  if (found > 0) {
+    return `Found ${found} new stop${found === 1 ? '' : 's'} nearby.`
+  }
+  if (droppedTooFar > 0) {
+    return `Found ${droppedTooFar} place${droppedTooFar === 1 ? '' : 's'}, but ${droppedTooFar === 1 ? 'it was' : 'they were'} outside the area searched — zoom out and scan again to include ${droppedTooFar === 1 ? 'it' : 'them'}.`
+  }
+  return 'Nothing new found nearby.'
+}
+
 function elapsedLabel(startedAt: string | undefined, now: number): string {
   if (!startedAt) return 'Scanning…'
   const ms = now - new Date(startedAt).getTime()
@@ -65,6 +93,7 @@ function elapsedLabel(startedAt: string | undefined, now: number): string {
 export function RescanCorridorButton({
   tripId,
   center,
+  bounds,
   planMeta,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
@@ -110,10 +139,15 @@ export function RescanCorridorButton({
   const status = abandoned
     ? 'That scan stopped reporting back — it may have run out of time. Anything it did find is already on the map.'
     : planMeta.rescanStatus !== 'generating' && planMeta.rescanLastRunAt
-      ? planMeta.rescanLastFoundCount
-        ? `Found ${planMeta.rescanLastFoundCount} new stop${planMeta.rescanLastFoundCount === 1 ? '' : 's'} nearby.`
-        : 'Nothing new found nearby.'
+      ? describeResult(
+          planMeta.rescanLastFoundCount ?? 0,
+          planMeta.rescanLastDroppedTooFar ?? 0,
+        )
       : null
+
+  // Falls back to the old fixed circle only until the map has reported a
+  // camera change, which in practice is immediately.
+  const area = bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }
 
   async function rescan() {
     setSubmitting(true)
@@ -127,7 +161,7 @@ export function RescanCorridorButton({
       await rescanCorridorArea(
         tripId,
         center,
-        RESCAN_RADIUS_KM,
+        area.radiusKm,
         undefined,
         undefined,
         centerName,
