@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import { haversineDistanceKm, type LatLng, type OvernightStopCandidate } from '@rv/shared'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
+import { extractJsonObject } from './jsonFromClaude.js'
+import { runWebSearchTurn } from './webSearchTurn.js'
 import {
   buildOvernightCandidatesPrompt,
   type ClaudeOvernightCandidateKind,
@@ -34,16 +36,14 @@ const overnightCandidateResponseSchema = z.object({
     .max(3),
 })
 
-function stripCodeFences(text: string): string {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```\s*$/, '')
-    .trim()
-}
-
+/**
+ * Tolerant of a sentence around the JSON — see jsonFromClaude.ts. This is a
+ * searching turn, and a turn grounded in sources is the likeliest of all to
+ * introduce or sign off its answer despite the prompt asking for JSON only.
+ * The rescan path lost every one of those responses for months.
+ */
 export function parseOvernightCandidatesResponse(text: string) {
-  return overnightCandidateResponseSchema.parse(JSON.parse(stripCodeFences(text)))
+  return overnightCandidateResponseSchema.parse(JSON.parse(extractJsonObject(text)))
 }
 
 function textFromResponse(response: Anthropic.Message): string {
@@ -77,7 +77,7 @@ export async function generateClaudeOvernightCandidates(input: {
     let response: Anthropic.Message
     const attemptStartedAt = Date.now()
     try {
-      response = await client.messages.create({
+      response = await runWebSearchTurn(client, {
         model: MODEL,
         max_tokens: 2000,
         thinking: { type: 'disabled' },
@@ -127,11 +127,19 @@ export async function generateClaudeOvernightCandidates(input: {
         }))
     } catch (error) {
       lastError = error
-      messages.push({ role: 'assistant', content: text })
-      messages.push({
-        role: 'user',
-        content: `Your last response failed validation: ${String(error)}. Return ONLY the corrected JSON matching the schema — no prose, no markdown code fences.`,
-      })
+      // Only quote back something there is something to quote: an assistant
+      // turn with empty content is rejected outright by the API, so a turn
+      // that returned no text became a 400 on the retry meant to recover
+      // from it. A retry here also costs another full set of web searches,
+      // which is the other reason the parse above is tolerant rather than
+      // strict.
+      if (text.trim().length > 0) {
+        messages.push({ role: 'assistant', content: text })
+        messages.push({
+          role: 'user',
+          content: `Your last response failed validation: ${String(error)}. Return ONLY the corrected JSON matching the schema — no prose, no markdown code fences.`,
+        })
+      }
     }
   }
 

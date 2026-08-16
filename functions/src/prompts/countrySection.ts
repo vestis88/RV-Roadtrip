@@ -3,6 +3,8 @@ import { defineSecret } from 'firebase-functions/params'
 import { z } from 'zod'
 import type { CountryBriefSection, Vehicle } from '@rv/shared'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
+import { extractJsonObject } from './jsonFromClaude.js'
+import { runWebSearchTurn } from './webSearchTurn.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 
@@ -78,19 +80,12 @@ Respond with JSON ONLY, matching this exact shape — no prose, no markdown code
   return { system, user }
 }
 
-function stripCodeFences(text: string): string {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```\s*$/, '')
-    .trim()
-}
-
+/** Tolerant of a sentence around the JSON — see jsonFromClaude.ts. */
 export function parseCountrySectionOutput(text: string): {
   items: string[]
   sources: string[]
 } {
-  const json: unknown = JSON.parse(stripCodeFences(text))
+  const json: unknown = JSON.parse(extractJsonObject(text))
   return sectionOutputSchema.parse(json)
 }
 
@@ -116,7 +111,7 @@ export async function generateCountrySection(input: {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const attemptStartedAt = Date.now()
     try {
-      const response: Anthropic.Message = await client.messages.create({
+      const response: Anthropic.Message = await runWebSearchTurn(client, {
         model: MODEL,
         max_tokens: 2000,
         // Same reasoning as the guide prompt this replaces: schema-constrained

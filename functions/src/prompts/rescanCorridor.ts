@@ -95,7 +95,7 @@ const rescanResponseSchema = z.object({
  *
  * This used to be `JSON.parse(stripCodeFences(text))`, and that single line
  * is the best explanation there is for why a rescan appeared never to work.
- * It is the only Claude call in the app that runs web_search, and a turn
+ * It was one of three Claude calls running web_search, and a turn
  * grounded in sources is the one most likely to say so — an opening sentence
  * before the JSON, or a "let me know if you'd like me to widen the search"
  * after it. Both throw. Every other symptom followed from that: minutes
