@@ -86,7 +86,7 @@ export function sortCandidatesForList(
   }))
 }
 
-const GENERIC_STOPS_ERROR = 'Could not find stops right now — please try again.'
+export const GENERIC_STOPS_ERROR = 'Could not find stops right now — please try again.'
 
 // Codes generateExploreHighlights raises itself, every one of them with a
 // message written for the traveler. Everything else a callable can fail

@@ -5,7 +5,10 @@ import {
   rescanCorridorArea,
   visibleRadiusKm,
 } from '../lib/rescanCorridorAction'
-import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
+import {
+  describeExploreHighlightsError,
+  GENERIC_STOPS_ERROR,
+} from '../lib/exploreCandidateActions'
 import { reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
@@ -98,6 +101,9 @@ export function RescanCorridorButton({
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set when this device lost the connection to a scan the server is still
+  // running — see the catch below.
+  const [disconnected, setDisconnected] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
   /**
@@ -136,7 +142,12 @@ export function RescanCorridorButton({
    * so it is waiting for the traveler when they come back to the tab,
    * whether or not the connection that started the scan survived.
    */
-  const status = abandoned
+  // Ordered deliberately: a scan still running outranks the news that this
+  // phone stopped watching it, because the first is what the traveler asked
+  // about and the second is only an explanation for the wait.
+  const status = scanning && disconnected
+    ? 'Still scanning — this phone stopped following it, but the search is running on the server. Anything it finds appears on the map on its own; you can leave this screen.'
+    : abandoned
     ? 'That scan stopped reporting back — it may have run out of time. Anything it did find is already on the map.'
     : planMeta.rescanStatus !== 'generating' && planMeta.rescanLastRunAt
       ? describeResult(
@@ -152,6 +163,7 @@ export function RescanCorridorButton({
   async function rescan() {
     setSubmitting(true)
     setError(null)
+    setDisconnected(false)
     try {
       const centerName = await reverseGeocodeName(center)
       // The result is deliberately ignored: the server writes it to the trip
@@ -168,10 +180,26 @@ export function RescanCorridorButton({
       )
     } catch (err) {
       console.error('rescanCorridor failed', err)
-      // The server's own account where it has one — a search that ran out
-      // of time can say so and name what would make it finish, which
-      // "please try again" actively contradicts.
-      setError(describeExploreHighlightsError(err))
+      // A dead connection is not a failed search.
+      //
+      // Holding a callable open for minutes from a phone does not work:
+      // iOS Safari, a cellular NAT timeout or the screen locking will drop
+      // the request long before any deadline we set expires. The function
+      // keeps running — the client hanging up does not cancel it — and its
+      // finds still arrive over the corridorStops subscription. Reported as
+      // a red "please try again" sitting beside a live "Scanning… 3m 16s",
+      // which is two contradictory claims about the same scan, and the
+      // wrong one is the banner.
+      //
+      // So the trip decides, not the socket: while it still says a scan is
+      // running, the connection dropping is a fact about this phone and
+      // nothing the traveler needs to act on. Only a server that actually
+      // answered — describeExploreHighlightsError finds a real cause in it —
+      // gets to put an error on screen.
+      const described = describeExploreHighlightsError(err)
+      const serverAnswered = described !== GENERIC_STOPS_ERROR
+      if (serverAnswered) setError(described)
+      else setDisconnected(true)
     } finally {
       setSubmitting(false)
     }

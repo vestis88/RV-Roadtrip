@@ -326,6 +326,38 @@ test('a scan the server cannot still be running stops blocking the button', asyn
 // places and thrown every one of them away for sitting outside the area —
 // a sentence describing a different failure from the one that happened, and
 // the reason a narrow search read as a broken one.
+// Reported as a red "Could not find stops right now — please try again"
+// sitting beside a live "Scanning… 3m 16s". Two contradictory claims about
+// one scan, and the banner was the wrong one: holding a callable open for
+// minutes from a phone does not work (iOS Safari, a cellular NAT timeout,
+// the screen locking), but the function keeps running and its finds still
+// arrive. The dropped connection is a fact about the phone, not the search.
+test('losing the connection to a running scan is not reported as a failure', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  // The server takes the job and is still working on it...
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'generating',
+      'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
+    })
+  await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
+
+  // ...while this device's request dies on the network.
+  await page.route('**/rescanCorridor', (route) => route.abort('failed'))
+  await page.getByTestId('rescan-corridor-button').click({ force: true })
+
+  // No error banner — the scan it would be reporting on is still running.
+  await expect(page.getByTestId('rescan-corridor-error')).toHaveCount(0)
+  await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
+})
+
 test('a scan that found places outside the area says so, not "nothing"', async ({
   page,
 }) => {
