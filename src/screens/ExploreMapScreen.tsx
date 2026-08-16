@@ -469,7 +469,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             backbone={backbone}
             waypointNames={waypointNames}
           />
-          <RescanCorridorButton tripId={tripId} center={center} />
+          <RescanCorridorButton
+            tripId={tripId}
+            center={center}
+            planMeta={trip.planMeta}
+          />
         </div>
       </div>
 

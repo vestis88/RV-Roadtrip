@@ -188,15 +188,47 @@ export const rescanCorridor = onCall(
       )
     }
     await requireTripMember(tripId, request.auth.uid)
-    const stopsWritten = await runRescanCorridor(
-      tripId,
-      center,
-      radiusKm,
-      query?.trim() || undefined,
-      backbone,
-      (centerName as string | undefined)?.trim() || undefined,
-      waypointNames as string[] | undefined,
-    )
-    return { stopsWritten }
+
+    // Progress lives on the trip from here on, not in the caller's promise.
+    // The client hanging up does not cancel this function (see
+    // callableTimeouts.ts), and on a phone hanging up is routine: switching
+    // tabs unmounts the button, and backgrounding the app can drop the
+    // connection outright. Either way the search runs to completion and
+    // writes its stops — what the traveler lost was any way to know that.
+    // Writing status here means the answer is waiting for them when they
+    // come back, whether or not the connection that started it survived.
+    const tripRef = getFirestore().collection('trips').doc(tripId)
+    await tripRef.update({
+      'planMeta.rescanStatus': 'generating',
+      'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
+    })
+    try {
+      const stopsWritten = await runRescanCorridor(
+        tripId,
+        center,
+        radiusKm,
+        query?.trim() || undefined,
+        backbone,
+        (centerName as string | undefined)?.trim() || undefined,
+        waypointNames as string[] | undefined,
+      )
+      await tripRef.update({
+        'planMeta.rescanStatus': 'idle',
+        'planMeta.rescanLastRunAt': new Date().toISOString(),
+        'planMeta.rescanLastFoundCount': stopsWritten,
+      })
+      return { stopsWritten }
+    } catch (error) {
+      // Cleared on the way out either way: a status left at 'generating' by a
+      // failed run would show a spinner forever, which is a worse lie than
+      // the error the caller is about to see. A container killed mid-run
+      // can't reach this, which is what the staleness check is for.
+      await tripRef
+        .update({ 'planMeta.rescanStatus': 'idle' })
+        .catch((clearError: unknown) =>
+          console.warn('Clearing rescanStatus after a failed run failed', clearError),
+        )
+      throw error
+    }
   },
 )

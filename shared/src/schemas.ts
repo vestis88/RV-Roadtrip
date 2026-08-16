@@ -151,6 +151,25 @@ export const planMetaSchema = z.object({
   // mounts fresh with no memory of the search that just ran — the exact
   // primary entry point this distinction exists for.
   exploreLastRunAt: isoDateTime.optional(),
+  // "Rescan this area" progress, kept on the trip rather than in the button's
+  // own state (2026-08-16). Reported as "changing tab during a rescan breaks
+  // the search": the search itself was fine — corridorStops is a live
+  // subscription, so anything it found still arrived — but the component
+  // holding the in-flight promise unmounts on a tab change, taking the
+  // "Scanning…" state and the "found N stops" confirmation with it. What the
+  // traveler saw was an idle button and no answer, which reads as a search
+  // that died, and invites pressing it again for a second paid Claude call.
+  //
+  // Same shape and the same reasoning as exploreStatus above, including the
+  // heartbeat that lets a lock abandoned by a killed container be recognised
+  // as stale rather than trusted forever.
+  rescanStatus: z.enum(['idle', 'generating']).optional(),
+  rescanStatusUpdatedAt: isoDateTime.optional(),
+  // Set when a rescan finishes, with what it found — so the confirmation
+  // survives the round trip through Firestore instead of living only in the
+  // component that started it.
+  rescanLastRunAt: isoDateTime.optional(),
+  rescanLastFoundCount: z.number().int().nonnegative().optional(),
   // Heartbeat for the `status` busy guard — refreshed whenever a running
   // generation writes progress, so a claim left behind by a killed
   // container can be reclaimed instead of wedging the trip forever. See

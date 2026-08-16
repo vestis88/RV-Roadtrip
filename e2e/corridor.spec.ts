@@ -251,6 +251,66 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
   })
 })
 
+// Reported as "changing tab during a rescan breaks the search". It never
+// broke the search — the callable runs to completion whether or not the
+// client is still listening, and its finds arrive over the corridorStops
+// subscription regardless. What broke was the traveler's only evidence any
+// of that was happening: the button unmounts on a tab change, and it used to
+// hold the entire "Scanning…" state itself, so they came back to an idle
+// button and no answer. Indistinguishable from a search that died, and an
+// invitation to press it again for a second paid Claude call.
+test('a scan in progress is still reported after switching tabs and back', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  // Stand in for a scan this device started that is still running server
+  // side — the state the button has to recover rather than remember.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'generating',
+      'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+  await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
+
+  // Away and back — the round trip that used to lose everything.
+  await page.getByTestId('nav-diary').click()
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText('Scanning')
+})
+
+test('the result of a scan is waiting on return, not lost with the tab', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  // A scan that finished while the traveler was on another tab.
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 3,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+    '3 new stops',
+  )
+  await expect(page.getByTestId('rescan-corridor-button')).toBeEnabled()
+})
+
 test('"Describe it" mode requires a description, then degrades to an error banner without Claude/Places access', async ({
   page,
 }) => {

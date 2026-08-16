@@ -543,7 +543,11 @@ export function OverviewMapScreen() {
             top of it. */}
         <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
           <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
-          <RescanCorridorButton tripId={tripId} center={center} />
+          <RescanCorridorButton
+            tripId={tripId}
+            center={center}
+            planMeta={trip.planMeta}
+          />
         </div>
 
         {selectedCorridorStop && (
