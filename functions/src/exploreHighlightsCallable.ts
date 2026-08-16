@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { CorridorStop, Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
+import { describeCause } from './describeCause.js'
 import { requireTripMember } from './authz.js'
 import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
@@ -17,19 +18,6 @@ import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
 // this only ever kicks in for an actually-abandoned lock, not a slow one.
 const STALE_EXPLORE_LOCK_MS = 5 * 60 * 1000
 
-// Long enough to name the fault, short enough to read on a phone. The
-// underlying messages are not sized for a UI at all — a Claude parse
-// failure carries a 300-character excerpt of the raw response — and the
-// full text is in the logs either way.
-const CAUSE_PREVIEW_LENGTH = 160
-
-function describeCause(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  const collapsed = message.replace(/\s+/g, ' ').trim()
-  return collapsed.length > CAUSE_PREVIEW_LENGTH
-    ? `${collapsed.slice(0, CAUSE_PREVIEW_LENGTH)}…`
-    : collapsed
-}
 
 /**
  * Explore mode's own generation entry point (2026-07-30) — deliberately NOT

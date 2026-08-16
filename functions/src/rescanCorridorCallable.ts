@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { corridorStopSchema, type LatLng, type Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
+import { describeCause } from './describeCause.js'
 import { requireTripMember } from './authz.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
@@ -228,7 +229,17 @@ export const rescanCorridor = onCall(
         .catch((clearError: unknown) =>
           console.warn('Clearing rescanStatus after a failed run failed', clearError),
         )
-      throw error
+      if (error instanceof HttpsError) throw error
+      // firebase-functions forwards only an HttpsError's message; everything
+      // else arrives at the browser as the bare code 'internal' with the
+      // message "INTERNAL". exploreHighlightsCallable learned this on
+      // 2026-08-12 and this path never did, so every rescan failure — a
+      // timeout, an unparseable response, a refused web search, a missing
+      // key — reached the traveler as the same sentence, and reached whoever
+      // was fixing it as nothing at all. Three consecutive failures were
+      // reported and diagnosed by guesswork for exactly this reason.
+      console.error(`rescanCorridor failed for trip ${tripId}`, error)
+      throw new HttpsError('internal', `Could not rescan: ${describeCause(error)}`)
     }
   },
 )

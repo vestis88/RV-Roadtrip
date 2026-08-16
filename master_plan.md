@@ -557,8 +557,23 @@ It reads `CLAUDE_API_KEY` and `GOOGLE_PLACES_API_KEY` through the same
 anywhere in the pipeline it exercises. Both keys already exist in Google
 Secret Manager for the deployed functions.
 
-It costs real money: one Claude call plus one Places text search per distinct
-base town and per candidate sight. Cents per run, but not something to loop.
+`npm run debug:search` does the same for "Rescan this area", and exists for
+a sharper reason: three consecutive rescan failures were each reported as the
+same sentence on a phone with the actual cause never leaving the server —
+firebase-functions forwards only an `HttpsError`'s message, so everything
+else arrived as the bare code `internal`. Both callables now say what broke
+(`describeCause`), but a message on a phone is still a slow way to ask; this
+prints the exception itself, and the wall time with it, which is the
+measurement that separates "too slow" from "broken".
+
+```
+npm run debug:search -- --lat 56.51 --lng 13.04 --radius 25
+npm run debug:search -- --lat 56.51 --lng 13.04 --query "downhill bike park"
+```
+
+Both cost real money: a Claude call each, plus Places lookups per result —
+and for the search, up to three web searches inside the turn. Cents per run,
+but not something to loop.
 
 ---
 
