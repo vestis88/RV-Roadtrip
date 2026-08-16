@@ -13,6 +13,18 @@ import {
 import { findStopsForQuery } from './querySearch.js'
 
 /**
+ * How long the search itself may run, leaving the rest of the function's
+ * 300s for geocoding every find and committing the writes.
+ *
+ * The deadline is stated here, by the caller that owns the timeout, rather
+ * than inferred inside the search — which is what let the search run until
+ * the container was killed and everything it had found was thrown away.
+ * Reported as "Scanning… 5m 4s" and then an error, which is this function's
+ * own ceiling to the second.
+ */
+const SEARCH_BUDGET_MS = 220_000
+
+/**
  * "Rescan this area" (phase 3 of the persistent-corridor overhaul): searches
  * near `center` and writes each surviving find as a new corridorStops doc,
  * unlinked to any day — reviewing/locking/discarding a proposed stop is a
@@ -49,6 +61,7 @@ export async function runRescanCorridor(
   // comment for why sending coordinates alone was so expensive.
   centerName?: string,
   waypointNames?: string[],
+  deadlineMs?: number,
 ): Promise<number> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
@@ -84,7 +97,8 @@ export async function runRescanCorridor(
         backbone,
         centerName,
         waypointNames,
-      })
+          ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+  })
 
   let nextRank = 0
   if (isExploring && finds.length > 0) {
@@ -212,6 +226,7 @@ export const rescanCorridor = onCall(
         backbone,
         (centerName as string | undefined)?.trim() || undefined,
         waypointNames as string[] | undefined,
+        Date.now() + SEARCH_BUDGET_MS,
       )
       await tripRef.update({
         'planMeta.rescanStatus': 'idle',

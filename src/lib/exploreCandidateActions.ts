@@ -136,10 +136,22 @@ export function describeExploreHighlightsError(error: unknown): string {
   if (typeof code !== 'string' || !SERVER_AUTHORED_CODES.has(code)) {
     return GENERIC_STOPS_ERROR
   }
-  if (typeof message !== 'string' || message.trim() === '' || message === 'INTERNAL') {
+  // A message that is just the code repeated back says nothing a traveler
+  // can use — and it reached the screen anyway, as the single word
+  // "internal", because this only rejected the exact uppercase spelling.
+  // The Firebase client emits either casing depending on the path, so the
+  // comparison is case-insensitive and covers the code itself, not one
+  // spelling of it.
+  const named = typeof message === 'string' ? message.trim() : ''
+  const codeWord = code.replace(/^functions\//, '')
+  if (
+    named === '' ||
+    named.toLowerCase() === codeWord.toLowerCase() ||
+    named.toLowerCase() === code.toLowerCase()
+  ) {
     return GENERIC_STOPS_ERROR
   }
-  return message
+  return named
 }
 
 /**

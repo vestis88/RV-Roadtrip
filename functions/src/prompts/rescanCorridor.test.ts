@@ -484,3 +484,80 @@ describe('generateRescanCandidates — long and paused turns', () => {
     warn.mockRestore()
   })
 })
+
+describe('generateRescanCandidates — staying inside the caller\'s budget', () => {
+  const NEAR = { lat: 61.1, lng: 10.5 }
+
+  beforeEach(() => {
+    vi.stubEnv('CLAUDE_API_KEY', 'test-key')
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.2, lng: 10.6 })
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  // The reported failure: "Scanning… 5m 4s", then an error — the function's
+  // own 300s ceiling to the second. A rescan is the only search here that
+  // uses web_search, so each turn costs a minute or more; two attempts of up
+  // to four turns each is eight searching turns, which no deadline survives.
+  // Counting attempts was the wrong bound. Time is the right one.
+  it('does not start a turn it has no time to finish', async () => {
+    createMock.mockReset().mockResolvedValue({
+      stop_reason: 'pause_turn',
+      content: [{ type: 'text', text: '{"finds": []}' }],
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: NEAR,
+      radiusKm: 25,
+      // Already spent: there is room for the first turn and nothing after it.
+      deadlineMs: Date.now() + 1_000,
+    })
+
+    // One turn, no resumes — the resume cap would have allowed three more.
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no time left to resume'),
+    )
+    warn.mockRestore()
+  })
+
+  it('still resumes when there is budget for it', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        stop_reason: 'pause_turn',
+        content: [{ type: 'text', text: '{"finds": [' }],
+      })
+      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({
+      center: NEAR,
+      radiusKm: 25,
+      deadlineMs: Date.now() + 10 * 60_000,
+    })
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
+  })
+
+  // A short budget must not cost the traveler the finds already in hand —
+  // being killed at the deadline with everything discarded is the failure
+  // this replaces.
+  it('returns what it found rather than nothing when the budget runs out', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({
+      center: NEAR,
+      radiusKm: 25,
+      deadlineMs: Date.now() + 1_000,
+    })
+
+    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
+  })
+})

@@ -210,3 +210,34 @@ describe('describeExploreHighlightsError — a search that ran out of time', () 
     )
   })
 })
+
+describe('describeExploreHighlightsError — a message that is only the code', () => {
+  // Reported as a red banner reading, in full, "internal". The guard only
+  // rejected the exact uppercase "INTERNAL", so the lowercase spelling the
+  // client emits went straight to the screen — a word that tells the
+  // traveler nothing and tells whoever is debugging it even less.
+  it('rejects the code echoed back, in either casing', () => {
+    expect(
+      describeExploreHighlightsError({ code: 'functions/internal', message: 'internal' }),
+    ).toBe(GENERIC)
+    expect(
+      describeExploreHighlightsError({ code: 'functions/internal', message: 'INTERNAL' }),
+    ).toBe(GENERIC)
+    expect(
+      describeExploreHighlightsError({
+        code: 'functions/internal',
+        message: 'functions/internal',
+      }),
+    ).toBe(GENERIC)
+  })
+
+  // The point of the whole path: a real cause still gets through.
+  it('shows a cause the server actually wrote', () => {
+    expect(
+      describeExploreHighlightsError({
+        code: 'functions/internal',
+        message: 'Could not rescan: Overpass query failed with 406',
+      }),
+    ).toMatch(/406/)
+  })
+})

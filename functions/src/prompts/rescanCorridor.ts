@@ -11,21 +11,32 @@ export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 const MODEL = 'claude-sonnet-5'
 const MAX_ATTEMPTS = 2
 /**
- * Don't START a retry once this much of the budget is gone.
+ * How much wall time to reserve for one more Claude turn.
  *
- * Each attempt is a Claude call with up to 3 web searches, so two of them
- * back to back can run for minutes — and did: a "Describe it" search was
- * reported taking four minutes and then failing, which is the client's own
- * timeout firing mid-second-attempt. A retry that cannot finish before the
- * traveler is shown an error isn't resilience, it's just spend. One
- * slow-but-complete attempt beats two that get cut off.
+ * Everything here is now bounded by a real deadline rather than by counting
+ * attempts, because counting attempts is what let this run past five
+ * minutes. The failure looked like this: a rescan is the only search in the
+ * app that uses `web_search` (the initial corridor curation calls Claude
+ * with no tools at all, which is why it is the faster of the two despite
+ * covering the whole trip), and each searching turn costs a minute or more.
+ * Multiply that by up to two attempts, each allowed up to three resumes of a
+ * paused turn, and the ceiling was eight searching turns — comfortably past
+ * any deadline, and reported as "Scanning… 5m 4s" followed by an error.
  *
- * Raised alongside the callable's own timeoutSeconds (180 -> 300): this is
- * the point past which a second attempt has no room to finish, so it has to
- * move with the budget it is measured against. Leaving it at 100s would
- * have kept refusing retries the deadline could now comfortably afford.
+ * Attempt and resume caps still exist as backstops, but this is the limit
+ * that actually binds: before every turn, if there isn't room for one, stop
+ * and use what there is. Coming back with fewer finds beats being killed
+ * mid-search with none.
  */
-const RETRY_DEADLINE_MS = 180_000
+const TURN_RESERVE_MS = 90_000
+
+/**
+ * The budget assumed when no caller supplies one — the debug tool and the
+ * unit tests. Deliberately not read from the callable's timeoutSeconds:
+ * a default that silently tracked production config would hide the fact
+ * that the real budget is the caller's to state.
+ */
+const DEFAULT_SEARCH_BUDGET_MS = 240_000
 
 /**
  * How large a "rescan this area" search radius is allowed to be, in
@@ -139,6 +150,7 @@ async function runSearchTurn(
   system: string,
   messages: Anthropic.MessageParam[],
   input: { query?: string },
+  deadlineMs: number,
 ): Promise<Anthropic.Message> {
   const turn = [...messages]
   let response: Anthropic.Message | undefined
@@ -161,6 +173,12 @@ async function runSearchTurn(
     })
     response = await stream.finalMessage()
     if (response.stop_reason !== 'pause_turn') return response
+    if (Date.now() + TURN_RESERVE_MS > deadlineMs) {
+      console.warn(
+        'Rescan search paused with no time left to resume — using the partial turn',
+      )
+      return response
+    }
     turn.push({ role: 'assistant', content: response.content })
   }
 
@@ -182,6 +200,14 @@ export async function generateRescanCandidates(input: {
   backbone?: LatLng[]
   centerName?: string
   waypointNames?: string[]
+  /**
+   * When this whole search has to be finished, as an epoch millisecond.
+   * Supplied by the callable from its own remaining budget so the search
+   * stops itself in time to geocode and write what it found, rather than
+   * being killed by the function timeout with everything discarded.
+   * Defaults to a self-contained budget for the debug tool and tests.
+   */
+  deadlineMs?: number
 }): Promise<RescanFind[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
   const { system, user } = buildRescanCorridorPrompt(input)
@@ -190,17 +216,18 @@ export async function generateRescanCandidates(input: {
   let found: z.infer<typeof rescanResponseSchema> | undefined
   let lastError: unknown
   const startedAt = Date.now()
+  const deadlineMs = input.deadlineMs ?? startedAt + DEFAULT_SEARCH_BUDGET_MS
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0 && Date.now() - startedAt > RETRY_DEADLINE_MS) {
+    if (attempt > 0 && Date.now() + TURN_RESERVE_MS > deadlineMs) {
       console.warn(
-        `Skipping rescan retry — ${Math.round((Date.now() - startedAt) / 1000)}s already spent`,
+        `Skipping rescan retry — ${Math.round((Date.now() - startedAt) / 1000)}s spent, no room for another turn`,
       )
       break
     }
     let response: Anthropic.Message
     const attemptStartedAt = Date.now()
     try {
-      response = await runSearchTurn(client, system, messages, input)
+      response = await runSearchTurn(client, system, messages, input, deadlineMs)
     } catch (error) {
       // A transient API-level failure (rate limit, brief overload, network
       // blip), not Claude returning malformed JSON — MAX_ATTEMPTS existing
