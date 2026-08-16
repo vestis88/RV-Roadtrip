@@ -70,12 +70,23 @@ function isStale(beatAt: string | undefined, now: number): boolean {
  * happened, and the reason a narrow search read as a broken one. When
  * something was thrown away, say that instead, and name the fix.
  */
-function describeResult(found: number, droppedTooFar: number): string {
+function describeResult(
+  found: number,
+  droppedTooFar: number,
+  notLocated: number,
+): string {
   if (found > 0) {
     return `Found ${found} new stop${found === 1 ? '' : 's'} nearby.`
   }
   if (droppedTooFar > 0) {
     return `Found ${droppedTooFar} place${droppedTooFar === 1 ? '' : 's'}, but ${droppedTooFar === 1 ? 'it was' : 'they were'} outside the area searched — zoom out and scan again to include ${droppedTooFar === 1 ? 'it' : 'them'}.`
+  }
+  // Not the traveler's problem to fix, and saying "nothing here" would blame
+  // the area for what is a map-data failure — see notLocated().
+  if (notLocated > 0) {
+    return notLocated === 1
+      ? 'Suggested 1 place, but it could not be found on the map, so it was dropped.'
+      : `Suggested ${notLocated} places, but none of them could be found on the map, so they were dropped.`
   }
   return 'Nothing new found nearby.'
 }
@@ -170,6 +181,7 @@ export function RescanCorridorButton({
       ? describeResult(
           planMeta.rescanLastFoundCount ?? 0,
           planMeta.rescanLastDroppedTooFar ?? 0,
+          planMeta.rescanLastNotLocated ?? 0,
         )
       : null
 

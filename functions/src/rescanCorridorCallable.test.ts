@@ -125,10 +125,15 @@ describe('runRescanCorridor', () => {
     expect(snap.docs[0]?.data().rank).toBe(1)
   })
 
-  it('passes the center, radius, and trip notes through to the generator', async () => {
+  // The interests are the part that was missing, and the reason a rescan for
+  // a downhill-biking trip answered "Nothing new found nearby" with a bike
+  // park inside the searched circle: only the freeform notes ever reached
+  // the prompt, so it answered a different question.
+  it('passes the center, radius, notes AND stated interests through to the generator', async () => {
     const { tripId } = await createTripForUser('uidRescanB')
     await getFirestore().collection('trips').doc(tripId).update({
       'notes.freeText': 'We like hands-on museums.',
+      'settings.interests': ['downhill mountain biking', 'swimming'],
     })
     generateRescanCandidatesMock.mockReset().mockResolvedValue([])
 
@@ -139,6 +144,7 @@ describe('runRescanCorridor', () => {
       center: CENTER,
       radiusKm: 15,
       notesFreeText: 'We like hands-on museums.',
+      interests: ['downhill mountain biking', 'swimming'],
       tripId,
     })
   })

@@ -13,21 +13,21 @@ import type { LatLng } from '@rv/shared'
  */
 const RESCAN_SYSTEM_PROMPT = `You are an expert European tour guide specializing in RV travel for families. The traveler wants to know what's worth stopping for — either near one specific point they're looking at on the map, or along their route corridor as a whole — not a redesign of their trip, just genuinely good finds.
 
-You will be given EITHER a center point (as a rough place description, not coordinates) and a search radius in kilometres, OR a routeWaypoints list describing the corridor roughly, plus the traveler's freeform notes about their trip if any.
+You will be given EITHER a center point (as a rough place description, not coordinates) and a search radius in kilometres, OR a routeWaypoints list describing the corridor roughly, plus this trip's stated "interests" and the traveler's freeform notes.
 
-Search for things like:
-- Recently opened or recently reopened attractions, museums, parks, trails, and viewpoints.
-- Local favourites and lesser-known spots: regional parks, small museums, swimming spots, farm visits, marked walks.
-- Anything matching the traveler's stated interests and notes, if given.
+Work in this order:
+1. Take the stated interests and notes ONE AT A TIME and ask where that interest is genuinely best served inside this area. Name the place someone who knows the subject would name if asked "where do you go for this around here?" — the bike park, the ski area, the climbing crag, the swimming spot, the trailhead, the museum. An interest like downhill mountain biking is answered by the actual bike park, not by a scenic trail or a viewpoint near one. Read the traveler's own word for it in context: "downhill" is a bike park to one group and a ski area to another, and the notes and the season tell you which.
+2. Then add anything else genuinely worth stopping for in the same area — local favourites and lesser-known spots as readily as famous ones: regional parks, small museums, swimming spots, farm visits, marked walks, viewpoints.
 
-If a "focusQuery" is given, it OVERRIDES the general guidance above: the traveler has asked for something specific (e.g. "coffee stop", "cozy small lunch place", "a playground") — search for real places matching THAT description specifically, not general tourist highlights. When routeWaypoints are given too, look ALONG that whole corridor, not just at one of the waypoints — a good coffee stop halfway between two waypoints is exactly what "along route" means. Still apply the same rigor: only genuinely real places found via web search, still nothing generic or invented.
+If a "focusQuery" is given, it OVERRIDES the ordering above: the traveler has asked for something specific (e.g. "coffee stop", "cozy small lunch place", "a playground") — propose real places matching THAT description specifically, not general tourist highlights. When routeWaypoints are given too, look ALONG that whole corridor, not just at one of the waypoints — a good coffee stop halfway between two waypoints is exactly what "along route" means.
 
 Hard rules:
 1. STAY CLOSE. When a center+radius is given, only propose places genuinely within that radius. When routeWaypoints are given instead, only propose places that are a small, reasonable detour off that route — not a place near one waypoint that would require backtracking far off the corridor to reach. Anything too far will be discarded server-side regardless of how good it is.
 2. DO NOT invent or state exact distances, drive times, or coordinates — not in "why", not anywhere. Those are checked against real data after you respond. Describe where a place roughly is in words and stop there.
-3. Ground every suggestion in something you actually found via web search. If nothing genuinely worthwhile turns up, respond with an empty "finds" list rather than padding it with generic suggestions.
+3. "name" MUST be the real, searchable name of a real place, spelled the way Google Maps would have it (e.g. "Vallåsen Bike Park", "Hovs Hallar", "Klässbols Linneväveri"). Every name is looked up against real map data after you respond and DISCARDED if it can't be found, so a generic entry ("a nice forest walk", "a local café") is a wasted one — name the park, the operator, the trailhead, the resort's own base area.
+4. Do not pad. If this area genuinely has nothing worth stopping for, an empty "finds" list is a valid and honest answer. But "I am not certain enough" is not the same as "there is nothing here": propose the place you would name to a friend and let the map-data check be the thing that rejects it.
 
-The "why" for each find is what the traveler actually reads when deciding whether to keep it: 2-4 sentences describing what's genuinely there, what makes it worth the stop, and (if notes were given) how it connects to the traveler's stated interests.
+The "why" for each find is what the traveler actually reads when deciding whether to keep it: 2-4 sentences describing what's genuinely there, what makes it worth the stop, and which of the traveler's stated interests or notes it answers.
 
 Respond with JSON ONLY, matching this exact shape — no prose, no markdown code fences:
 {
@@ -41,6 +41,21 @@ export function buildRescanCorridorPrompt(input: {
   center: LatLng
   radiusKm: number
   notesFreeText?: string
+  /**
+   * The trip's own stated interests — the single most important input to
+   * "what's worth stopping for here", and the one this prompt never
+   * received (2026-08-16).
+   *
+   * Reported with a rescan of the Hallandsåsen area that answered "Nothing
+   * new found nearby" for a trip whose stated interest is downhill mountain
+   * biking, with Vallåsen Bike Park inside the searched circle. It was never
+   * a search problem: the search was never told what the traveler came for.
+   * All this call had was `notes` — which on that trip say "cozy over
+   * mainstream" and "good coffee" — so it answered the question it was
+   * actually asked. The whole-trip curation phase gets the full settings and
+   * proposes bike parks correctly; this is the same fix, one call later.
+   */
+  interests?: string[]
   // A traveler-typed description of what they're looking for (2026-08-01):
   // "coffee stop", "cozy small lunch place", etc. — see AddCorridorStopForm's
   // own doc comment for the UI this feeds. Optional: omitted, this call
@@ -91,6 +106,7 @@ export function buildRescanCorridorPrompt(input: {
             `latitude ${input.center.lat.toFixed(2)}, longitude ${input.center.lng.toFixed(2)}`,
           radiusKm: input.radiusKm,
         }),
+    interests: input.interests ?? [],
     notes: input.notesFreeText ?? '',
     ...(input.query ? { focusQuery: input.query } : {}),
   })

@@ -10,6 +10,7 @@ import {
   claudeApiKey,
   droppedForDistance,
   generateRescanCandidates,
+  notLocated,
 } from './prompts/rescanCorridor.js'
 import { findStopsForQuery } from './querySearch.js'
 
@@ -77,7 +78,7 @@ export async function runRescanCorridor(
   centerName?: string,
   waypointNames?: string[],
   deadlineMs?: number,
-): Promise<{ stopsWritten: number; droppedTooFar: number }> {
+): Promise<{ stopsWritten: number; droppedTooFar: number; notLocated: number }> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
   const tripSnap = await tripRef.get()
@@ -98,6 +99,7 @@ export async function runRescanCorridor(
           center,
           radiusKm,
           notesFreeText: trip.notes.freeText,
+          interests: trip.settings.interests,
           tripId,
           backbone,
           centerName,
@@ -108,6 +110,10 @@ export async function runRescanCorridor(
         center,
         radiusKm,
         notesFreeText: trip.notes.freeText,
+        // The trip's own stated interests. Their absence here is why a
+        // rescan for a downhill-biking trip answered "nothing nearby" with
+        // a bike park inside the circle — see buildRescanCorridorPrompt.
+        interests: trip.settings.interests,
         tripId,
         backbone,
         centerName,
@@ -144,20 +150,23 @@ export async function runRescanCorridor(
     ),
   )
 
-  return { stopsWritten: finds.length, droppedTooFar: droppedForDistance(finds) }
+  return {
+    stopsWritten: finds.length,
+    droppedTooFar: droppedForDistance(finds),
+    notLocated: notLocated(finds),
+  }
 }
 
 export const rescanCorridor = onCall(
   {
     secrets: [claudeApiKey, googlePlacesApiKey],
-    // Raised from 180 after a rescan was reported spinning for three
-    // minutes and then failing: one Claude turn with up to three web
-    // searches inside it, plus a retry allowance and geocoding for every
-    // find, does not reliably fit in three minutes — and unlike the
-    // overnight picker there is no partial result to degrade to, so the
-    // deadline firing costs the traveler the whole search. The streaming
-    // and pause-resume fixes in rescanCorridor.ts are what make a slow turn
-    // finish at all; this is the headroom for it to.
+    // Raised from 180 when this call still ran up to three web searches per
+    // turn. The search is gone (see rescanCorridor.ts's own note) and a
+    // tool-free turn plus geocoding is a fraction of that, so this is now
+    // pure headroom rather than a limit anything approaches. Left high on
+    // purpose: unlike the overnight picker there is no partial result to
+    // degrade to, so the deadline firing still costs the traveler the whole
+    // search, and nothing is paid for headroom that goes unused.
     timeoutSeconds: 300,
   },
   async (request) => {
@@ -244,7 +253,7 @@ export const rescanCorridor = onCall(
         )
     }, RESCAN_HEARTBEAT_MS)
     try {
-      const { stopsWritten, droppedTooFar } = await runRescanCorridor(
+      const { stopsWritten, droppedTooFar, notLocated: unlocatable } = await runRescanCorridor(
         tripId,
         center,
         radiusKm,
@@ -261,11 +270,13 @@ export const rescanCorridor = onCall(
         // Recorded so "nothing found" can stop being said when it isn't
         // true — see droppedForDistance.
         'planMeta.rescanLastDroppedTooFar': droppedTooFar,
+        // Proposed and then not findable on the map at all — see notLocated.
+        'planMeta.rescanLastNotLocated': unlocatable,
         // A run that worked answers the last one that didn't.
         'planMeta.rescanLastError': FieldValue.delete(),
         'planMeta.rescanLastFailedAt': FieldValue.delete(),
       })
-      return { stopsWritten, droppedTooFar }
+      return { stopsWritten, droppedTooFar, notLocated: unlocatable }
     } catch (error) {
       // Cleared on the way out either way: a status left at 'generating' by a
       // failed run would show a spinner forever, which is a worse lie than

@@ -439,6 +439,36 @@ test('a scan that found places outside the area says so, not "nothing"', async (
   await expect(status).not.toContainText('Nothing new found')
 })
 
+// The other way "Nothing new found nearby" was untrue: the search proposed
+// real places and every one failed its map-data lookup. That is not an empty
+// area, is not fixed by zooming out, and points at Places rather than at the
+// search — so it must not be reported as the same thing.
+test('a scan whose finds could not be located says that, not "nothing"', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 0,
+      'planMeta.rescanLastDroppedTooFar': 0,
+      'planMeta.rescanLastNotLocated': 3,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  const status = page.getByTestId('rescan-corridor-status')
+  await expect(status).toContainText(
+    'none of them could be found on the map',
+  )
+  await expect(status).not.toContainText('Nothing new found')
+})
+
 // A search that genuinely found nothing still says so — the honest case has
 // to survive the fix for the dishonest one.
 test('a scan that truly found nothing still says nothing', async ({ page }) => {

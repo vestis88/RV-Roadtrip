@@ -79,7 +79,13 @@ async function runRescan(radiusKm = 25) {
 }
 
 describe('generateRescanCandidates', () => {
-  it('offers web search and geocodes finds biased near the given center', async () => {
+  // No tools, deliberately. The web_search tool was what made this call take
+  // minutes, and its "ground every suggestion in something you found via web
+  // search" rule was what made it answer "nothing nearby" for an area with a
+  // bike park in it. Grounding is the Places lookup below, which is the same
+  // check the whole-trip curation phase relies on — and that phase calls
+  // Claude with no tools at all.
+  it('asks Claude directly, with no tools, and verifies each find through Places', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
     geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
 
@@ -90,16 +96,43 @@ describe('generateRescanCandidates', () => {
     expect(geocodeQueryMock).toHaveBeenCalledWith('Nearby, NO', CENTER)
 
     const [params] = createMock.mock.calls[0] as [
-      { tools?: { type: string }[]; thinking?: { type: string }; system: string },
+      { tools?: unknown; thinking?: { type: string }; system: string },
     ]
-    expect(params.tools?.some((t) => t.type === 'web_search_20260209')).toBe(true)
+    expect(params.tools).toBeUndefined()
     expect(params.thinking).toEqual({ type: 'disabled' })
     expect(params.system).toMatch(/DO NOT invent/i)
   })
 
-  // "Describe what you want" (AddCorridorStopForm, 2026-08-01): a traveler
-  // query narrows what this same call looks for instead of the generic
-  // "what's worth stopping for" pass.
+  // The defect behind "Nothing new found nearby" on a downhill-biking trip
+  // with Vallåsen Bike Park inside the searched circle: this prompt received
+  // the freeform notes and never the interests, so it answered a different
+  // question from the one the traveler thought they were asking.
+  it("sends the trip's stated interests, not just the freeform notes", async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 25,
+      interests: ['downhill mountain biking', 'swimming'],
+      notesFreeText: 'cozy over mainstream',
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const userContent = JSON.parse(params.messages[0].content) as Record<
+      string,
+      unknown
+    >
+    expect(userContent.interests).toEqual([
+      'downhill mountain biking',
+      'swimming',
+    ])
+    expect(userContent.notes).toBe('cozy over mainstream')
+  })
+
   it('includes the traveler\'s query as a focusQuery when one is given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
     geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
@@ -400,7 +433,7 @@ describe('generateRescanCandidates', () => {
   })
 })
 
-describe('generateRescanCandidates — long and paused turns', () => {
+describe('generateRescanCandidates — one streamed turn', () => {
   const NEAR = { lat: 61.1, lng: 10.5 }
 
   beforeEach(() => {
@@ -412,8 +445,7 @@ describe('generateRescanCandidates — long and paused turns', () => {
     vi.unstubAllEnvs()
   })
 
-  it('streams the search rather than waiting on one whole request', async () => {
-    // The non-streaming path is what a three-web-search turn runs out of.
+  it('streams the answer rather than waiting on one whole request', async () => {
     // Asserting the call shape is the only way to pin this from a unit test:
     // the timeout it prevents lives in the SDK's transport, not in our code.
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
@@ -424,64 +456,18 @@ describe('generateRescanCandidates — long and paused turns', () => {
     expect(createMock).toHaveBeenCalledTimes(1)
   })
 
-  // A server-side tool runs inside its own sampling loop; hitting that loop's
-  // ceiling ends the turn with `pause_turn` and a partial answer. That used
-  // to reach the schema parser as though it were a finished response — the
-  // JSON was cut off, parsing failed, and a merely unfinished search was
-  // reported as a malformed one.
-  it('resumes a paused turn instead of parsing the partial answer', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValueOnce({
-        stop_reason: 'pause_turn',
-        content: [{ type: 'text', text: '{"finds": [' }],
-      })
-      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-
-    const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
-
-    expect(createMock).toHaveBeenCalledTimes(2)
-    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
-  })
-
-  // Continuing a paused turn means re-sending the conversation with the
-  // partial assistant turn appended and nothing else. A "carry on" message
-  // would read as a fresh instruction rather than a continuation.
-  it('resumes by appending the partial turn, with no extra instruction', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValueOnce({
-        stop_reason: 'pause_turn',
-        content: [{ type: 'text', text: '{"finds": [' }],
-      })
-      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
+  // pause_turn is a server-side-tool phenomenon: the tool runs inside
+  // Anthropic's own sampling loop, and hitting that loop's ceiling is what
+  // ends a turn early. With no tools there is no loop and no pause, which is
+  // why the resumption machinery this call used to carry went with the
+  // search rather than being kept "just in case".
+  it('makes exactly one call per attempt, with nothing to resume', async () => {
+    createMock.mockReset().mockResolvedValue(responseWithFinds(['Nearby']))
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
 
-    const [resumed] = createMock.mock.calls[1] as [
-      { messages: { role: string }[] },
-    ]
-    expect(resumed.messages).toHaveLength(2)
-    expect(resumed.messages[1].role).toBe('assistant')
-  })
-
-  it('gives up resuming rather than spinning until the deadline kills it', async () => {
-    createMock.mockReset().mockResolvedValue({
-      stop_reason: 'pause_turn',
-      content: [{ type: 'text', text: '{"finds": []}' }],
-    })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
-
-    // Four calls: the first turn plus MAX_PAUSE_RESUMES resumes. Anything
-    // unbounded here would burn the whole function budget on one attempt.
-    expect(createMock).toHaveBeenCalledTimes(4)
-    expect(warn).toHaveBeenCalled()
-    warn.mockRestore()
+    expect(createMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -498,40 +484,37 @@ describe('generateRescanCandidates — staying inside the caller\'s budget', () 
   })
 
   // The reported failure: "Scanning… 5m 4s", then an error — the function's
-  // own 300s ceiling to the second. A rescan is the only search here that
-  // uses web_search, so each turn costs a minute or more; two attempts of up
-  // to four turns each is eight searching turns, which no deadline survives.
-  // Counting attempts was the wrong bound. Time is the right one.
-  it('does not start a turn it has no time to finish', async () => {
-    createMock.mockReset().mockResolvedValue({
-      stop_reason: 'pause_turn',
-      content: [{ type: 'text', text: '{"finds": []}' }],
-    })
+  // own ceiling to the second. Counting attempts was the wrong bound; time
+  // is the right one. Much less pressing now that a turn is one tool-free
+  // call, but the deadline is still the caller's to state and still binds.
+  it('does not start a retry it has no time to finish', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValue({ content: [{ type: 'text', text: 'not json' }] })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    await generateRescanCandidates({
-      center: NEAR,
-      radiusKm: 25,
-      // Already spent: there is room for the first turn and nothing after it.
-      deadlineMs: Date.now() + 1_000,
-    })
+    await expect(
+      generateRescanCandidates({
+        center: NEAR,
+        radiusKm: 25,
+        // Already spent: room for the first turn and nothing after it.
+        deadlineMs: Date.now() + 1_000,
+      }),
+    ).rejects.toBeDefined()
 
-    // One turn, no resumes — the resume cap would have allowed three more.
+    // One turn — MAX_ATTEMPTS alone would have allowed a second.
     expect(createMock).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('no time left to resume'),
+      expect.stringContaining('no room for another turn'),
     )
     warn.mockRestore()
   })
 
-  it('still resumes when there is budget for it', async () => {
+  it('still retries when there is budget for it', async () => {
     createMock
       .mockReset()
-      .mockResolvedValueOnce({
-        stop_reason: 'pause_turn',
-        content: [{ type: 'text', text: '{"finds": [' }],
-      })
+      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'not json' }] })
       .mockResolvedValueOnce(responseWithFinds(['Nearby']))
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
@@ -562,17 +545,7 @@ describe('generateRescanCandidates — staying inside the caller\'s budget', () 
   })
 })
 
-/**
- * The reported failure, over and over: "it scanned for minutes and came up
- * empty", and then "it still shouldn't be that long and come up empty!!".
- *
- * The search had done the expensive part. What it hadn't done was get the
- * JSON out — paused, clipped by the deadline, or cut off at max_tokens
- * mid-object — and every one of those went straight to JSON.parse, threw,
- * and discarded the entire run. The traveler paid for a search that had
- * genuinely found places and was told nothing was found.
- */
-describe('generateRescanCandidates — an answer for a search that already happened', () => {
+describe('generateRescanCandidates — a turn that produced nothing usable', () => {
   const NEAR = { lat: 61.1, lng: 10.5 }
 
   beforeEach(() => {
@@ -584,67 +557,12 @@ describe('generateRescanCandidates — an answer for a search that already happe
     vi.unstubAllEnvs()
   })
 
-  /** A turn that ran its web searches, however it then ended. */
-  function searchedTurn(text: string, stopReason?: string) {
-    return {
-      ...(stopReason ? { stop_reason: stopReason } : {}),
-      content: [
-        { type: 'web_search_tool_result', content: [] },
-        ...(text ? [{ type: 'text', text }] : []),
-      ],
-    }
-  }
-
-  it('asks for the write-up without searching again when a turn is cut off mid-answer', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValueOnce(searchedTurn('{"finds": [{"name": "Nea', 'max_tokens'))
-      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-
-    const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
-
-    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
-    const [finalize] = createMock.mock.calls[1] as [
-      {
-        tool_choice?: { type: string }
-        messages: { role: string; content: unknown }[]
-      },
-    ]
-    // The whole point: no second search. The tools stay declared so the
-    // search blocks already in the history remain valid.
-    expect(finalize.tool_choice).toEqual({ type: 'none' })
-    expect(finalize.messages.map((m) => m.role)).toEqual([
-      'user',
-      'assistant',
-      'user',
-    ])
-  })
-
-  it('recovers a turn that searched and then produced no text at all', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValueOnce(searchedTurn('', 'pause_turn'))
-      .mockResolvedValueOnce(searchedTurn('', 'pause_turn'))
-      .mockResolvedValueOnce(searchedTurn('', 'pause_turn'))
-      .mockResolvedValueOnce(searchedTurn('', 'pause_turn'))
-      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
-
-    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
-    warn.mockRestore()
-  })
-
   // An assistant turn with empty content is rejected outright by the API, so
   // quoting an empty response back at Claude turned "the model returned no
   // text" into a 400 on the very attempt meant to recover from it — a
   // different and more confusing failure than the one that happened.
   it('never quotes an empty response back on the retry', async () => {
     createMock.mockReset().mockResolvedValue({ content: [] })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await expect(
@@ -656,53 +574,77 @@ describe('generateRescanCandidates — an answer for a search that already happe
     ][]) {
       expect(params.messages.some((m) => m.content === '')).toBe(false)
     }
-    warn.mockRestore()
   })
 
   // "Unexpected end of JSON input" reads as Claude returning malformed JSON,
   // which is a prompt problem. Running out of output length is not. Those
   // have different fixes, and the wrong one was the only thing on screen.
   it('reports a truncated answer as truncated, not as malformed JSON', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValue(searchedTurn('{"finds": [{"name": "Nea', 'max_tokens'))
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    createMock.mockReset().mockResolvedValue({
+      stop_reason: 'max_tokens',
+      content: [{ type: 'text', text: '{"finds": [{"name": "Nea' }],
+    })
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await expect(
       generateRescanCandidates({ center: NEAR, radiusKm: 25 }),
     ).rejects.toThrow(/cut off/i)
-    warn.mockRestore()
-  })
-
-  // The finalize turn is only ever reached when the alternative is throwing,
-  // so its own failure must restore that outcome rather than replace it.
-  it('falls back to the ordinary retry when the finalize turn itself fails', async () => {
-    createMock
-      .mockReset()
-      .mockResolvedValueOnce(searchedTurn('not json', 'end_turn'))
-      .mockRejectedValueOnce(new Error('529 overloaded_error'))
-      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const { generateRescanCandidates } = await import('./rescanCorridor.js')
-    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
-
-    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
-    warn.mockRestore()
   })
 })
 
 /**
- * The single line that best explains why a rescan appeared never to work.
+ * "Nothing new found nearby" has to describe what actually happened.
  *
- * This is the only Claude call in the app that runs web_search, and a turn
- * grounded in sources is the one most likely to introduce or sign off its
- * answer — despite the prompt asking for JSON only. The old parser threw on
- * every one of these, discarding a complete and correct answer and buying a
- * second full web search to reach the same ending. The tool-free highlights
- * path was given this exact tolerance months ago; this one never was.
+ * It was said when the search proposed real places that then failed their
+ * map-data lookup — which is not the area being empty, is not the traveler's
+ * to fix by zooming out, and points at Places rather than at the search. See
+ * notLocated() and debug/curate.ts: proposed-then-rejected and never-proposed
+ * are the two halves of the fork, and they have completely different fixes.
  */
+describe('counting what was dropped, and why', () => {
+  const NEAR = { lat: 61.1, lng: 10.5 }
+
+  beforeEach(() => {
+    vi.stubEnv('CLAUDE_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('counts finds that could not be located at all, apart from those too far', async () => {
+    const { generateRescanCandidates, droppedForDistance, notLocated } =
+      await import('./rescanCorridor.js')
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce(responseWithFinds(['Close', 'Far', 'Unlocatable']))
+    geocodeQueryMock.mockReset().mockImplementation((query: string) => {
+      if (query.startsWith('Unlocatable')) return Promise.resolve(null)
+      if (query.startsWith('Far')) return Promise.resolve({ lat: 63, lng: 10.5 })
+      return Promise.resolve({ lat: 61.2, lng: 10.6 })
+    })
+
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(finds.map((find) => find.name)).toEqual(['Close'])
+    expect(droppedForDistance(finds)).toBe(1)
+    expect(notLocated(finds)).toBe(1)
+  })
+
+  it('reports nothing dropped when nothing was proposed', async () => {
+    const { generateRescanCandidates, droppedForDistance, notLocated } =
+      await import('./rescanCorridor.js')
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    geocodeQueryMock.mockReset()
+
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(finds).toHaveLength(0)
+    expect(droppedForDistance(finds)).toBe(0)
+    expect(notLocated(finds)).toBe(0)
+  })
+})
+
 describe('parseRescanResponse — an answer with a sentence around it', () => {
   const FINDS = {
     finds: [

@@ -12,22 +12,35 @@ export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 const MODEL = 'claude-sonnet-5'
 const MAX_ATTEMPTS = 2
 /**
- * How much wall time to reserve for one more Claude turn.
+ * WEB SEARCH, AND WHY THIS CALL NO LONGER USES IT (2026-08-16).
  *
- * Everything here is now bounded by a real deadline rather than by counting
- * attempts, because counting attempts is what let this run past five
- * minutes. The failure looked like this: a rescan is the only search in the
- * app that uses `web_search` (the initial corridor curation calls Claude
- * with no tools at all, which is why it is the faster of the two despite
- * covering the whole trip), and each searching turn costs a minute or more.
- * Multiply that by up to two attempts, each allowed up to three resumes of a
- * paused turn, and the ceiling was eight searching turns — comfortably past
- * any deadline, and reported as "Scanning… 5m 4s" followed by an error.
+ * A rescan used to run `web_search` with `max_uses: 3`, and the prompt's
+ * third hard rule was "ground every suggestion in something you actually
+ * found via web search... respond with an empty finds list rather than
+ * padding". That made the search a GATE on what could be proposed rather
+ * than a source: three queries over a whole viewport, and anything they
+ * missed was forbidden — including everything the model already knew.
  *
- * Attempt and resume caps still exist as backstops, but this is the limit
- * that actually binds: before every turn, if there isn't room for one, stop
- * and use what there is. Coming back with fewer finds beats being killed
- * mid-search with none.
+ * Reported as a rescan of the Hallandsåsen area answering "Nothing new found
+ * nearby" with Vallåsen Bike Park inside the circle. Grounding was never
+ * what web search was buying, either: every find is looked up through Google
+ * Places afterwards and dropped if it can't be located, which is the same
+ * and stronger check the whole-trip curation phase relies on — and that
+ * phase calls Claude with no tools at all and proposes bike parks by name.
+ *
+ * So the tool is gone. It cost minutes per turn, it was the sole reason this
+ * call needed streaming, pause-turn resumption and a wall-clock budget, and
+ * it suppressed correct answers. querySearch.ts reached the same conclusion
+ * for typed queries in 2026-08-02 and moved to Places-first; this is the
+ * same lesson arriving at the other path.
+ */
+
+/**
+ * How much wall time to reserve for one more Claude turn — the retry is
+ * skipped rather than started when the budget can't hold it. Far less
+ * binding now that a turn is one tool-free call rather than up to four
+ * searching ones, but kept: the caller still owns the deadline, and being
+ * killed mid-write with everything discarded is still the failure to avoid.
  */
 const TURN_RESERVE_MS = 90_000
 
@@ -41,8 +54,8 @@ const DEFAULT_SEARCH_BUDGET_MS = 240_000
 
 /**
  * How large a "rescan this area" search radius is allowed to be, in
- * kilometres. This is a traveler-triggered, on-demand Claude + web-search
- * call with no per-trip cost guard (unlike full generation/replan, it never
+ * kilometres. This is a traveler-triggered, on-demand Claude call with no
+ * per-trip cost guard (unlike full generation/replan, it never
  * touches `planMeta.status` or the days collection, so concurrent rescans
  * are merely redundant, not corrupting) — the radius cap is what keeps a
  * single call bounded, per master_plan.md's "explicit cap/viewport-scoping
@@ -104,17 +117,6 @@ function textFromResponse(response: Anthropic.Message): string {
     .join('')
 }
 
-/**
- * Whether this turn actually searched — used to decide whether asking for
- * the JSON again is worth anything, or whether there is nothing to ask
- * about.
- */
-function searched(response: Anthropic.Message): boolean {
-  return response.content.some(
-    (block) => block.type === 'web_search_tool_result',
-  )
-}
-
 export interface RescanFind {
   name: string
   country: string
@@ -134,95 +136,38 @@ export interface RescanFind {
  * geocode is dropped (nothing to check its distance/detour against).
  */
 /**
- * How many times a paused turn may be resumed before this attempt gives up.
+ * One attempt, streamed.
  *
- * A server-side tool runs inside a sampling loop on Anthropic's side, and
- * when that loop hits its own iteration ceiling the turn comes back with
- * `stop_reason: "pause_turn"` — a partial answer with an explicit "ask me
- * again to continue". Nothing here was checking for it, so a paused turn was
- * handed straight to the schema parser as though it were finished: the JSON
- * was cut off mid-object, parsing failed, and the failure was reported as a
- * malformed response from Claude rather than as an unfinished one. The retry
- * then re-ran the whole search from scratch instead of continuing it.
+ * Streamed because a survey-sized answer is exactly the shape that runs out
+ * a single non-streaming request's timeout. Streaming holds the connection
+ * open through the whole generation instead, which is the documented remedy;
+ * `finalMessage()` hands back the same assembled message the non-streaming
+ * call would have returned, so nothing downstream changes.
  *
- * Three is generous for an area rescan. The cap exists so a pathologically
- * pausing turn cannot spin until the function's own deadline kills it.
+ * No tools. See RESCAN_SYSTEM_PROMPT and the note on WEB SEARCH below for
+ * why the web_search tool was removed rather than tuned — and with it the
+ * pause-turn resumption this function used to carry, which only ever existed
+ * because a server-side tool can pause a turn. Without a server tool there
+ * is no paused turn to resume.
  */
-const MAX_PAUSE_RESUMES = 3
-
-/**
- * One search attempt, streamed, resuming across any paused turns.
- *
- * Streamed because the non-streaming path is what a long web-search turn
- * runs out of: a single request has to complete inside the SDK's request
- * timeout, and three searches plus a survey-sized answer is exactly the
- * shape that doesn't. Streaming holds the connection open through the whole
- * generation instead, which is the documented remedy — `finalMessage()` then
- * hands back the same assembled message the non-streaming call would have
- * returned, so nothing downstream changes.
- *
- * Resuming is the other half. To continue a paused turn you re-send the
- * conversation with the partial assistant turn appended and nothing else —
- * no "carry on" message, which would be read as a new instruction rather
- * than a continuation.
- */
-const SEARCH_TOOLS: Anthropic.ToolUnion[] = [
-  // Uncapped web_search bills every search result back in as input tokens on
-  // top of the per-search fee — a rescan of one small area never legitimately
-  // needs more than a couple of searches.
-  { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
-]
-
 async function runSearchTurn(
   client: Anthropic,
   system: string,
   messages: Anthropic.MessageParam[],
   input: { query?: string },
-  deadlineMs: number,
-): Promise<{ response: Anthropic.Message; turn: Anthropic.MessageParam[] }> {
-  const turn = [...messages]
-  let response: Anthropic.Message | undefined
-
-  for (let resume = 0; resume <= MAX_PAUSE_RESUMES; resume++) {
-    const stream = client.messages.stream({
-      model: MODEL,
-      // A focused query wants a handful of matches, not a survey — and
-      // output length is paid for in wall time, on the call the traveler
-      // is sitting and waiting for. The general "what's worth stopping
-      // for here" pass still gets the full budget.
-      max_tokens: input.query ? 1500 : 4000,
-      thinking: { type: 'disabled' },
-      system,
-      messages: turn,
-      tools: SEARCH_TOOLS,
-    })
-    response = await stream.finalMessage()
-    if (response.stop_reason !== 'pause_turn') return { response, turn }
-    if (Date.now() + TURN_RESERVE_MS > deadlineMs) {
-      console.warn(
-        'Rescan search paused with no time left to resume — using the partial turn',
-      )
-      return { response, turn }
-    }
-    turn.push({ role: 'assistant', content: response.content })
-  }
-
-  // Out of resumes: hand back the last partial rather than throwing. The
-  // caller's schema check is the right place to decide whether what arrived
-  // is usable, and a truncated-but-parseable answer is still an answer.
-  console.warn(
-    `Rescan search paused ${MAX_PAUSE_RESUMES} times without finishing — using the partial turn`,
-  )
-  return { response: response as Anthropic.Message, turn }
-}
-
-function isParseable(text: string): boolean {
-  try {
-    parseRescanResponse(text)
-    return true
-  } catch {
-    return false
-  }
+): Promise<Anthropic.Message> {
+  const stream = client.messages.stream({
+    model: MODEL,
+    // A focused query wants a handful of matches, not a survey — and output
+    // length is paid for in wall time, on the call the traveler is sitting
+    // and waiting for. The general "what's worth stopping for here" pass
+    // still gets the full budget.
+    max_tokens: input.query ? 1500 : 4000,
+    thinking: { type: 'disabled' },
+    system,
+    messages,
+  })
+  return stream.finalMessage()
 }
 
 /**
@@ -246,75 +191,17 @@ function describeUnusableResponse(
     )
   }
   if (text.trim().length === 0) {
-    return new Error(
-      response.stop_reason === 'pause_turn'
-        ? 'The search ran out of time before it could write up what it found.'
-        : 'The search returned no answer at all.',
-    )
+    return new Error('The search returned no answer at all.')
   }
   return parseError instanceof Error ? parseError : new Error(String(parseError))
-}
-
-const FINALIZE_INSTRUCTION =
-  'Stop searching now and answer from what you have already found. ' +
-  'Return ONLY the JSON object described in your instructions — no prose, ' +
-  'no markdown code fences. If nothing you found is genuinely worth a stop, ' +
-  'return {"finds": []}.'
-
-/**
- * Asks for the answer to the search that already happened, without searching
- * again.
- *
- * This is the fix for the failure that was reported over and over as "it
- * scanned for minutes and came up empty". A searching turn that pauses, or
- * runs into the deadline, or fills its output budget mid-object, comes back
- * with the searches done and the JSON unfinished or absent entirely — and
- * every one of those was handed straight to JSON.parse, which threw, which
- * discarded the whole run. The traveler paid three minutes and a Claude call
- * for a search that had genuinely found places, and was told nothing was
- * found. The retry then re-ran the entire search from the beginning, at full
- * cost, for another chance at the same ending.
- *
- * The searches are already in the conversation as results, so this turn only
- * has to write them down: no tools (`tool_choice: none` rather than dropping
- * the tools, which would invalidate the search blocks in the history it is
- * being shown), and seconds rather than minutes. It is the cheapest turn in
- * the whole path and it is the one that turns a wasted search into an answer.
- *
- * Best-effort by construction: it is only ever reached when the alternative
- * is throwing, so its own failure just restores that outcome.
- */
-async function finalizeWithoutSearching(
-  client: Anthropic,
-  system: string,
-  turn: Anthropic.MessageParam[],
-  searchResponse: Anthropic.Message,
-): Promise<string | undefined> {
-  try {
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 2000,
-      thinking: { type: 'disabled' },
-      system,
-      messages: [
-        ...turn,
-        { role: 'assistant', content: searchResponse.content },
-        { role: 'user', content: FINALIZE_INSTRUCTION },
-      ],
-      tools: SEARCH_TOOLS,
-      tool_choice: { type: 'none' },
-    })
-    return textFromResponse(await stream.finalMessage())
-  } catch (error) {
-    console.warn('Rescan finalize turn failed — falling back to a retry', error)
-    return undefined
-  }
 }
 
 export async function generateRescanCandidates(input: {
   center: LatLng
   radiusKm: number
   notesFreeText?: string
+  /** The trip's stated interests — see buildRescanCorridorPrompt's own note. */
+  interests?: string[]
   tripId?: string
   query?: string
   backbone?: LatLng[]
@@ -345,16 +232,9 @@ export async function generateRescanCandidates(input: {
       break
     }
     let response: Anthropic.Message
-    let turn: Anthropic.MessageParam[]
     const attemptStartedAt = Date.now()
     try {
-      ;({ response, turn } = await runSearchTurn(
-        client,
-        system,
-        messages,
-        input,
-        deadlineMs,
-      ))
+      response = await runSearchTurn(client, system, messages, input)
     } catch (error) {
       // A transient API-level failure (rate limit, brief overload, network
       // blip), not Claude returning malformed JSON — MAX_ATTEMPTS existing
@@ -372,18 +252,7 @@ export async function generateRescanCandidates(input: {
       elapsedMs: Date.now() - attemptStartedAt,
       response,
     })
-    let text = textFromResponse(response)
-
-    // A turn that searched and then didn't get its answer out — paused,
-    // deadline-clipped, or cut off at max_tokens mid-object — has the whole
-    // expensive part behind it. Ask for the write-up before spending another
-    // search on it. See finalizeWithoutSearching.
-    if (!isParseable(text) && searched(response)) {
-      console.warn(
-        `Rescan search turn ended ${response.stop_reason ?? 'with no stop reason'} without usable JSON — asking for the answer without searching again`,
-      )
-      text = (await finalizeWithoutSearching(client, system, turn, response)) ?? text
-    }
+    const text = textFromResponse(response)
 
     try {
       found = parseRescanResponse(text)
@@ -461,16 +330,43 @@ export function filterFindsToCorridor(
 
   const kept = filtered.slice(0, MAX_RESCAN_RESULTS)
   const located = finds.filter((find) => find !== null).length
-  return withDroppedCount(kept, located - filtered.length)
+  return withCounts(kept, {
+    tooFar: located - filtered.length,
+    notLocated: finds.length - located,
+  })
 }
 
 const DROPPED_FOR_DISTANCE = Symbol('droppedForDistance')
+const NOT_LOCATED = Symbol('notLocated')
 
-function withDroppedCount(finds: RescanFind[], dropped: number): RescanFind[] {
-  return Object.defineProperty(finds, DROPPED_FOR_DISTANCE, {
-    value: dropped,
+function withCounts(
+  finds: RescanFind[],
+  counts: { tooFar: number; notLocated: number },
+): RescanFind[] {
+  Object.defineProperty(finds, DROPPED_FOR_DISTANCE, {
+    value: counts.tooFar,
     enumerable: false,
   })
+  return Object.defineProperty(finds, NOT_LOCATED, {
+    value: counts.notLocated,
+    enumerable: false,
+  })
+}
+
+/**
+ * How many places this search proposed that could not be found on the map at
+ * all, and were therefore dropped before the traveler ever saw them.
+ *
+ * The other half of the fork the debug tool was built around (see
+ * debug/curate.ts): a candidate with no coordinates was proposed and then
+ * rejected by verification, and one that never appears was never proposed.
+ * They have completely different fixes — a broken or restricted Places key
+ * versus a search that answered the wrong question — and "Nothing new found
+ * nearby" is what both of them looked like from the map. Counting them apart
+ * is what makes the next empty rescan diagnosable instead of another guess.
+ */
+export function notLocated(finds: RescanFind[]): number {
+  return (finds as unknown as Record<symbol, number>)[NOT_LOCATED] ?? 0
 }
 
 /**

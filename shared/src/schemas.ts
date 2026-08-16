@@ -196,6 +196,12 @@ export const planMetaSchema = z.object({
   // describes a different failure from the one that happened and is what
   // made a narrow search look like a broken one.
   rescanLastDroppedTooFar: z.number().int().nonnegative().optional(),
+  // Places the search proposed that could not be found on the map at all.
+  // Recorded apart from the count above because the two mean opposite
+  // things: "the area you searched was too narrow" versus "these could not
+  // be verified", the second of which points at map data rather than at the
+  // search. Both used to read as "Nothing new found nearby".
+  rescanLastNotLocated: z.number().int().nonnegative().optional(),
   // Heartbeat for the `status` busy guard — refreshed whenever a running
   // generation writes progress, so a claim left behind by a killed
   // container can be reclaimed instead of wedging the trip forever. See

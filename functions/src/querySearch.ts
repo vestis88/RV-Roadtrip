@@ -64,6 +64,7 @@ export async function findStopsForQuery(input: {
   center: LatLng
   radiusKm: number
   notesFreeText?: string
+  interests?: string[]
   tripId?: string
   backbone?: LatLng[]
   centerName?: string
