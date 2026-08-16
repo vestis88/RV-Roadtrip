@@ -194,6 +194,12 @@ export const overnightStopSchema = z.object({
   // because the rules can be re-researched afterwards — this is what the plan
   // was actually decided on.
   freeCampingRule: z.string().optional(),
+  // Google's own URL for the committed stop, when it came from Places (a
+  // commercial campsite). Absent for an OSM stellplatz or a free spot, which
+  // genuinely have no Google listing — there the coordinate link is the right
+  // answer rather than a degraded one, since what is being navigated to is a
+  // point in a lay-by and not a business.
+  googleMapsUrl: z.string().optional(),
 })
 
 // Overnight-stop type & candidate selection (implemented 2026-07-27):
@@ -366,6 +372,13 @@ export const corridorStopSchema = z.object({
   baseTown: z.string().optional(),
   interest: z.string().optional(),
   timeNeeded: sightTimeNeededSchema.optional(),
+  // Google's own URL for this place's listing, when it was verified through
+  // Places. Present so "Open in Google Maps" lands on the place — with its
+  // name, photos and opening hours — instead of dropping a nameless pin at
+  // its coordinates, which is what a coordinate link does and what was
+  // reported. Absent for a hand-dropped pin or anything not verified, where
+  // the coordinate link is the honest answer rather than a worse one.
+  googleMapsUrl: z.string().optional(),
 })
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per

@@ -750,6 +750,20 @@ export interface VerifiedPlace {
   name: string
   lat: number
   lng: number
+  /**
+   * Google's own URL for this listing, which the search already returned
+   * (FIELD_MASK asks for googleMapsUri) and which used to be discarded here.
+   *
+   * It is the difference between "Navigate" opening Klässbols Linneväveri and
+   * opening 59°31'53.6\"N 12°44'40.7\"E — a dropped pin in a field, with no
+   * name, no photos, no opening hours and no way to tell whether it is even
+   * the right building. Reported with a screenshot of exactly that.
+   *
+   * Optional because a listing without one is possible and a stop that was
+   * never verified through Places has none at all; every consumer falls back
+   * to the coordinate link, which is correct if bare.
+   */
+  googleMapsUrl?: string
 }
 
 /**
@@ -807,7 +821,14 @@ export async function verifyPlaceLocation(
     NO_QUALITY_BAR,
     maxDistanceKm,
   )
-  return match ? { name: match.name, lat: match.lat, lng: match.lng } : null
+  return match
+    ? {
+        name: match.name,
+        lat: match.lat,
+        lng: match.lng,
+        ...(match.googleMapsUrl ? { googleMapsUrl: match.googleMapsUrl } : {}),
+      }
+    : null
 }
 
 export interface ProposedActivity {

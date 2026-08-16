@@ -349,7 +349,15 @@ test('a candidate reports its detour in both distance and time', async ({
 // photos, reviews and opening hours without this app paying per photo load
 // or putting its Places key in a scrapeable <img src> — and it works for
 // stops already in Firestore, which a stored photo URL would not.
-test('every candidate links out to Google Maps', async ({ page }) => {
+// This link is labelled "Photos & details", and it used to be built from the
+// stop's coordinates — which opens a nameless pin in a field with no photos,
+// no reviews and no opening hours. Reported with a screenshot of exactly
+// that: a dropped pin at 59°31'53.6"N 12°44'40.7"E instead of the linen mill
+// standing on it. A stop stored before listing URLs existed still has to
+// resolve, which is what the name query is for.
+test('every candidate links out to the place, not to its coordinates', async ({
+  page,
+}) => {
   const tripId = await getTripId(page)
   await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
 
@@ -358,16 +366,33 @@ test('every candidate links out to Google Maps', async ({ page }) => {
 
   const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
   const ottaDoc = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0]
-  const { lat, lng } = ottaDoc.data() as { lat: number; lng: number }
+  const { lat } = ottaDoc.data() as { lat: number }
 
   const link = page.getByTestId(`explore-candidate-maps-${ottaDoc.id}`)
-  await expect(link).toHaveAttribute(
-    'href',
-    `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-  )
+  const href = await link.getAttribute('href')
+  expect(decodeURIComponent(href ?? '')).toContain('query=Otta, NO')
+  expect(href).not.toContain(String(lat))
   await expect(link).toHaveAttribute('target', '_blank')
   // Without noopener the opened tab gets a handle back to this one.
   await expect(link).toHaveAttribute('rel', /noopener/)
+})
+
+test("a candidate curated since listing URLs existed links straight to Google's own page", async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaDoc = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0]
+  await ottaDoc.ref.update({ googleMapsUrl: 'https://maps.google.com/?cid=99' })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  await expect(
+    page.getByTestId(`explore-candidate-maps-${ottaDoc.id}`),
+  ).toHaveAttribute('href', 'https://maps.google.com/?cid=99')
 })
 
 // Totals describe the committed route, so with nothing kept there is no

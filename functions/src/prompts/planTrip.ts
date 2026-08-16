@@ -486,7 +486,13 @@ async function locateCandidateSight(
     // Places' own spelling wins from here on: it is what the traveler will
     // see on the map, and it gives the sight one stable identity across
     // repeated curation passes (see buildExploreCandidateWrites' merge).
-    return { ...stop, sight: sight.name, lat: sight.lat, lng: sight.lng }
+    return {
+      ...stop,
+      sight: sight.name,
+      lat: sight.lat,
+      lng: sight.lng,
+      ...(sight.googleMapsUrl ? { googleMapsUrl: sight.googleMapsUrl } : {}),
+    }
   } catch (error) {
     console.warn(
       `Locating highlight candidate "${stop.sight}, ${stop.town}, ${stop.country}" failed — continuing without coordinates`,

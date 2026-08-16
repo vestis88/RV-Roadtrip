@@ -22,7 +22,7 @@ import { usePlanBusy } from '../lib/planBusy'
 import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
-import { googleMapsSearchUrl } from '../lib/mapLinks'
+import { navigateUrl } from '../lib/mapLinks'
 import {
   markDone,
   markSuggested,
@@ -484,7 +484,7 @@ export function DayViewScreen() {
           </span>
           <a
             data-testid="overnight-navigate"
-            href={googleMapsSearchUrl(day.overnight.lat, day.overnight.lng)}
+            href={navigateUrl(day.overnight)}
             target="_blank"
             rel="noreferrer"
             className="link text-xs font-medium"

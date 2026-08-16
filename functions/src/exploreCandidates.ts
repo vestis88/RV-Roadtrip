@@ -139,6 +139,9 @@ export function buildExploreCandidateWrites(
           baseTown: candidate.town,
           ...(candidate.interest ? { interest: candidate.interest } : {}),
           ...(candidate.timeNeeded ? { timeNeeded: candidate.timeNeeded } : {}),
+          ...(candidate.googleMapsUrl
+            ? { googleMapsUrl: candidate.googleMapsUrl }
+            : {}),
         }),
       })
     }

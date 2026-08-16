@@ -307,6 +307,7 @@ export async function applyOvernightOptions(
     const stop = { ...day.overnight }
     delete stop.type
     delete stop.freeCampingRule
+    delete stop.googleMapsUrl
     writes.push({
       op: 'set',
       ref,
@@ -328,6 +329,12 @@ export async function applyOvernightOptions(
                 // be re-researched, and this is what the decision was made on.
                 ...(picked.type === 'wild' && policy.rule
                   ? { freeCampingRule: policy.rule }
+                  : {}),
+                // Only a Places-sourced campsite has one. Navigating to a
+                // stellplatz or a lay-by is navigating to a coordinate, and
+                // there is no listing to open instead.
+                ...(picked.googleMapsUrl
+                  ? { googleMapsUrl: picked.googleMapsUrl }
                   : {}),
               }
             : { lat: anchor.lat, lng: anchor.lng }),

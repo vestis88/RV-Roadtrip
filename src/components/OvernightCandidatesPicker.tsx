@@ -3,7 +3,7 @@ import { collection, getDocs } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { OvernightStopCandidate, Trip, TripDay } from '@rv/shared'
 import { db, functions } from '../lib/firebase'
-import { googleMapsSearchUrl } from '../lib/mapLinks'
+import { navigateUrl } from '../lib/mapLinks'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 
@@ -286,7 +286,7 @@ export function OvernightCandidatesPicker({
                     )}
                     <a
                       data-testid={`overnight-candidate-navigate-${type}-${i}`}
-                      href={c.googleMapsUrl ?? googleMapsSearchUrl(c.lat, c.lng)}
+                      href={navigateUrl(c)}
                       target="_blank"
                       rel="noreferrer"
                       className="link mt-1 inline-block text-xs font-medium"

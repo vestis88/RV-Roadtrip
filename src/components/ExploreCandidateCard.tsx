@@ -2,7 +2,7 @@ import { estimateDriveMinutes } from '@rv/shared'
 import type { CorridorStopPriority, SightTimeNeeded } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { isoCountryFlag } from '../lib/countryFlag'
-import { googleMapsSearchUrl } from '../lib/mapLinks'
+import { placeDetailsUrl } from '../lib/mapLinks'
 import { formatDriveTime } from '../lib/formatDuration'
 import {
   TIER_LABEL,
@@ -225,11 +225,12 @@ export function ExploreCandidateCard({
             * mirror any of them: Places photo media is billed per load and
             * puts the API key in a scrapeable <img src>, whereas a link
             * costs nothing and lands the traveler somewhere strictly richer
-            * than a thumbnail. Coordinates rather than a place ID, so it
-            * works for every stop already in Firestore — see
-            * googleMapsSearchUrl's own note on the precision tradeoff. */}
+            * than a thumbnail. Which link is best depends on what the
+            * stop carries — see placeDetailsUrl; it used to be the
+            * coordinate unconditionally, which reached none of the photos
+            * or details this link promises. */}
           <a
-            href={googleMapsSearchUrl(stop.lat, stop.lng)}
+            href={placeDetailsUrl(stop)}
             target="_blank"
             rel="noopener noreferrer"
             data-testid={`explore-candidate-maps-${stop.id}`}

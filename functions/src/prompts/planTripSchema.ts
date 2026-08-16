@@ -127,6 +127,10 @@ export const regionHighlightCandidateSchema = z.object({
   // so the two lists drifting apart would mean a candidate that validates
   // here and fails there.
   timeNeeded: sightTimeNeededSchema.optional(),
+  // Google's own URL for the verified listing (see VerifiedPlace). Carried
+  // from here onto the corridor stop so the card's link opens the place
+  // rather than a bare pin at its coordinates.
+  googleMapsUrl: z.string().optional(),
   source: z.enum(['curated', 'search']).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
