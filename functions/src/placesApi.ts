@@ -622,10 +622,12 @@ export interface QueryPlaceFind {
   rating?: number
   ratingCount?: number
   summary?: string
+  /** Google's own URL for the listing — see RescanFind.googleMapsUrl. */
+  googleMapsUrl?: string
 }
 
 const QUERY_SEARCH_FIELD_MASK =
-  'places.displayName,places.location,places.rating,places.userRatingCount,places.addressComponents,places.editorialSummary,places.formattedAddress'
+  'places.displayName,places.location,places.rating,places.userRatingCount,places.addressComponents,places.editorialSummary,places.formattedAddress,places.googleMapsUri'
 
 /** Places' own bias radius cap. */
 const MAX_BIAS_RADIUS_METERS = 50_000
@@ -702,6 +704,7 @@ export async function searchPlacesByQuery(
       userRatingCount?: number
       addressComponents?: { shortText?: string; types?: string[] }[]
       editorialSummary?: { text?: string }
+      googleMapsUri?: string
       formattedAddress?: string
     }[]
   }
@@ -718,6 +721,7 @@ export async function searchPlacesByQuery(
         rating: place.rating,
         ratingCount: place.userRatingCount,
         summary: place.editorialSummary?.text ?? place.formattedAddress,
+        ...(place.googleMapsUri ? { googleMapsUrl: place.googleMapsUri } : {}),
       },
     ]
   })

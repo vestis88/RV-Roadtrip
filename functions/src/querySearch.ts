@@ -87,6 +87,9 @@ export async function findStopsForQuery(input: {
     why: describePlace(place, input.query),
     lat: place.lat,
     lng: place.lng,
+    // These came straight from Places, so the listing link is already in
+    // hand — the same link the Claude path now gets from verification.
+    ...(place.googleMapsUrl ? { googleMapsUrl: place.googleMapsUrl } : {}),
   }))
   const withinCorridor = filterFindsToCorridor(located, input)
 

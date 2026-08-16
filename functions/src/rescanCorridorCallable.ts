@@ -140,6 +140,10 @@ export async function runRescanCorridor(
           lng: find.lng,
           country: find.country,
           why: find.why,
+          // Google's own listing URL when the find was verified through
+          // Places — what makes "Photos & details" open the place rather
+          // than a search for its name. See RescanFind.googleMapsUrl.
+          ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
           status: isExploring ? 'candidate' : 'proposed',
           linkedDayIds: [],
           ...(isExploring

@@ -39,14 +39,24 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }))
 
-const geocodeQueryMock = vi.fn()
+// The seam is verifyPlaceLocation, not geocodeQuery: a find is checked for
+// identity and comes back with Places' OWN name and listing URL, which is
+// the whole point (a card read "Vrå Bike Park" over a pin sitting on
+// Vallåsen Bike Park, because the verified name was thrown away).
+const verifyPlaceMock = vi.fn()
 vi.mock('../placesApi.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../placesApi.js')>()
   return {
     ...actual,
-    geocodeQuery: (...args: unknown[]) => geocodeQueryMock(...args),
+    verifyPlaceLocation: (...args: unknown[]) => verifyPlaceMock(...args),
   }
 })
+
+/** Places confirming the name it was asked for, at a given point. */
+function found(point: { lat: number; lng: number }) {
+  return (_query: string, expectedName: string) =>
+    Promise.resolve({ name: expectedName, ...point })
+}
 
 function responseWithFinds(
   names: string[],
@@ -87,13 +97,18 @@ describe('generateRescanCandidates', () => {
   // Claude with no tools at all.
   it('asks Claude directly, with no tools, and verifies each find through Places', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const finds = await runRescan()
 
     expect(finds).toHaveLength(1)
     expect(finds[0]).toMatchObject({ name: 'Nearby', lat: 61.8, lng: 9.6 })
-    expect(geocodeQueryMock).toHaveBeenCalledWith('Nearby, NO', CENTER)
+    expect(verifyPlaceMock).toHaveBeenCalledWith(
+      'Nearby, NO',
+      'Nearby',
+      CENTER,
+      Number.POSITIVE_INFINITY,
+    )
 
     const [params] = createMock.mock.calls[0] as [
       { tools?: unknown; thinking?: { type: string }; system: string },
@@ -109,7 +124,7 @@ describe('generateRescanCandidates', () => {
   // question from the one the traveler thought they were asking.
   it("sends the trip's stated interests, not just the freeform notes", async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({
@@ -135,7 +150,7 @@ describe('generateRescanCandidates', () => {
 
   it('includes the traveler\'s query as a focusQuery when one is given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({
@@ -156,7 +171,7 @@ describe('generateRescanCandidates', () => {
 
   it('omits focusQuery entirely from a plain rescan with no query', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     await runRescan()
 
@@ -178,12 +193,13 @@ describe('generateRescanCandidates', () => {
     createMock
       .mockReset()
       .mockResolvedValueOnce(responseWithFinds(['OnRoute', 'OffRoute']))
-    geocodeQueryMock.mockReset().mockImplementation((query: string) =>
-      Promise.resolve(
-        query.startsWith('OnRoute')
+    verifyPlaceMock.mockReset().mockImplementation((query: string, expectedName: string) =>
+      Promise.resolve({
+        name: expectedName,
+        ...(query.startsWith('OnRoute')
           ? { lat: 61.5, lng: 9.0 } // roughly on the backbone line below
-          : { lat: 61.5, lng: 12.0 }, // ~150km east of it
-      ),
+          : { lat: 61.5, lng: 12.0 }), // ~150km east of it
+      }),
     )
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
@@ -203,7 +219,7 @@ describe('generateRescanCandidates', () => {
 
   it('sends routeWaypoints instead of areaDescription/radiusKm in the prompt when backbone is given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({
@@ -233,7 +249,7 @@ describe('generateRescanCandidates', () => {
   // named its own town and still failed; see querySearch.ts.
   it('names the area instead of sending coordinates when centerName is given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({
@@ -256,7 +272,7 @@ describe('generateRescanCandidates', () => {
 
   it('names the corridor instead of listing latitudes when waypointNames are given', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({
@@ -288,7 +304,7 @@ describe('generateRescanCandidates', () => {
   // has to keep working — worse prompt, but never a broken one.
   it('still falls back to coordinates when no names are available', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     await generateRescanCandidates({ center: CENTER, radiusKm: 25 })
@@ -305,7 +321,7 @@ describe('generateRescanCandidates', () => {
 
   it('falls back to distance-from-center filtering when backbone has fewer than 2 points', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const { generateRescanCandidates } = await import('./rescanCorridor.js')
     const finds = await generateRescanCandidates({
@@ -329,14 +345,15 @@ describe('generateRescanCandidates', () => {
     createMock
       .mockReset()
       .mockResolvedValueOnce(responseWithFinds(['Close', 'Far']))
-    geocodeQueryMock
+    verifyPlaceMock
       .mockReset()
-      .mockImplementation((query: string) =>
-        Promise.resolve(
-          query.startsWith('Far')
+      .mockImplementation((query: string, expectedName: string) =>
+        Promise.resolve({
+          name: expectedName,
+          ...(query.startsWith('Far')
             ? { lat: 63, lng: 9.54 } // ~137 km away
-            : { lat: 61.8, lng: 9.6 }, // a few km away
-        ),
+            : { lat: 61.8, lng: 9.6 }), // a few km away
+        }),
       )
 
     const finds = await runRescan(25)
@@ -348,11 +365,13 @@ describe('generateRescanCandidates', () => {
     createMock
       .mockReset()
       .mockResolvedValueOnce(responseWithFinds(['Close', 'Unlocatable']))
-    geocodeQueryMock
+    verifyPlaceMock
       .mockReset()
-      .mockImplementation((query: string) =>
+      .mockImplementation((query: string, expectedName: string) =>
         Promise.resolve(
-          query.startsWith('Unlocatable') ? null : { lat: 61.8, lng: 9.6 },
+          query.startsWith('Unlocatable')
+            ? null
+            : { name: expectedName, lat: 61.8, lng: 9.6 },
         ),
       )
 
@@ -365,7 +384,7 @@ describe('generateRescanCandidates', () => {
     const { MAX_RESCAN_RESULTS } = await import('./rescanCorridor.js')
     const names = Array.from({ length: MAX_RESCAN_RESULTS + 5 }, (_, i) => `Stop ${i}`)
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(names))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const finds = await runRescan()
 
@@ -376,10 +395,10 @@ describe('generateRescanCandidates', () => {
     createMock.mockReset().mockResolvedValueOnce({
       content: [{ type: 'text', text: '{"finds": []}' }],
     })
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     expect(await runRescan()).toEqual([])
-    expect(geocodeQueryMock).not.toHaveBeenCalled()
+    expect(verifyPlaceMock).not.toHaveBeenCalled()
   })
 
   it('retries once on a schema failure and succeeds on the second attempt', async () => {
@@ -387,7 +406,7 @@ describe('generateRescanCandidates', () => {
       .mockReset()
       .mockResolvedValueOnce({ content: [{ type: 'text', text: 'not valid json' }] })
       .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const finds = await runRescan()
 
@@ -399,7 +418,7 @@ describe('generateRescanCandidates', () => {
     createMock
       .mockReset()
       .mockResolvedValue({ content: [{ type: 'text', text: 'still not json' }] })
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     await expect(runRescan()).rejects.toBeDefined()
     expect(createMock).toHaveBeenCalledTimes(2)
@@ -416,7 +435,7 @@ describe('generateRescanCandidates', () => {
       .mockReset()
       .mockRejectedValueOnce(new Error('529 overloaded_error'))
       .mockResolvedValueOnce(responseWithFinds(['Nearby']))
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.8, lng: 9.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     const finds = await runRescan()
 
@@ -426,7 +445,7 @@ describe('generateRescanCandidates', () => {
 
   it('throws the transient-failure error when every attempt fails at the API level', async () => {
     createMock.mockReset().mockRejectedValue(new Error('529 overloaded_error'))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     await expect(runRescan()).rejects.toThrow('529 overloaded_error')
     expect(createMock).toHaveBeenCalledTimes(2)
@@ -438,7 +457,7 @@ describe('generateRescanCandidates — one streamed turn', () => {
 
   beforeEach(() => {
     vi.stubEnv('CLAUDE_API_KEY', 'test-key')
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.2, lng: 10.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.2, lng: 10.6 }))
   })
 
   afterEach(() => {
@@ -476,7 +495,7 @@ describe('generateRescanCandidates — staying inside the caller\'s budget', () 
 
   beforeEach(() => {
     vi.stubEnv('CLAUDE_API_KEY', 'test-key')
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.2, lng: 10.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.2, lng: 10.6 }))
   })
 
   afterEach(() => {
@@ -550,7 +569,7 @@ describe('generateRescanCandidates — a turn that produced nothing usable', () 
 
   beforeEach(() => {
     vi.stubEnv('CLAUDE_API_KEY', 'test-key')
-    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.2, lng: 10.6 })
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.2, lng: 10.6 }))
   })
 
   afterEach(() => {
@@ -618,10 +637,11 @@ describe('counting what was dropped, and why', () => {
     createMock
       .mockReset()
       .mockResolvedValueOnce(responseWithFinds(['Close', 'Far', 'Unlocatable']))
-    geocodeQueryMock.mockReset().mockImplementation((query: string) => {
+    verifyPlaceMock.mockReset().mockImplementation((query: string, expectedName: string) => {
       if (query.startsWith('Unlocatable')) return Promise.resolve(null)
-      if (query.startsWith('Far')) return Promise.resolve({ lat: 63, lng: 10.5 })
-      return Promise.resolve({ lat: 61.2, lng: 10.6 })
+      if (query.startsWith('Far'))
+        return Promise.resolve({ name: expectedName, lat: 63, lng: 10.5 })
+      return Promise.resolve({ name: expectedName, lat: 61.2, lng: 10.6 })
     })
 
     const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
@@ -635,7 +655,7 @@ describe('counting what was dropped, and why', () => {
     const { generateRescanCandidates, droppedForDistance, notLocated } =
       await import('./rescanCorridor.js')
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
-    geocodeQueryMock.mockReset()
+    verifyPlaceMock.mockReset()
 
     const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
 
@@ -691,5 +711,90 @@ describe('parseRescanResponse — an answer with a sentence around it', () => {
     expect(() =>
       parseRescanResponse('I was unable to search the web just now.'),
     ).toThrow(/no JSON at all.*unable to search/i)
+  })
+})
+
+/**
+ * Reported with two screenshots: a card reading "Vrå Bike Park" whose pin sat
+ * precisely on Vallåsen Bike Park, and a "Photos & details" tap that opened
+ * directions to the village of Vrå, an hour away.
+ *
+ * The pin was right the whole time. Places had resolved the query correctly
+ * and handed back the real listing — its own name and its own URL — and the
+ * old geocodeQuery call kept nothing but the coordinate. So the card carried
+ * Claude's version of the name, and with no listing URL stored the details
+ * link fell back to searching Google for that name, which resolves to a
+ * village because no such bike park exists under it.
+ */
+describe('generateRescanCandidates — taking the name from the map, not the model', () => {
+  const NEAR = { lat: 56.4, lng: 13.1 }
+
+  beforeEach(() => {
+    vi.stubEnv('CLAUDE_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("replaces the model's name with the one Places actually matched", async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce(responseWithFinds(['Vrå Bike Park']))
+    verifyPlaceMock.mockReset().mockResolvedValue({
+      name: 'Vallåsen Bike Park',
+      lat: 56.41,
+      lng: 13.11,
+      googleMapsUrl: 'https://maps.google.com/?cid=123',
+    })
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(finds[0].name).toBe('Vallåsen Bike Park')
+    expect(finds[0].googleMapsUrl).toBe('https://maps.google.com/?cid=123')
+  })
+
+  // Without this the details link falls back to a name search, which is what
+  // sent a traveler to a village an hour away.
+  it('keeps the listing URL so the details link never has to guess', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Somewhere']))
+    verifyPlaceMock
+      .mockReset()
+      .mockResolvedValue({ name: 'Somewhere', lat: 56.41, lng: 13.11 })
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    // Absent rather than invented when Places has no URL for the listing —
+    // placeDetailsUrl's own fallback is correct in that case.
+    expect(finds[0]).not.toHaveProperty('googleMapsUrl')
+  })
+
+  // Geography is filterFindsToCorridor's job and has to stay only its job:
+  // verification bounded to Places' default 30km would silently lose every
+  // find further than that from the map centre on a route-wide search.
+  it('checks identity without imposing a distance bound of its own', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Far along the route']))
+    verifyPlaceMock
+      .mockReset()
+      .mockResolvedValue({ name: 'Far along the route', lat: 61.5, lng: 9.0 })
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: NEAR,
+      radiusKm: 25,
+      backbone: [
+        { lat: 61.0, lng: 9.0 },
+        { lat: 62.0, lng: 9.0 },
+      ],
+    })
+
+    expect(verifyPlaceMock).toHaveBeenCalledWith(
+      expect.any(String),
+      'Far along the route',
+      NEAR,
+      Number.POSITIVE_INFINITY,
+    )
   })
 })

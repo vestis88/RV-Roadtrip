@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
-import { geocodeQuery } from '../placesApi.js'
+import { verifyPlaceLocation } from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
 import { extractJsonObject } from './jsonFromClaude.js'
@@ -123,6 +123,14 @@ export interface RescanFind {
   why: string
   lat: number
   lng: number
+  /**
+   * Google's own URL for the listing this find was verified against.
+   *
+   * Absent before 2026-08-16, which is why "Photos & details" on a rescan
+   * find fell back to searching Google for the name Claude had given it —
+   * and a name Claude had given it is exactly what could not be trusted.
+   */
+  googleMapsUrl?: string
 }
 
 /**
@@ -280,10 +288,41 @@ export async function generateRescanCandidates(input: {
   const located = await Promise.all(
     found.finds.map(async (find) => {
       try {
-        const point = await geocodeQuery(`${find.name}, ${find.country}`, input.center)
-        return point ? { ...find, ...point } : null
+        // verifyPlaceLocation, not geocodeQuery. geocodeQuery takes Places'
+        // FIRST result and returns nothing but a coordinate — placesApi.ts
+        // says in as many words that this "is exactly wrong for a named
+        // sight". Reported with a screenshot: a find card reading "Vrå Bike
+        // Park" whose pin sat precisely on Vallåsen Bike Park. Places had
+        // resolved the query correctly and handed back the real listing —
+        // its own name and its own URL — and both were thrown away, leaving
+        // Claude's version of the name on the card and no listing link at
+        // all. So "Photos & details" searched Google for a name that does
+        // not exist, and landed on the village of Vrå, an hour away.
+        //
+        // Taking Places' spelling is the whole point (see its own note on
+        // collapsing "Kronborg"/"Kronborg Slot"/"Kronborg Castle" onto one
+        // identity): the name a traveler reads is then one a map can find.
+        //
+        // Identity is all that is checked here — distance is deliberately
+        // unbounded. filterFindsToCorridor below is the geography gate and
+        // has to stay the only one, or a search along a route backbone would
+        // silently lose every find more than 30km from the map centre.
+        const verified = await verifyPlaceLocation(
+          `${find.name}, ${find.country}`,
+          find.name,
+          input.center,
+          Number.POSITIVE_INFINITY,
+        )
+        if (!verified) return null
+        return {
+          ...find,
+          name: verified.name,
+          lat: verified.lat,
+          lng: verified.lng,
+          ...(verified.googleMapsUrl ? { googleMapsUrl: verified.googleMapsUrl } : {}),
+        }
       } catch (error) {
-        console.warn(`Geocoding rescan find "${find.name}, ${find.country}" failed — dropping it`, error)
+        console.warn(`Verifying rescan find "${find.name}, ${find.country}" failed — dropping it`, error)
         return null
       }
     }),
