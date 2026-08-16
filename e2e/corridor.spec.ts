@@ -358,6 +358,63 @@ test('losing the connection to a running scan is not reported as a failure', asy
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 })
 
+// The reason three rescan failures in a row were diagnosed by guesswork:
+// the cause existed only in the rejected promise on the traveler's phone.
+// A phone that had already stopped following the call — locked screen,
+// switched tab, cellular NAT timeout, all routine — never saw it, so every
+// failure looked identical from the outside and the fixes for them were
+// guesses. The server now writes what went wrong onto the trip, where it
+// outlives the connection that started the scan.
+test('a failure the phone never saw is still reported afterwards', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastError':
+        'The search answer was cut off before it finished — it ran out of output length.',
+      'planMeta.rescanLastFailedAt': new Date().toISOString(),
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-error')).toContainText(
+    'ran out of output length',
+  )
+})
+
+// ...and stops being reported the moment a scan works, so a fixed problem
+// doesn't sit on screen forever.
+test('a later successful scan retires the last failure', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const failedAt = new Date(Date.now() - 60_000).toISOString()
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastError': 'The search returned no answer at all.',
+      'planMeta.rescanLastFailedAt': failedAt,
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 2,
+      'planMeta.rescanLastDroppedTooFar': 0,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+    'Found 2 new stops',
+  )
+  await expect(page.getByTestId('rescan-corridor-error')).toHaveCount(0)
+})
+
 test('a scan that found places outside the area says so, not "nothing"', async ({
   page,
 }) => {

@@ -164,7 +164,27 @@ export const planMetaSchema = z.object({
   // heartbeat that lets a lock abandoned by a killed container be recognised
   // as stale rather than trusted forever.
   rescanStatus: z.enum(['idle', 'generating']).optional(),
+  // A genuine heartbeat: refreshed every few seconds for as long as the
+  // function is alive, not written once at the start. Written once, it could
+  // not tell "still searching" apart from "the container died four minutes
+  // ago", which is why a stuck scan had to be given a six-minute benefit of
+  // the doubt before the button would come back. See RESCAN_HEARTBEAT_MS.
   rescanStatusUpdatedAt: isoDateTime.optional(),
+  // When the running scan actually began. Separate from the heartbeat
+  // because the two are read for opposite purposes — this one is the
+  // traveler's elapsed counter, which must not reset every time the server
+  // says "still here".
+  rescanStartedAt: isoDateTime.optional(),
+  // Why the last rescan failed, in one line, written where it survives the
+  // connection that started the scan.
+  //
+  // The reason three rescan failures in a row were diagnosed by guesswork:
+  // the cause existed only in the rejected promise on the traveler's phone,
+  // and a phone that had stopped following the call never saw it either. A
+  // scan is a fact about the trip (see rescanStatus above) and so is its
+  // failure. Cleared whenever a scan succeeds.
+  rescanLastError: z.string().optional(),
+  rescanLastFailedAt: isoDateTime.optional(),
   // Set when a rescan finishes, with what it found — so the confirmation
   // survives the round trip through Firestore instead of living only in the
   // component that started it.

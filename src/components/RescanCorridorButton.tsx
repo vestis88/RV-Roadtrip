@@ -34,27 +34,31 @@ interface RescanCorridorButtonProps {
 const SHOW_ELAPSED_AFTER_MS = 20_000
 
 /**
- * Past this, a scan still marked running is treated as abandoned rather than
- * slow.
+ * How long a running scan may go without a heartbeat before it counts as
+ * over.
  *
  * The callable clears its own status on the way out, success or failure —
- * but a container killed by its own 300s ceiling never reaches that code,
- * and the trip is left saying 'generating' forever. The button then sits
- * disabled behind a counter that climbs without limit: reported at
- * "Scanning… 10m 47s", which is well past anything the server can still be
- * doing. The heartbeat this reads was written for exactly this and then not
- * consulted, which is the bug.
+ * but a container killed by its own ceiling never reaches that code, and the
+ * trip is left saying 'generating' forever. Reported at "Scanning… 10m 47s",
+ * well past anything the server could still be doing.
  *
- * Comfortably above the callable's own timeoutSeconds so a genuinely slow
- * scan is never cut off early — this only ever fires for a run that cannot
- * still be alive.
+ * This used to be measured from the scan's start, which meant waiting out a
+ * fixed six minutes before the button came back, because a start time cannot
+ * tell a slow scan from a dead one. It is now measured against a real
+ * heartbeat (see rescanCorridorCallable.ts's RESCAN_HEARTBEAT_MS, every 20s),
+ * so a run that has genuinely stopped is recognised in under a minute while a
+ * slow one is never cut off at all.
  */
-const STALE_SCAN_MS = 6 * 60 * 1000
+const STALE_HEARTBEAT_MS = 75_000
 
-function isStale(startedAt: string | undefined, now: number): boolean {
-  if (!startedAt) return false
-  const started = new Date(startedAt).getTime()
-  return Number.isFinite(started) && now - started > STALE_SCAN_MS
+function isStale(beatAt: string | undefined, now: number): boolean {
+  // No heartbeat at all means a scan started by the previous deploy, before
+  // the callable wrote one. Trusted rather than declared dead: the cost of
+  // being wrong here is a button that comes back too early and invites a
+  // second paid search.
+  if (!beatAt) return false
+  const beat = new Date(beatAt).getTime()
+  return Number.isFinite(beat) && now - beat > STALE_HEARTBEAT_MS
 }
 
 /**
@@ -118,8 +122,8 @@ export function RescanCorridorButton({
    * `submitting` covers only the gap between the tap and the server writing
    * its status, so the button doesn't flash idle in between.
    */
-  // A scan the server can no longer be running does not count as running,
-  // however the trip still describes it — see STALE_SCAN_MS.
+  // A scan the server has stopped reporting does not count as running,
+  // however the trip still describes it — see STALE_HEARTBEAT_MS.
   const abandoned =
     planMeta.rescanStatus === 'generating' &&
     isStale(planMeta.rescanStatusUpdatedAt, now)
@@ -142,6 +146,19 @@ export function RescanCorridorButton({
    * so it is waiting for the traveler when they come back to the tab,
    * whether or not the connection that started the scan survived.
    */
+  // The server's own account of the last failure, which outlives the
+  // connection that started it — see planMeta.rescanLastError. Shown only
+  // when it is the most recent thing that happened, so a fixed problem
+  // stops being reported the moment a scan succeeds.
+  const lastFailedFirst =
+    !!planMeta.rescanLastFailedAt &&
+    (!planMeta.rescanLastRunAt ||
+      planMeta.rescanLastFailedAt > planMeta.rescanLastRunAt)
+  const serverError =
+    planMeta.rescanStatus !== 'generating' && lastFailedFirst
+      ? planMeta.rescanLastError
+      : undefined
+
   // Ordered deliberately: a scan still running outranks the news that this
   // phone stopped watching it, because the first is what the traveler asked
   // about and the second is only an explanation for the wait.
@@ -149,7 +166,7 @@ export function RescanCorridorButton({
     ? 'Still scanning — this phone stopped following it, but the search is running on the server. Anything it finds appears on the map on its own; you can leave this screen.'
     : abandoned
     ? 'That scan stopped reporting back — it may have run out of time. Anything it did find is already on the map.'
-    : planMeta.rescanStatus !== 'generating' && planMeta.rescanLastRunAt
+    : planMeta.rescanStatus !== 'generating' && !lastFailedFirst && planMeta.rescanLastRunAt
       ? describeResult(
           planMeta.rescanLastFoundCount ?? 0,
           planMeta.rescanLastDroppedTooFar ?? 0,
@@ -215,7 +232,13 @@ export function RescanCorridorButton({
         className="btn btn-sm border border-dashed border-neutral-300 bg-white/95 text-neutral-600 shadow-md backdrop-blur-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
         {scanning
-          ? elapsedLabel(planMeta.rescanStatusUpdatedAt, now)
+          ? elapsedLabel(
+              // Counted from when the scan began, not from its last
+              // heartbeat — the heartbeat moves every 20 seconds, which
+              // would reset the counter to zero for as long as the scan ran.
+              planMeta.rescanStartedAt ?? planMeta.rescanStatusUpdatedAt,
+              now,
+            )
           : 'Rescan this area'}
       </button>
       {status && (
@@ -226,12 +249,16 @@ export function RescanCorridorButton({
           {status}
         </p>
       )}
-      {error && (
+      {/* The local rejection when there is one, the trip's own record of the
+          failure otherwise — the latter is what survives a phone that stopped
+          following the call, which is how these failures kept arriving with
+          no cause attached. */}
+      {(error ?? serverError) && (
         <p
           data-testid="rescan-corridor-error"
           className="rounded bg-white/95 px-2 py-1 text-xs text-red-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-red-400"
         >
-          {error}
+          {error ?? `That scan failed: ${serverError}`}
         </p>
       )}
     </div>

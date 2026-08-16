@@ -1,4 +1,4 @@
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { corridorStopSchema, type LatLng, type Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
@@ -24,6 +24,20 @@ import { findStopsForQuery } from './querySearch.js'
  * own ceiling to the second.
  */
 const SEARCH_BUDGET_MS = 220_000
+
+/**
+ * How often a running scan says it is still alive.
+ *
+ * `rescanStatusUpdatedAt` was written once, at the start, and described as a
+ * heartbeat — which it wasn't. A single timestamp cannot distinguish a scan
+ * that is two minutes into a slow web search from one whose container was
+ * killed two minutes ago, so the only safe reading was "assume alive", and
+ * the button sat disabled behind a counter that climbed past anything the
+ * server could still be doing. Refreshing it on a timer makes the claim
+ * mean what its name says: gone quiet for more than a couple of intervals
+ * and the run is over, however it ended.
+ */
+const RESCAN_HEARTBEAT_MS = 20_000
 
 /**
  * "Rescan this area" (phase 3 of the persistent-corridor overhaul): searches
@@ -217,7 +231,18 @@ export const rescanCorridor = onCall(
     await tripRef.update({
       'planMeta.rescanStatus': 'generating',
       'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
+      'planMeta.rescanStartedAt': new Date().toISOString(),
     })
+    // Keeps saying so for as long as this container is alive — see
+    // RESCAN_HEARTBEAT_MS. Failures here are deliberately swallowed: a
+    // missed beat is worth far less than the search it would abort.
+    const heartbeat = setInterval(() => {
+      void tripRef
+        .update({ 'planMeta.rescanStatusUpdatedAt': new Date().toISOString() })
+        .catch((error: unknown) =>
+          console.warn('Rescan heartbeat write failed', error),
+        )
+    }, RESCAN_HEARTBEAT_MS)
     try {
       const { stopsWritten, droppedTooFar } = await runRescanCorridor(
         tripId,
@@ -236,6 +261,9 @@ export const rescanCorridor = onCall(
         // Recorded so "nothing found" can stop being said when it isn't
         // true — see droppedForDistance.
         'planMeta.rescanLastDroppedTooFar': droppedTooFar,
+        // A run that worked answers the last one that didn't.
+        'planMeta.rescanLastError': FieldValue.delete(),
+        'planMeta.rescanLastFailedAt': FieldValue.delete(),
       })
       return { stopsWritten, droppedTooFar }
     } catch (error) {
@@ -243,8 +271,20 @@ export const rescanCorridor = onCall(
       // failed run would show a spinner forever, which is a worse lie than
       // the error the caller is about to see. A container killed mid-run
       // can't reach this, which is what the staleness check is for.
+      //
+      // The cause is written next to it, and that is the part that was
+      // missing. Until now the only copy of it lived in the promise this is
+      // about to reject — so a phone that had stopped following the call
+      // (routine: locked screen, switched tab, cellular NAT timeout) lost it
+      // entirely, and every failure looked identical from the outside. Three
+      // in a row were diagnosed by guesswork for exactly that reason.
+      const cause = describeCause(error)
       await tripRef
-        .update({ 'planMeta.rescanStatus': 'idle' })
+        .update({
+          'planMeta.rescanStatus': 'idle',
+          'planMeta.rescanLastError': cause,
+          'planMeta.rescanLastFailedAt': new Date().toISOString(),
+        })
         .catch((clearError: unknown) =>
           console.warn('Clearing rescanStatus after a failed run failed', clearError),
         )
@@ -258,7 +298,9 @@ export const rescanCorridor = onCall(
       // was fixing it as nothing at all. Three consecutive failures were
       // reported and diagnosed by guesswork for exactly this reason.
       console.error(`rescanCorridor failed for trip ${tripId}`, error)
-      throw new HttpsError('internal', `Could not rescan: ${describeCause(error)}`)
+      throw new HttpsError('internal', `Could not rescan: ${cause}`)
+    } finally {
+      clearInterval(heartbeat)
     }
   },
 )

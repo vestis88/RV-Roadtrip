@@ -94,6 +94,17 @@ function textFromResponse(response: Anthropic.Message): string {
     .join('')
 }
 
+/**
+ * Whether this turn actually searched — used to decide whether asking for
+ * the JSON again is worth anything, or whether there is nothing to ask
+ * about.
+ */
+function searched(response: Anthropic.Message): boolean {
+  return response.content.some(
+    (block) => block.type === 'web_search_tool_result',
+  )
+}
+
 export interface RescanFind {
   name: string
   country: string
@@ -145,13 +156,20 @@ const MAX_PAUSE_RESUMES = 3
  * no "carry on" message, which would be read as a new instruction rather
  * than a continuation.
  */
+const SEARCH_TOOLS: Anthropic.ToolUnion[] = [
+  // Uncapped web_search bills every search result back in as input tokens on
+  // top of the per-search fee — a rescan of one small area never legitimately
+  // needs more than a couple of searches.
+  { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
+]
+
 async function runSearchTurn(
   client: Anthropic,
   system: string,
   messages: Anthropic.MessageParam[],
   input: { query?: string },
   deadlineMs: number,
-): Promise<Anthropic.Message> {
+): Promise<{ response: Anthropic.Message; turn: Anthropic.MessageParam[] }> {
   const turn = [...messages]
   let response: Anthropic.Message | undefined
 
@@ -166,18 +184,15 @@ async function runSearchTurn(
       thinking: { type: 'disabled' },
       system,
       messages: turn,
-      // Uncapped web_search bills every search result back in as input
-      // tokens on top of the per-search fee — a rescan of one small area
-      // never legitimately needs more than a couple of searches.
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+      tools: SEARCH_TOOLS,
     })
     response = await stream.finalMessage()
-    if (response.stop_reason !== 'pause_turn') return response
+    if (response.stop_reason !== 'pause_turn') return { response, turn }
     if (Date.now() + TURN_RESERVE_MS > deadlineMs) {
       console.warn(
         'Rescan search paused with no time left to resume — using the partial turn',
       )
-      return response
+      return { response, turn }
     }
     turn.push({ role: 'assistant', content: response.content })
   }
@@ -188,7 +203,102 @@ async function runSearchTurn(
   console.warn(
     `Rescan search paused ${MAX_PAUSE_RESUMES} times without finishing — using the partial turn`,
   )
-  return response as Anthropic.Message
+  return { response: response as Anthropic.Message, turn }
+}
+
+function isParseable(text: string): boolean {
+  try {
+    parseRescanResponse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The error to keep when a turn produced nothing usable.
+ *
+ * "Unexpected end of JSON input" is what a truncated or absent answer
+ * reported, and it is actively misleading: it reads as Claude returning
+ * malformed JSON, which is a prompt problem, when the actual event was a
+ * turn that filled its output budget or ran out of time mid-search. Those
+ * have completely different fixes, and the wrong one was on screen — and in
+ * the logs — for every one of these failures.
+ */
+function describeUnusableResponse(
+  response: Anthropic.Message,
+  text: string,
+  parseError: unknown,
+): Error {
+  if (response.stop_reason === 'max_tokens') {
+    return new Error(
+      'The search answer was cut off before it finished — it ran out of output length.',
+    )
+  }
+  if (text.trim().length === 0) {
+    return new Error(
+      response.stop_reason === 'pause_turn'
+        ? 'The search ran out of time before it could write up what it found.'
+        : 'The search returned no answer at all.',
+    )
+  }
+  return parseError instanceof Error ? parseError : new Error(String(parseError))
+}
+
+const FINALIZE_INSTRUCTION =
+  'Stop searching now and answer from what you have already found. ' +
+  'Return ONLY the JSON object described in your instructions — no prose, ' +
+  'no markdown code fences. If nothing you found is genuinely worth a stop, ' +
+  'return {"finds": []}.'
+
+/**
+ * Asks for the answer to the search that already happened, without searching
+ * again.
+ *
+ * This is the fix for the failure that was reported over and over as "it
+ * scanned for minutes and came up empty". A searching turn that pauses, or
+ * runs into the deadline, or fills its output budget mid-object, comes back
+ * with the searches done and the JSON unfinished or absent entirely — and
+ * every one of those was handed straight to JSON.parse, which threw, which
+ * discarded the whole run. The traveler paid three minutes and a Claude call
+ * for a search that had genuinely found places, and was told nothing was
+ * found. The retry then re-ran the entire search from the beginning, at full
+ * cost, for another chance at the same ending.
+ *
+ * The searches are already in the conversation as results, so this turn only
+ * has to write them down: no tools (`tool_choice: none` rather than dropping
+ * the tools, which would invalidate the search blocks in the history it is
+ * being shown), and seconds rather than minutes. It is the cheapest turn in
+ * the whole path and it is the one that turns a wasted search into an answer.
+ *
+ * Best-effort by construction: it is only ever reached when the alternative
+ * is throwing, so its own failure just restores that outcome.
+ */
+async function finalizeWithoutSearching(
+  client: Anthropic,
+  system: string,
+  turn: Anthropic.MessageParam[],
+  searchResponse: Anthropic.Message,
+): Promise<string | undefined> {
+  try {
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: 2000,
+      thinking: { type: 'disabled' },
+      system,
+      messages: [
+        ...turn,
+        { role: 'assistant', content: searchResponse.content },
+        { role: 'user', content: FINALIZE_INSTRUCTION },
+      ],
+      tools: SEARCH_TOOLS,
+      tool_choice: { type: 'none' },
+    })
+    return textFromResponse(await stream.finalMessage())
+  } catch (error) {
+    console.warn('Rescan finalize turn failed — falling back to a retry', error)
+    return undefined
+  }
 }
 
 export async function generateRescanCandidates(input: {
@@ -225,9 +335,16 @@ export async function generateRescanCandidates(input: {
       break
     }
     let response: Anthropic.Message
+    let turn: Anthropic.MessageParam[]
     const attemptStartedAt = Date.now()
     try {
-      response = await runSearchTurn(client, system, messages, input, deadlineMs)
+      ;({ response, turn } = await runSearchTurn(
+        client,
+        system,
+        messages,
+        input,
+        deadlineMs,
+      ))
     } catch (error) {
       // A transient API-level failure (rate limit, brief overload, network
       // blip), not Claude returning malformed JSON — MAX_ATTEMPTS existing
@@ -245,18 +362,36 @@ export async function generateRescanCandidates(input: {
       elapsedMs: Date.now() - attemptStartedAt,
       response,
     })
-    const text = textFromResponse(response)
+    let text = textFromResponse(response)
+
+    // A turn that searched and then didn't get its answer out — paused,
+    // deadline-clipped, or cut off at max_tokens mid-object — has the whole
+    // expensive part behind it. Ask for the write-up before spending another
+    // search on it. See finalizeWithoutSearching.
+    if (!isParseable(text) && searched(response)) {
+      console.warn(
+        `Rescan search turn ended ${response.stop_reason ?? 'with no stop reason'} without usable JSON — asking for the answer without searching again`,
+      )
+      text = (await finalizeWithoutSearching(client, system, turn, response)) ?? text
+    }
 
     try {
       found = parseRescanResponse(text)
       break
     } catch (error) {
-      lastError = error
-      messages.push({ role: 'assistant', content: text })
-      messages.push({
-        role: 'user',
-        content: `Your last response failed validation: ${String(error)}. Return ONLY the corrected JSON matching the schema — no prose, no markdown code fences.`,
-      })
+      lastError = describeUnusableResponse(response, text, error)
+      // Only ever quote back something there is something to quote. An
+      // assistant turn with empty content is rejected outright by the API,
+      // so pushing one turned "the model returned no text" into a 400 on the
+      // retry — a different, more confusing error than the one that
+      // happened, on the attempt that was supposed to recover from it.
+      if (text.trim().length > 0) {
+        messages.push({ role: 'assistant', content: text })
+        messages.push({
+          role: 'user',
+          content: `Your last response failed validation: ${String(error)}. Return ONLY the corrected JSON matching the schema — no prose, no markdown code fences.`,
+        })
+      }
     }
   }
 
