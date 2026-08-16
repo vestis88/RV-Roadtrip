@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describeEmptyCountries } from './exploreCandidateActions'
 import type { CorridorStopPriority } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 
@@ -239,5 +240,80 @@ describe('describeExploreHighlightsError — a message that is only the code', (
         message: 'Could not rescan: Overpass query failed with 406',
       }),
     ).toMatch(/406/)
+  })
+})
+
+/**
+ * A country picked in Trip Setup that produced nothing used to be said
+ * nothing about — no screen mentioned it at all. See countryCoverage.ts.
+ */
+describe('describeEmptyCountries', () => {
+  const nameOf = (code: string) => ({ EE: 'Estonia', LV: 'Latvia' })[code] ?? code
+
+  it('says nothing when every chosen country produced something', () => {
+    expect(describeEmptyCountries([], nameOf)).toBeNull()
+  })
+
+  it('names the country and passes on why nothing was suggested', () => {
+    expect(
+      describeEmptyCountries(
+        [
+          {
+            country: 'EE',
+            reason: 'not-proposed',
+            proposed: 0,
+            note: 'Nothing here answers downhill mountain biking.',
+          },
+        ],
+        nameOf,
+      ),
+    ).toBe(
+      'Estonia: nothing suggested — Nothing here answers downhill mountain biking.',
+    )
+  })
+
+  it('still names the country when curation gave no reason', () => {
+    expect(
+      describeEmptyCountries(
+        [{ country: 'EE', reason: 'not-proposed', proposed: 0 }],
+        nameOf,
+      ),
+    ).toBe('Estonia: nothing suggested for this trip.')
+  })
+
+  // The other kind of empty, and a different problem: these existed, and the
+  // map lookup lost them.
+  it('distinguishes suggestions that could not be found on the map', () => {
+    expect(
+      describeEmptyCountries(
+        [{ country: 'EE', reason: 'not-located', proposed: 3 }],
+        nameOf,
+      ),
+    ).toBe(
+      'Estonia: 3 suggestions came back but none of them could be found on the map.',
+    )
+  })
+
+  it('reads correctly for a single unlocatable suggestion', () => {
+    expect(
+      describeEmptyCountries(
+        [{ country: 'EE', reason: 'not-located', proposed: 1 }],
+        nameOf,
+      ),
+    ).toBe(
+      'Estonia: 1 suggestion came back but it could not be found on the map.',
+    )
+  })
+
+  it('reports every empty country, not just the first', () => {
+    const said = describeEmptyCountries(
+      [
+        { country: 'EE', reason: 'not-proposed', proposed: 0 },
+        { country: 'LV', reason: 'not-located', proposed: 2 },
+      ],
+      nameOf,
+    )
+    expect(said).toContain('Estonia')
+    expect(said).toContain('Latvia')
   })
 })

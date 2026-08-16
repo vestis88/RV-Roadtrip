@@ -17,12 +17,14 @@ import {
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
+  describeEmptyCountries,
   describeExploreHighlightsError,
   generateExploreHighlights,
   setCandidatePriority,
   sortCandidatesForList,
 } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
+import { countryName } from '../lib/countries'
 import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
@@ -237,16 +239,20 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     }
     setGenerating(true)
     try {
-      const { candidateCount, alreadyKnown } = await generateExploreHighlights(tripId)
-      setGenSummary(
+      const { candidateCount, alreadyKnown, emptyCountries } =
+        await generateExploreHighlights(tripId)
+      const found =
         candidateCount > 0
           ? `Added ${candidateCount} new ${candidateCount === 1 ? 'find' : 'finds'}${
               alreadyKnown > 0 ? ` — the other ${alreadyKnown} you already had` : ''
             }.`
           : alreadyKnown > 0
             ? `Nothing new this time — all ${alreadyKnown} suggestions are already on your list.`
-            : 'Nothing new turned up along this route.',
-      )
+            : 'Nothing new turned up along this route.'
+      // A country picked in Trip Setup that produced nothing is news, not an
+      // absence to leave the traveler to notice for themselves.
+      const gaps = describeEmptyCountries(emptyCountries, countryName)
+      setGenSummary(gaps ? `${found} ${gaps}` : found)
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
       setGenError(describeExploreHighlightsError(error))

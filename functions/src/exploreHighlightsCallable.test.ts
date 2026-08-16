@@ -148,6 +148,8 @@ describe('generateExploreHighlightsForTrip', () => {
     await expect(generateExploreHighlightsForTrip(tripId)).resolves.toEqual({
       candidateCount: 0,
       alreadyKnown: 0,
+      // No preferred countries on this trip, so nothing to report empty.
+      emptyCountries: [],
     })
   })
 
@@ -179,7 +181,11 @@ describe('generateExploreHighlightsForTrip', () => {
     )
     const result = await generateExploreHighlightsForTrip(tripId)
 
-    expect(result).toEqual({ candidateCount: 1, alreadyKnown: 0 })
+    expect(result).toEqual({
+      candidateCount: 1,
+      alreadyKnown: 0,
+      emptyCountries: [],
+    })
     const after = await curated.get()
     expect(after.exists).toBe(true)
     expect(after.data()?.priority).toBe('must-see')
@@ -206,7 +212,11 @@ describe('generateExploreHighlightsForTrip', () => {
     )
     const result = await generateExploreHighlightsForTrip(tripId)
 
-    expect(result).toEqual({ candidateCount: 0, alreadyKnown: 1 })
+    expect(result).toEqual({
+      candidateCount: 0,
+      alreadyKnown: 1,
+      emptyCountries: [],
+    })
     const after = await stops.get()
     expect(after.size).toBe(1)
     expect(after.docs[0].data().status).toBe('rejected')
@@ -239,6 +249,7 @@ describe('generateExploreHighlightsForTrip', () => {
     await expect(generateExploreHighlightsForTrip(tripId)).resolves.toEqual({
       candidateCount: 0,
       alreadyKnown: 1,
+      emptyCountries: [],
     })
     const snap = await db.collection('trips').doc(tripId).get()
     expect(snap.data()?.planMeta?.exploreLastRunAt).toBeTruthy()

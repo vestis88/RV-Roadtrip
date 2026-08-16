@@ -160,16 +160,62 @@ export function describeExploreHighlightsError(error: unknown): string {
  * `alreadyKnown` is how much of the answer was already on the list — an
  * older deployment returns only the former, hence the fallback.
  */
+export interface EmptyCountry {
+  country: string
+  reason: 'not-proposed' | 'not-located'
+  proposed: number
+  note?: string
+}
+
 export async function generateExploreHighlights(
   tripId: string,
-): Promise<{ candidateCount: number; alreadyKnown: number }> {
+): Promise<{
+  candidateCount: number
+  alreadyKnown: number
+  emptyCountries: EmptyCountry[]
+}> {
   const call = httpsCallable<
     { tripId: string },
-    { candidateCount: number; alreadyKnown?: number }
+    {
+      candidateCount: number
+      alreadyKnown?: number
+      emptyCountries?: EmptyCountry[]
+    }
   >(functions, 'generateExploreHighlights', { timeout: LONG_CALLABLE_TIMEOUT_MS })
   const result = await call({ tripId })
   return {
     candidateCount: result.data.candidateCount,
     alreadyKnown: result.data.alreadyKnown ?? 0,
+    emptyCountries: result.data.emptyCountries ?? [],
   }
+}
+
+/**
+ * What to say about countries the traveler chose that came back empty.
+ *
+ * They used to be said nothing about at all: a country picked in Trip Setup
+ * could simply not appear in the answer, and no screen anywhere mentioned
+ * it. Naming the country and which kind of empty it was is the whole point —
+ * "nothing was proposed there" and "things were proposed and none could be
+ * found on the map" are different problems.
+ */
+export function describeEmptyCountries(
+  empty: EmptyCountry[],
+  nameOf: (code: string) => string,
+): string | null {
+  if (empty.length === 0) return null
+  return empty
+    .map((entry) => {
+      const name = nameOf(entry.country)
+      if (entry.reason === 'not-located') {
+        const n = entry.proposed
+        return n === 1
+          ? `${name}: 1 suggestion came back but it could not be found on the map.`
+          : `${name}: ${n} suggestions came back but none of them could be found on the map.`
+      }
+      return entry.note
+        ? `${name}: nothing suggested — ${entry.note}`
+        : `${name}: nothing suggested for this trip.`
+    })
+    .join(' ')
 }

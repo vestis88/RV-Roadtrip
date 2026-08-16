@@ -4,6 +4,10 @@ import type { CorridorStop, Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { describeCause } from './describeCause.js'
 import { requireTripMember } from './authz.js'
+import {
+  emptyPreferredCountries,
+  type EmptyCountry,
+} from './countryCoverage.js'
 import { commitInChunks } from './firestoreBatch.js'
 import { buildExploreCandidateWrites } from './exploreCandidates.js'
 import { googlePlacesApiKey } from './placesApi.js'
@@ -41,7 +45,11 @@ const STALE_EXPLORE_LOCK_MS = 5 * 60 * 1000
  */
 export async function generateExploreHighlightsForTrip(
   tripId: string,
-): Promise<{ candidateCount: number; alreadyKnown: number }> {
+): Promise<{
+  candidateCount: number
+  alreadyKnown: number
+  emptyCountries: EmptyCountry[]
+}> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
 
@@ -129,7 +137,25 @@ export async function generateExploreHighlightsForTrip(
     // nothing" regardless of which screen fired the call. See
     // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
     await tripRef.update({ 'planMeta.exploreLastRunAt': new Date().toISOString() })
-    return { candidateCount: merge.added, alreadyKnown: merge.alreadyKnown }
+    // Which chosen countries came back with nothing, and why. Without this a
+    // country the traveler explicitly picked can vanish from the answer with
+    // no explanation anywhere — see countryCoverage.ts.
+    const emptyCountries = emptyPreferredCountries(
+      trip.settings.preferredCountries,
+      highlights,
+    )
+    if (emptyCountries.length > 0) {
+      console.info(
+        `Preferred countries with nothing on the map for trip ${tripId}: ${emptyCountries
+          .map((entry) => `${entry.country} (${entry.reason})`)
+          .join(', ')}`,
+      )
+    }
+    return {
+      candidateCount: merge.added,
+      alreadyKnown: merge.alreadyKnown,
+      emptyCountries,
+    }
   } catch (error) {
     // firebase-functions only forwards the message of an HttpsError;
     // anything else reaches the browser as the bare code 'internal' with the
