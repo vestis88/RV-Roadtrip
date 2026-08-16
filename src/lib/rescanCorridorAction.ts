@@ -1,7 +1,7 @@
 import { httpsCallable } from 'firebase/functions'
 import type { LatLng } from '@rv/shared'
 import { functions } from './firebase'
-import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
+import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 
 /** A fixed, conservative default — comfortably under the callable's own
  * MAX_RESCAN_RADIUS_KM cap. No radius picker anywhere this is used yet. */
@@ -46,7 +46,7 @@ export async function rescanCorridorArea(
       waypointNames?: string[]
     },
     { stopsWritten: number }
-  >(functions, 'rescanCorridor', { timeout: LONG_CALLABLE_TIMEOUT_MS })
+  >(functions, 'rescanCorridor', { timeout: SEARCH_CALLABLE_TIMEOUT_MS })
   const result = await call({
     tripId,
     center,

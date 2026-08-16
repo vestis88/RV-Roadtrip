@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { LatLng } from '@rv/shared'
 import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 import { reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
@@ -42,7 +43,10 @@ export function RescanCorridorButton({ tripId, center }: RescanCorridorButtonPro
       )
     } catch (err) {
       console.error('rescanCorridor failed', err)
-      setError('Could not rescan this area right now.')
+      // The server's own account where it has one — a search that ran out
+      // of time can say so and name what would make it finish, which
+      // "please try again" actively contradicts.
+      setError(describeExploreHighlightsError(err))
     } finally {
       setLoading(false)
     }

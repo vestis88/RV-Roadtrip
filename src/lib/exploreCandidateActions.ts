@@ -92,6 +92,19 @@ const GENERIC_STOPS_ERROR = 'Could not find stops right now — please try again
 // message written for the traveler. Everything else a callable can fail
 // with — 'deadline-exceeded', 'unavailable', 'cancelled' — carries the code
 // string as its message, which is not something to put on screen.
+/**
+ * What a search that ran out of time should say.
+ *
+ * 'deadline-exceeded' is the one failure a traveler can act on, and the
+ * generic "please try again" is the worst possible advice for it: re-running
+ * the identical search is the one thing certain to take just as long. The
+ * levers that actually help are a smaller area or a specific description,
+ * so the message names them.
+ */
+const SEARCH_TIMEOUT_MESSAGE =
+  'That search took too long to finish. Try a smaller area, or describe what ' +
+  'you are looking for so the search has less ground to cover.'
+
 const SERVER_AUTHORED_CODES = new Set([
   'functions/failed-precondition',
   'functions/internal',
@@ -119,6 +132,7 @@ const SERVER_AUTHORED_CODES = new Set([
  */
 export function describeExploreHighlightsError(error: unknown): string {
   const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
+  if (code === 'functions/deadline-exceeded') return SEARCH_TIMEOUT_MESSAGE
   if (typeof code !== 'string' || !SERVER_AUTHORED_CODES.has(code)) {
     return GENERIC_STOPS_ERROR
   }

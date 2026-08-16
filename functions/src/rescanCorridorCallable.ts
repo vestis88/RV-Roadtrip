@@ -120,10 +120,15 @@ export async function runRescanCorridor(
 export const rescanCorridor = onCall(
   {
     secrets: [claudeApiKey, googlePlacesApiKey],
-    // Same reasoning as exploreHighlightsCallable.ts's own timeoutSeconds:
-    // the underlying Claude call retries and geocodes every find before
-    // returning, which can plausibly exceed the 60s default.
-    timeoutSeconds: 180,
+    // Raised from 180 after a rescan was reported spinning for three
+    // minutes and then failing: one Claude turn with up to three web
+    // searches inside it, plus a retry allowance and geocoding for every
+    // find, does not reliably fit in three minutes — and unlike the
+    // overnight picker there is no partial result to degrade to, so the
+    // deadline firing costs the traveler the whole search. The streaming
+    // and pause-resume fixes in rescanCorridor.ts are what make a slow turn
+    // finish at all; this is the headroom for it to.
+    timeoutSeconds: 300,
   },
   async (request) => {
     if (!request.auth) {

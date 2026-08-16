@@ -3,6 +3,7 @@ import { addDoc, collection } from 'firebase/firestore'
 import { corridorStopSchema, type LatLng, type NamedPoint } from '@rv/shared'
 import { db } from '../lib/firebase'
 import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 import { reverseGeocodeName } from '../lib/reverseGeocode'
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput'
 
@@ -134,7 +135,7 @@ export function AddCorridorStopForm({
       )
     } catch (err) {
       console.error('rescanCorridor (query) failed', err)
-      setSearchError('Could not search right now — please try again.')
+      setSearchError(describeExploreHighlightsError(err))
     } finally {
       setSearching(false)
     }

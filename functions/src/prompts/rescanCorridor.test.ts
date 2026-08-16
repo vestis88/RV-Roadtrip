@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseRescanResponse } from './rescanCorridor.js'
 
 describe('parseRescanResponse', () => {
@@ -23,10 +23,19 @@ describe('parseRescanResponse', () => {
   })
 })
 
+// Stubbed at `stream`, not `create`: a long web-search turn has to hold the
+// connection open through the whole generation or it runs out the SDK's
+// request timeout, so that is the call the code makes now. `createMock` still
+// records the request params — every assertion about what was sent reads the
+// same — and resolves what finalMessage() hands back.
 const createMock = vi.fn()
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
-    messages = { create: createMock }
+    messages = {
+      stream: (params: unknown) => ({
+        finalMessage: () => createMock(params),
+      }),
+    }
   },
 }))
 
@@ -388,5 +397,90 @@ describe('generateRescanCandidates', () => {
 
     await expect(runRescan()).rejects.toThrow('529 overloaded_error')
     expect(createMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('generateRescanCandidates — long and paused turns', () => {
+  const NEAR = { lat: 61.1, lng: 10.5 }
+
+  beforeEach(() => {
+    vi.stubEnv('CLAUDE_API_KEY', 'test-key')
+    geocodeQueryMock.mockReset().mockResolvedValue({ lat: 61.2, lng: 10.6 })
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('streams the search rather than waiting on one whole request', async () => {
+    // The non-streaming path is what a three-web-search turn runs out of.
+    // Asserting the call shape is the only way to pin this from a unit test:
+    // the timeout it prevents lives in the SDK's transport, not in our code.
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(createMock).toHaveBeenCalledTimes(1)
+  })
+
+  // A server-side tool runs inside its own sampling loop; hitting that loop's
+  // ceiling ends the turn with `pause_turn` and a partial answer. That used
+  // to reach the schema parser as though it were a finished response — the
+  // JSON was cut off, parsing failed, and a merely unfinished search was
+  // reported as a malformed one.
+  it('resumes a paused turn instead of parsing the partial answer', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        stop_reason: 'pause_turn',
+        content: [{ type: 'text', text: '{"finds": [' }],
+      })
+      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(finds.map((find) => find.name)).toEqual(['Nearby'])
+  })
+
+  // Continuing a paused turn means re-sending the conversation with the
+  // partial assistant turn appended and nothing else. A "carry on" message
+  // would read as a fresh instruction rather than a continuation.
+  it('resumes by appending the partial turn, with no extra instruction', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        stop_reason: 'pause_turn',
+        content: [{ type: 'text', text: '{"finds": [' }],
+      })
+      .mockResolvedValueOnce(responseWithFinds(['Nearby']))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    const [resumed] = createMock.mock.calls[1] as [
+      { messages: { role: string }[] },
+    ]
+    expect(resumed.messages).toHaveLength(2)
+    expect(resumed.messages[1].role).toBe('assistant')
+  })
+
+  it('gives up resuming rather than spinning until the deadline kills it', async () => {
+    createMock.mockReset().mockResolvedValue({
+      stop_reason: 'pause_turn',
+      content: [{ type: 'text', text: '{"finds": []}' }],
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    // Four calls: the first turn plus MAX_PAUSE_RESUMES resumes. Anything
+    // unbounded here would burn the whole function budget on one attempt.
+    expect(createMock).toHaveBeenCalledTimes(4)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

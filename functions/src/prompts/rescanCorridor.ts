@@ -16,11 +16,16 @@ const MAX_ATTEMPTS = 2
  * Each attempt is a Claude call with up to 3 web searches, so two of them
  * back to back can run for minutes — and did: a "Describe it" search was
  * reported taking four minutes and then failing, which is the client's own
- * 190s timeout firing mid-second-attempt. A retry that cannot finish before
- * the traveler is shown an error isn't resilience, it's just spend. One
+ * timeout firing mid-second-attempt. A retry that cannot finish before the
+ * traveler is shown an error isn't resilience, it's just spend. One
  * slow-but-complete attempt beats two that get cut off.
+ *
+ * Raised alongside the callable's own timeoutSeconds (180 -> 300): this is
+ * the point past which a second attempt has no room to finish, so it has to
+ * move with the budget it is measured against. Leaving it at 100s would
+ * have kept refusing retries the deadline could now comfortably afford.
  */
-const RETRY_DEADLINE_MS = 100_000
+const RETRY_DEADLINE_MS = 180_000
 
 /**
  * How large a "rescan this area" search radius is allowed to be, in
@@ -96,6 +101,78 @@ export interface RescanFind {
  * applies) and then actually measured server-side — a find that doesn't
  * geocode is dropped (nothing to check its distance/detour against).
  */
+/**
+ * How many times a paused turn may be resumed before this attempt gives up.
+ *
+ * A server-side tool runs inside a sampling loop on Anthropic's side, and
+ * when that loop hits its own iteration ceiling the turn comes back with
+ * `stop_reason: "pause_turn"` — a partial answer with an explicit "ask me
+ * again to continue". Nothing here was checking for it, so a paused turn was
+ * handed straight to the schema parser as though it were finished: the JSON
+ * was cut off mid-object, parsing failed, and the failure was reported as a
+ * malformed response from Claude rather than as an unfinished one. The retry
+ * then re-ran the whole search from scratch instead of continuing it.
+ *
+ * Three is generous for an area rescan. The cap exists so a pathologically
+ * pausing turn cannot spin until the function's own deadline kills it.
+ */
+const MAX_PAUSE_RESUMES = 3
+
+/**
+ * One search attempt, streamed, resuming across any paused turns.
+ *
+ * Streamed because the non-streaming path is what a long web-search turn
+ * runs out of: a single request has to complete inside the SDK's request
+ * timeout, and three searches plus a survey-sized answer is exactly the
+ * shape that doesn't. Streaming holds the connection open through the whole
+ * generation instead, which is the documented remedy — `finalMessage()` then
+ * hands back the same assembled message the non-streaming call would have
+ * returned, so nothing downstream changes.
+ *
+ * Resuming is the other half. To continue a paused turn you re-send the
+ * conversation with the partial assistant turn appended and nothing else —
+ * no "carry on" message, which would be read as a new instruction rather
+ * than a continuation.
+ */
+async function runSearchTurn(
+  client: Anthropic,
+  system: string,
+  messages: Anthropic.MessageParam[],
+  input: { query?: string },
+): Promise<Anthropic.Message> {
+  const turn = [...messages]
+  let response: Anthropic.Message | undefined
+
+  for (let resume = 0; resume <= MAX_PAUSE_RESUMES; resume++) {
+    const stream = client.messages.stream({
+      model: MODEL,
+      // A focused query wants a handful of matches, not a survey — and
+      // output length is paid for in wall time, on the call the traveler
+      // is sitting and waiting for. The general "what's worth stopping
+      // for here" pass still gets the full budget.
+      max_tokens: input.query ? 1500 : 4000,
+      thinking: { type: 'disabled' },
+      system,
+      messages: turn,
+      // Uncapped web_search bills every search result back in as input
+      // tokens on top of the per-search fee — a rescan of one small area
+      // never legitimately needs more than a couple of searches.
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+    })
+    response = await stream.finalMessage()
+    if (response.stop_reason !== 'pause_turn') return response
+    turn.push({ role: 'assistant', content: response.content })
+  }
+
+  // Out of resumes: hand back the last partial rather than throwing. The
+  // caller's schema check is the right place to decide whether what arrived
+  // is usable, and a truncated-but-parseable answer is still an answer.
+  console.warn(
+    `Rescan search paused ${MAX_PAUSE_RESUMES} times without finishing — using the partial turn`,
+  )
+  return response as Anthropic.Message
+}
+
 export async function generateRescanCandidates(input: {
   center: LatLng
   radiusKm: number
@@ -123,21 +200,7 @@ export async function generateRescanCandidates(input: {
     let response: Anthropic.Message
     const attemptStartedAt = Date.now()
     try {
-      response = await client.messages.create({
-        model: MODEL,
-        // A focused query wants a handful of matches, not a survey — and
-        // output length is paid for in wall time, on the call the traveler
-        // is sitting and waiting for. The general "what's worth stopping
-        // for here" pass still gets the full budget.
-        max_tokens: input.query ? 1500 : 4000,
-        thinking: { type: 'disabled' },
-        system,
-        messages,
-        // Uncapped web_search bills every search result back in as input
-        // tokens on top of the per-search fee — a rescan of one small area
-        // never legitimately needs more than a couple of searches.
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-      })
+      response = await runSearchTurn(client, system, messages, input)
     } catch (error) {
       // A transient API-level failure (rate limit, brief overload, network
       // blip), not Claude returning malformed JSON — MAX_ATTEMPTS existing

@@ -59,13 +59,12 @@ describe('describeExploreHighlightsError', () => {
 
   // These codes come from the Firebase client, not from our callable, and
   // their message is just the code repeated back.
+  //
+  // 'deadline-exceeded' used to be in this list and has been deliberately
+  // pulled out of it: it is the one transport failure the traveler can act
+  // on, and "please try again" is the worst advice for it — see the
+  // dedicated case below.
   it('falls back for transport-level failures and non-callable errors', () => {
-    expect(
-      describeExploreHighlightsError({
-        code: 'functions/deadline-exceeded',
-        message: 'deadline-exceeded',
-      }),
-    ).toBe(GENERIC)
     expect(describeExploreHighlightsError(new TypeError('Failed to fetch'))).toBe(
       GENERIC,
     )
@@ -188,5 +187,26 @@ describe('sortCandidatesForList', () => {
     sortCandidatesForList(given, START, END)
 
     expect(given.map((s) => s.id)).toEqual(['b', 'a'])
+  })
+})
+
+describe('describeExploreHighlightsError — a search that ran out of time', () => {
+  // The generic "please try again" is the worst possible advice here:
+  // re-running the identical search is the one thing guaranteed to take just
+  // as long. Reported as three minutes of "Scanning…" followed by a failure.
+  it('names what would make the search finish instead of advising a retry', () => {
+    const message = describeExploreHighlightsError({
+      code: 'functions/deadline-exceeded',
+      message: 'deadline-exceeded',
+    })
+
+    expect(message).toMatch(/smaller area/i)
+    expect(message).not.toMatch(/try again/i)
+  })
+
+  it('still falls back to the generic line for a failure it cannot explain', () => {
+    expect(describeExploreHighlightsError({ code: 'functions/unavailable' })).toMatch(
+      /try again/i,
+    )
   })
 })
