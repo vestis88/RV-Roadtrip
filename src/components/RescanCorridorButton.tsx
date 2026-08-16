@@ -21,6 +21,30 @@ interface RescanCorridorButtonProps {
  */
 const SHOW_ELAPSED_AFTER_MS = 20_000
 
+/**
+ * Past this, a scan still marked running is treated as abandoned rather than
+ * slow.
+ *
+ * The callable clears its own status on the way out, success or failure —
+ * but a container killed by its own 300s ceiling never reaches that code,
+ * and the trip is left saying 'generating' forever. The button then sits
+ * disabled behind a counter that climbs without limit: reported at
+ * "Scanning… 10m 47s", which is well past anything the server can still be
+ * doing. The heartbeat this reads was written for exactly this and then not
+ * consulted, which is the bug.
+ *
+ * Comfortably above the callable's own timeoutSeconds so a genuinely slow
+ * scan is never cut off early — this only ever fires for a run that cannot
+ * still be alive.
+ */
+const STALE_SCAN_MS = 6 * 60 * 1000
+
+function isStale(startedAt: string | undefined, now: number): boolean {
+  if (!startedAt) return false
+  const started = new Date(startedAt).getTime()
+  return Number.isFinite(started) && now - started > STALE_SCAN_MS
+}
+
 function elapsedLabel(startedAt: string | undefined, now: number): string {
   if (!startedAt) return 'Scanning…'
   const ms = now - new Date(startedAt).getTime()
@@ -59,23 +83,33 @@ export function RescanCorridorButton({
    * `submitting` covers only the gap between the tap and the server writing
    * its status, so the button doesn't flash idle in between.
    */
-  const scanning = submitting || planMeta.rescanStatus === 'generating'
+  // A scan the server can no longer be running does not count as running,
+  // however the trip still describes it — see STALE_SCAN_MS.
+  const abandoned =
+    planMeta.rescanStatus === 'generating' &&
+    isStale(planMeta.rescanStatusUpdatedAt, now)
+  const scanning =
+    submitting || (planMeta.rescanStatus === 'generating' && !abandoned)
 
   // Only ticks while a scan is actually running, so an idle map isn't
   // re-rendering once a second for a counter nobody is looking at.
   useEffect(() => {
-    if (!scanning) return
+    // Keyed on the trip's own claim rather than on `scanning`: the clock has
+    // to keep running right up to the point the claim goes stale, or nothing
+    // would ever re-render to notice that it had.
+    if (planMeta.rescanStatus !== 'generating') return
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [scanning])
+  }, [planMeta.rescanStatus])
 
   /**
    * The confirmation, recovered from the trip rather than remembered here —
    * so it is waiting for the traveler when they come back to the tab,
    * whether or not the connection that started the scan survived.
    */
-  const status =
-    planMeta.rescanStatus !== 'generating' && planMeta.rescanLastRunAt
+  const status = abandoned
+    ? 'That scan stopped reporting back — it may have run out of time. Anything it did find is already on the map.'
+    : planMeta.rescanStatus !== 'generating' && planMeta.rescanLastRunAt
       ? planMeta.rescanLastFoundCount
         ? `Found ${planMeta.rescanLastFoundCount} new stop${planMeta.rescanLastFoundCount === 1 ? '' : 's'} nearby.`
         : 'Nothing new found nearby.'

@@ -287,6 +287,58 @@ test('a scan in progress is still reported after switching tabs and back', async
   await expect(page.getByTestId('rescan-corridor-button')).toContainText('Scanning')
 })
 
+// Reported as "Scanning… 10m 47s" — a counter climbing past anything the
+// server can still be doing. The callable clears its own status on the way
+// out, but a container killed by its own ceiling never reaches that code, so
+// the trip is left claiming 'generating' forever and the button sits
+// disabled behind it. rescanStatusUpdatedAt was added as the heartbeat for
+// exactly this case and then never consulted.
+test('a scan the server cannot still be running stops blocking the button', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'generating',
+      // Well past the callable's own 300s ceiling: whatever started this is
+      // long gone.
+      'planMeta.rescanStatusUpdatedAt': new Date(Date.now() - 15 * 60_000).toISOString(),
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-button')).toBeEnabled()
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText(
+    'Rescan this area',
+  )
+  await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+    'stopped reporting back',
+  )
+})
+
+// The counterpart: a scan that started moments ago is slow, not abandoned,
+// and cutting it off early would be the worse error.
+test('a scan that only just started is left alone', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'generating',
+      'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
+})
+
 test('the result of a scan is waiting on return, not lost with the tab', async ({
   page,
 }) => {
