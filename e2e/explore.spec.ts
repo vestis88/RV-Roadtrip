@@ -270,7 +270,7 @@ test('a town-only candidate renders without the sights-led extras', async ({
 // route. Both used to: a stop voted to must-see was silently added to the
 // backbone, which meant two unrelated controls did the same thing and the
 // card only ever admitted to one of them — a must-see stop wore the blue
-// ring but showed no "Keeping" chip and still offered a "Keep this" button
+// ring but showed no "Locked in" chip and still offered a "Lock in" button
 // that changed nothing visible. Votes are triage now; keeping is the
 // commitment.
 test('marking a stop must-see does not put it in the route', async ({
@@ -311,7 +311,7 @@ test('marking a stop must-see does not put it in the route', async ({
     page.getByTestId(`explore-candidate-onroute-${ottaId}`),
   ).toBeHidden()
 
-  // Keeping it is what commits it — and only then does it turn blue.
+  // Locking it in is what commits it — and only then does it turn blue.
   await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
   await expect(card).toHaveClass(/border-sky-600/)
 
@@ -319,6 +319,59 @@ test('marking a stop must-see does not put it in the route', async ({
   await expect(card).not.toHaveClass(/border-orange-600/)
   await card.click()
   await expect(card).toHaveClass(/border-orange-600/)
+})
+
+// Locking used to be a one-way door: a locked stop offered only "Remove",
+// which rejected it outright, so changing your mind about committing to a
+// place cost you the place — and because a rejection is remembered as a
+// tombstone, the next "Find more stops" would not hand it back either.
+test('locking a stop can be undone without losing the stop', async ({ page }) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+
+  await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
+  await expect
+    .poll(async () => (await stops.doc(ottaId).get()).data()?.status)
+    .toBe('locked')
+
+  await page.getByTestId(`explore-candidate-unlock-${ottaId}`).click()
+
+  // Back to a candidate — still on the list, still must-see, no longer
+  // bending the route.
+  await expect
+    .poll(async () => (await stops.doc(ottaId).get()).data()?.status)
+    .toBe('candidate')
+  expect((await stops.doc(ottaId).get()).data()?.priority).toBe('must-see')
+  await expect(page.getByTestId(`explore-candidate-lock-${ottaId}`)).toBeVisible()
+})
+
+// Undoing a commitment and ruling a place out are different intentions, so a
+// locked stop keeps both — the second is what leaves the tombstone.
+test('a locked stop can still be ruled out outright', async ({ page }) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, { name: 'Otta', priority: 'must-see', rank: 0 })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+
+  await page.getByTestId(`explore-candidate-lock-${ottaId}`).click()
+  await expect
+    .poll(async () => (await stops.doc(ottaId).get()).data()?.status)
+    .toBe('locked')
+
+  await page.getByTestId(`explore-candidate-reject-${ottaId}`).click()
+  await expect
+    .poll(async () => (await stops.doc(ottaId).get()).data()?.status)
+    .toBe('rejected')
 })
 
 // Both figures come from the same straight-line estimate, so they are shown

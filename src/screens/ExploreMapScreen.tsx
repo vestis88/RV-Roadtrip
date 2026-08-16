@@ -148,14 +148,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   //
   // This used to also include everything ranked must-see, which gave the
   // traveler two unrelated controls that did the same thing — vote a stop up
-  // to the top tier, or press "Keep this", either one bent the route. They
+  // to the top tier, or press "Lock in", either one bent the route. They
   // could also disagree, and the card only ever rendered one of them: a
   // must-see stop sat on the route wearing the blue ring but showed no
-  // "Keeping" chip and still offered a "Keep this" button that changed
+  // "Locked in" chip and still offered a "Lock in" button that changed
   // nothing visible when pressed.
   //
   // The two now mean different things. Votes are triage — how much the
-  // traveler cares, which is what sorts the list. Keeping is the commitment,
+  // traveler cares, which is what sorts the list. Locking in is the commitment,
   // and it is the only thing that moves the route. buildRouteBackbone sorts
   // these along the corridor itself, so the order they were kept in never
   // matters.
@@ -501,7 +501,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 onLock={() =>
                   runStopAction(
                     setCorridorStopStatus(tripId, stop.id, 'locked'),
-                    'Could not keep that stop — please try again.',
+                    'Could not lock in that stop — please try again.',
+                  )
+                }
+                onUnlock={() =>
+                  runStopAction(
+                    // Straight back to 'candidate' — the stop keeps its
+                    // interest level and its place in the list, and only
+                    // stops bending the route. Nothing else about it changes,
+                    // which is the whole difference between this and "Not
+                    // interested".
+                    setCorridorStopStatus(tripId, stop.id, 'candidate'),
+                    'Could not unlock that stop — please try again.',
                   )
                 }
                 onReject={() => {

@@ -21,6 +21,8 @@ interface ExploreCandidateCardProps {
   onSelect: () => void
   onSetPriority: (priority: CorridorStopPriority) => void
   onLock: () => void
+  /** Back to an ordinary candidate — see the Unlock button below. */
+  onUnlock: () => void
   onReject: () => void
 }
 
@@ -53,9 +55,20 @@ const TIER_STYLE: Record<CorridorStopPriority, string> = {
  * One row in explore mode's candidate list (below the map — see
  * ExploreMapScreen). The interest selector sets how much the traveler cares
  * about this stop, which is triage and changes nothing about the route;
- * "Keep this" promotes straight to `locked` — the same status a manually
+ * "Lock in" promotes straight to `locked` — the same status a manually
  * pinned stop gets, and the only thing that does bend the route, since both
  * mean "the traveler wants this in the eventual route."
+ *
+ * It is called "Lock in" because that is what it does. It read "Keep this",
+ * which sounds like a preference alongside the interest selector rather than
+ * the one commitment on the card that moves the route.
+ *
+ * Locking is undoable. It wasn't: a locked stop offered only "Remove", which
+ * rejected it outright — so changing your mind about committing to a stop
+ * cost you the stop, and the only route back was a fresh curation pass that
+ * might not propose it again. Unlock returns it to the candidate list with
+ * its interest level intact; "Not interested" stays alongside for when the
+ * answer really is no.
  */
 export function ExploreCandidateCard({
   stop,
@@ -66,6 +79,7 @@ export function ExploreCandidateCard({
   onSelect,
   onSetPriority,
   onLock,
+  onUnlock,
   onReject,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
@@ -137,7 +151,7 @@ export function ExploreCandidateCard({
             )
           )}
           {stop.status === 'locked' && (
-            <span className="chip chip-accent px-2 py-0.5 text-xs">Keeping</span>
+            <span className="chip chip-accent px-2 py-0.5 text-xs">Locked in</span>
           )}
         </div>
         {/* What this stop actually is, now that a candidate is a sight
@@ -184,7 +198,7 @@ export function ExploreCandidateCard({
         )}
         {/* How much the traveler cares, set directly rather than nudged a
           * step at a time. It sorts nothing and moves nothing — the list is
-          * in route order and only "Keep this" bends the route — it is what
+          * in route order and only "Lock in" bends the route — it is what
           * the eventual full generation is told to weigh when deciding what
           * fits. Claude's own pick is what's selected until it's changed. */}
         <div
@@ -249,7 +263,7 @@ export function ExploreCandidateCard({
               }}
               className="btn btn-sm btn-primary"
             >
-              Keep this
+              Lock in
             </button>
           )}
           {stop.status === 'locked' && (
@@ -258,26 +272,27 @@ export function ExploreCandidateCard({
               data-testid={`explore-candidate-unlock-${stop.id}`}
               onClick={(event) => {
                 event.stopPropagation()
-                onReject()
+                onUnlock()
               }}
               className="btn btn-sm btn-secondary"
             >
-              Remove
+              Unlock
             </button>
           )}
-          {stop.status === 'candidate' && (
-            <button
-              type="button"
-              data-testid={`explore-candidate-reject-${stop.id}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onReject()
-              }}
-              className="btn btn-sm btn-secondary text-neutral-500 dark:text-neutral-400"
-            >
-              Not interested
-            </button>
-          )}
+          {/* Offered whether or not the stop is locked. Undoing a commitment
+            * and ruling a place out are different intentions, and collapsing
+            * them into one button is what made locking a one-way door. */}
+          <button
+            type="button"
+            data-testid={`explore-candidate-reject-${stop.id}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onReject()
+            }}
+            className="btn btn-sm btn-secondary text-neutral-500 dark:text-neutral-400"
+          >
+            Not interested
+          </button>
         </div>
       </div>
     </div>
