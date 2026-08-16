@@ -3,6 +3,11 @@ import { defineSecret } from 'firebase-functions/params'
 import type { LatLng, TripSettings } from '@rv/shared'
 import { geocodeQuery, verifyPlaceLocation } from '../placesApi.js'
 import { logClaudeUsage, type ClaudeCallType } from '../claudeUsageLogger.js'
+import { salvageJsonPrefix, stripCodeFences } from './jsonFromClaude.js'
+// Re-exported so this stays the import site it has always been for the
+// highlights salvage — the implementation moved because the rescan path
+// needed it too, and had spent months failing without it.
+export { salvageJsonPrefix } from './jsonFromClaude.js'
 import {
   buildChunkDetailPrompt,
   buildRegionHighlightsPrompt,
@@ -40,82 +45,8 @@ export type PlanTripProgress =
   | { phase: 'outline' }
   | { phase: 'detail'; chunkIndex: number; chunkCount: number }
 
-function stripCodeFences(text: string): string {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```\s*$/, '')
-    .trim()
-}
-
 export function parseRegionHighlights(text: string): RegionHighlightsResponse {
   return regionHighlightsResponseSchema.parse(JSON.parse(stripCodeFences(text)))
-}
-
-/**
- * Cuts a syntactically broken response back to the longest prefix that IS
- * valid JSON, closing whatever containers are still open at that point.
- * Returns null when nothing parses.
- *
- * Exists because of a production failure on 2026-08-12 (explore highlights,
- * trip "Luxemburg"): Claude returned 5,609 characters of otherwise-complete
- * curation whose very last candidate was `{"town": "Bouillon", "country":
- * "BE", "why "}` — a key with no value. `JSON.parse` is all-or-nothing, so
- * one malformed field at the tail threw away every complete candidate
- * before it, both attempts failed the same way, and the whole callable
- * 500'd after paying for two Claude calls. The 30-day usage log shows this
- * is not a freak: 4 of 12 highlights runs needed their retry, so a run
- * where BOTH attempts miss is simply the tail of a rate the code already
- * lived with.
- *
- * Scans once, tracking string/escape state so a brace inside a `why`
- * sentence is never mistaken for structure, and records every point where a
- * container legitimately closed. Those points are then tried newest-first,
- * so the salvage keeps as much of the answer as possible; a trailing
- * sentence of prose after the closing brace (the other way a response
- * stops being parseable) is cut by the same mechanism.
- *
- * Deliberately NOT a general "repair any JSON" pass: it only ever truncates
- * at a boundary the model itself closed, so a salvaged document contains
- * only values Claude actually finished writing. Nothing is invented, and
- * the caller still validates the result against the real schema.
- */
-export function salvageJsonPrefix(text: string): string | null {
-  const cuts: { end: number; closers: string }[] = []
-  const open: string[] = []
-  let inString = false
-  let escaped = false
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (char === '\\') escaped = true
-      else if (char === '"') inString = false
-      continue
-    }
-    if (char === '"') inString = true
-    else if (char === '{') open.push('}')
-    else if (char === '[') open.push(']')
-    else if (char === '}' || char === ']') {
-      // A mismatched closer means the damage is structural rather than a
-      // truncated tail, and every cut point recorded so far sits inside a
-      // container whose nesting we can no longer trust — nothing to salvage.
-      if (open.pop() !== char) return null
-      cuts.push({ end: i, closers: [...open].reverse().join('') })
-    }
-  }
-
-  for (let i = cuts.length - 1; i >= 0; i--) {
-    const candidate = text.slice(0, cuts[i].end + 1) + cuts[i].closers
-    try {
-      JSON.parse(candidate)
-      return candidate
-    } catch {
-      // This boundary sat inside the broken region; try an earlier one.
-    }
-  }
-  return null
 }
 
 /**

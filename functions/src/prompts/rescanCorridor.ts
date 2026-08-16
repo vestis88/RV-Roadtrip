@@ -5,6 +5,7 @@ import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
 import { geocodeQuery } from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
+import { extractJsonObject } from './jsonFromClaude.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
 
@@ -64,14 +65,6 @@ export const MAX_RESCAN_RESULTS = 10
  */
 export const MAX_QUERY_SEARCH_DETOUR_KM = 30
 
-function stripCodeFences(text: string): string {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```\s*$/, '')
-    .trim()
-}
-
 const rescanCandidateSchema = z.object({
   name: z.string(),
   country: z.string().length(2),
@@ -84,8 +77,25 @@ const rescanResponseSchema = z.object({
   finds: z.array(rescanCandidateSchema),
 })
 
+/**
+ * The finds in a search response, whatever Claude wrapped them in.
+ *
+ * This used to be `JSON.parse(stripCodeFences(text))`, and that single line
+ * is the best explanation there is for why a rescan appeared never to work.
+ * It is the only Claude call in the app that runs web_search, and a turn
+ * grounded in sources is the one most likely to say so — an opening sentence
+ * before the JSON, or a "let me know if you'd like me to widen the search"
+ * after it. Both throw. Every other symptom followed from that: minutes
+ * spent, nothing found, a second full web search bought to reach the same
+ * ending, and an error blaming malformed JSON for what was a complete,
+ * correct answer with a sentence of politeness attached.
+ *
+ * The highlights path was given exactly this tolerance in 2026-08-12 (see
+ * jsonFromClaude.ts) after the same failure on the tool-free call, where it
+ * was measurably rarer. This path never got it.
+ */
 export function parseRescanResponse(text: string) {
-  return rescanResponseSchema.parse(JSON.parse(stripCodeFences(text)))
+  return rescanResponseSchema.parse(JSON.parse(extractJsonObject(text)))
 }
 
 function textFromResponse(response: Anthropic.Message): string {

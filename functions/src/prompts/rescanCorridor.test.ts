@@ -692,3 +692,62 @@ describe('generateRescanCandidates — an answer for a search that already happe
     warn.mockRestore()
   })
 })
+
+/**
+ * The single line that best explains why a rescan appeared never to work.
+ *
+ * This is the only Claude call in the app that runs web_search, and a turn
+ * grounded in sources is the one most likely to introduce or sign off its
+ * answer — despite the prompt asking for JSON only. The old parser threw on
+ * every one of these, discarding a complete and correct answer and buying a
+ * second full web search to reach the same ending. The tool-free highlights
+ * path was given this exact tolerance months ago; this one never was.
+ */
+describe('parseRescanResponse — an answer with a sentence around it', () => {
+  const FINDS = {
+    finds: [
+      {
+        name: 'Sunne Bike Park',
+        country: 'SE',
+        why: 'Lift-served downhill trails for a range of abilities.',
+      },
+    ],
+  }
+
+  it('reads an answer introduced by a sentence', () => {
+    const parsed = parseRescanResponse(
+      `Based on my searches, here are the standout stops near Sunne:\n\n${JSON.stringify(FINDS)}`,
+    )
+    expect(parsed.finds[0].name).toBe('Sunne Bike Park')
+  })
+
+  it('reads an answer that keeps talking afterwards', () => {
+    const parsed = parseRescanResponse(
+      `${JSON.stringify(FINDS)}\n\nLet me know if you would like me to widen the search!`,
+    )
+    expect(parsed.finds[0].name).toBe('Sunne Bike Park')
+  })
+
+  it('reads an answer wrapped in both, inside a code fence', () => {
+    const parsed = parseRescanResponse(
+      `Here is what I found:\n\n\`\`\`json\n${JSON.stringify(FINDS)}\n\`\`\`\n\nHope that helps.`,
+    )
+    expect(parsed.finds[0].name).toBe('Sunne Bike Park')
+  })
+
+  it('reads an empty answer wrapped in prose — "nothing nearby" still counts', () => {
+    expect(
+      parseRescanResponse(
+        'I searched thoroughly and found nothing worth a detour.\n\n{"finds": []}',
+      ).finds,
+    ).toHaveLength(0)
+  })
+
+  // Tolerance is not credulity: a response with no JSON in it is still a
+  // failure, and it now says what arrived instead of naming a character.
+  it('still fails on a response with no JSON in it, and says what came back', () => {
+    expect(() =>
+      parseRescanResponse('I was unable to search the web just now.'),
+    ).toThrow(/no JSON at all.*unable to search/i)
+  })
+})
