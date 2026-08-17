@@ -41,7 +41,10 @@ import {
 } from './prompts/planTrip.js'
 import { DETAIL_WINDOW_DAYS } from './dayDetail.js'
 import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
-import { buildRegionHighlightsFromCandidates } from './exploreCandidates.js'
+import {
+  buildRegionHighlightsFromCandidates,
+  lockedRouteOrder,
+} from './exploreCandidates.js'
 import { googlePlacesApiKey } from './placesApi.js'
 import {
   describePlanTripProgress,
@@ -154,6 +157,7 @@ export async function generateRealPlan(
   tripRef: DocumentReference,
   highlights?: RegionHighlightsResponse,
   deadlineMs?: number,
+  lockedRoute?: string[],
 ): Promise<{ days: GeneratedDay[]; complete: boolean }> {
   const settingsHash = computeSettingsHash(trip) + (highlights ? ':explore' : '')
   const checkpoint = await loadCheckpoint(tripRef, trip, settingsHash)
@@ -194,6 +198,7 @@ export async function generateRealPlan(
           highlights,
           tripId: tripRef.id,
           detailDayIndexes,
+          ...(lockedRoute?.length ? { lockedRoute } : {}),
           onProgress,
         })
       : await planTrip({
@@ -201,6 +206,7 @@ export async function generateRealPlan(
           notesFreeText: trip.notes.freeText,
           tripId: tripRef.id,
           detailDayIndexes,
+          ...(lockedRoute?.length ? { lockedRoute } : {}),
           onProgress,
         })
     await saveSkeletonCheckpoint(tripRef, settingsHash, skeleton)
@@ -406,9 +412,15 @@ export async function runFullGeneration(
     .collection('corridorStops')
     .where('status', 'in', ['candidate', 'locked'])
     .get()
-  const curated = buildRegionHighlightsFromCandidates(
-    candidatesSnap.docs.map((doc) => doc.data() as CorridorStop),
+  const curatedStops = candidatesSnap.docs.map(
+    (doc) => doc.data() as CorridorStop,
   )
+  const curated = buildRegionHighlightsFromCandidates(curatedStops)
+  // The order the traveler actually committed to on the map, worked out by
+  // Google against real roads. The route phase cannot derive it — a straight
+  // line between two coordinates says nothing about whether the road exists
+  // — and without it the detour that ordering removed comes straight back.
+  const lockedRoute = lockedRouteOrder(curatedStops)
   if (kind === 'fromExploreCandidates' && curated.regions.length === 0) {
     throw new Error(
       'No candidate stops to build a plan from — explore a few first.',
@@ -422,6 +434,7 @@ export async function runFullGeneration(
     tripRef,
     highlights,
     invocationDeadline,
+    lockedRoute,
   )
 
   if (!complete) {

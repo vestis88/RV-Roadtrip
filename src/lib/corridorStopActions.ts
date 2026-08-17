@@ -27,3 +27,32 @@ export async function deleteCorridorStop(tripId: string, stopId: string) {
 export async function rejectCorridorStop(tripId: string, stopId: string) {
   await setCorridorStopStatus(tripId, stopId, 'rejected')
 }
+
+/**
+ * Records the driving order Google worked out for the kept stops, so it
+ * survives leaving the map.
+ *
+ * Without this the order lived in component state and died at exactly the
+ * moment it mattered: a plan request carries nothing but a trip id, so the
+ * route phase re-derived the sequence from scratch and put back the detour
+ * the ordering had just removed. See corridorStopSchema.routeIndex.
+ *
+ * Only writes stops whose position actually changed — this runs whenever
+ * Directions answers, and rewriting every locked stop each time would be a
+ * burst of no-op writes against a live subscription every device on the trip
+ * is watching.
+ */
+export async function saveRouteOrder(
+  tripId: string,
+  orderedStops: { id: string; routeIndex?: number }[],
+): Promise<void> {
+  await Promise.all(
+    orderedStops.map((stop, routeIndex) =>
+      stop.routeIndex === routeIndex
+        ? Promise.resolve()
+        : updateDoc(doc(db, 'trips', tripId, 'corridorStops', stop.id), {
+            routeIndex,
+          }),
+    ),
+  )
+}

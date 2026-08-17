@@ -251,6 +251,26 @@ export const overnightStopSchema = z.object({
   // answer rather than a degraded one, since what is being navigated to is a
   // point in a lay-by and not a business.
   googleMapsUrl: z.string().optional(),
+  /**
+   * Where this stop sits in the driving order, for a `locked` stop only
+   * (2026-08-17).
+   *
+   * The explore map used to order kept stops by projecting them onto the
+   * straight start→end line, which cannot know the sea is in the way: it put
+   * a stop in northern Sweden ahead of one on Saaremaa, and the only road
+   * answer to that sequence was around the Gulf of Bothnia. Google orders
+   * them against real roads now — and this is where that answer is kept, so
+   * it survives pressing "Generate full plan".
+   *
+   * Without it the order lived in React state and died at the moment it
+   * mattered most: the plan request carries nothing but a trip id, so the
+   * route phase re-derived the sequence from scratch and put the detour
+   * straight back.
+   *
+   * Distinct from `rank`, which orders CANDIDATES within a priority tier —
+   * a different question about a different set of stops.
+   */
+  routeIndex: z.number().int().nonnegative().optional(),
 })
 
 // Overnight-stop type & candidate selection (implemented 2026-07-27):

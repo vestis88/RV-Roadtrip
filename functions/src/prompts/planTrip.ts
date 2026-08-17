@@ -444,6 +444,8 @@ export async function generateSkeletonFromHighlights(input: {
   notesFreeText: string
   highlights: RegionHighlightsResponse
   tripId?: string
+  /** See buildRouteOutlinePrompt — the committed driving order, if any. */
+  lockedRoute?: string[]
   /**
    * Which days to work out activities and restaurants for now, by index.
    *
@@ -584,6 +586,8 @@ export async function planTrip(input: {
   settings: TripSettings
   notesFreeText: string
   tripId?: string
+  /** See buildRouteOutlinePrompt — the committed driving order, if any. */
+  lockedRoute?: string[]
   /** See generateSkeletonFromHighlights — passed straight through. */
   detailDayIndexes?: number[]
   onProgress?: (progress: PlanTripProgress) => void

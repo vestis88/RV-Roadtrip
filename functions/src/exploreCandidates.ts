@@ -3,6 +3,7 @@ import {
   corridorStopSchema,
   type CorridorStop,
   type CorridorStopPriority,
+  type CorridorStopStatus,
   type SightTimeNeeded,
 } from '@rv/shared'
 import type { PendingWrite } from './firestoreBatch.js'
@@ -161,6 +162,8 @@ interface CandidateLike {
   baseTown?: string
   interest?: string
   timeNeeded?: SightTimeNeeded
+  status?: CorridorStopStatus
+  routeIndex?: number
 }
 
 /**
@@ -236,4 +239,25 @@ export function buildRegionHighlightsFromCandidates(
       candidateStops: group.items,
     })),
   }
+}
+
+/**
+ * The locked stops' names in driving order — what the route phase is told it
+ * must follow.
+ *
+ * Ordered by `routeIndex`, which the explore map writes from Google's own
+ * answer (see corridorStopSchema.routeIndex). A stop with no routeIndex
+ * sorts last rather than to the front: it has simply never been drawn on a
+ * route, and guessing zero for it would put it first and invent exactly the
+ * kind of order this exists to stop being invented.
+ */
+export function lockedRouteOrder(candidates: CandidateLike[]): string[] {
+  return candidates
+    .filter((stop) => stop.status === 'locked')
+    .sort(
+      (a, b) =>
+        (a.routeIndex ?? Number.MAX_SAFE_INTEGER) -
+        (b.routeIndex ?? Number.MAX_SAFE_INTEGER),
+    )
+    .map((stop) => stop.name)
 }

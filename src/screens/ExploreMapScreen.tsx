@@ -16,6 +16,7 @@ import { useCorridorStops } from '../hooks/useCorridorStops'
 import {
   rejectCorridorStop,
   setCorridorStopStatus,
+  saveRouteOrder,
 } from '../lib/corridorStopActions'
 import {
   describeEmptyCountries,
@@ -214,6 +215,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
   )
+  // Persisted, not just held: pressing "Generate full plan" sends nothing
+  // but a trip id, so an order kept only in this component would be gone by
+  // the time the route phase needed it — see saveRouteOrder.
+  useEffect(() => {
+    if (routeStops.length < 2) return
+    void saveRouteOrder(tripId, routeStops).catch((error: unknown) =>
+      console.error('Saving the route order failed', error),
+    )
+  }, [tripId, routeStops])
   // Built in routeStops' order rather than re-sorted: that order is now
   // Google's answer, and buildRouteBackbone would throw it away and put the
   // projection back.

@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import {
   buildExploreCandidateWrites,
   buildRegionHighlightsFromCandidates,
+  lockedRouteOrder,
 } from './exploreCandidates.js'
 import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
 
@@ -349,5 +350,51 @@ describe('buildRegionHighlightsFromCandidates', () => {
 
   it('returns no regions for an empty candidate list', () => {
     expect(buildRegionHighlightsFromCandidates([]).regions).toEqual([])
+  })
+})
+
+/**
+ * The order the traveler committed to on the map, worked out by Google
+ * against real roads — carried into the route phase, which cannot derive it.
+ *
+ * Reported as a Denmark→Baltics trip routed north through Sweden and around
+ * the Gulf of Bothnia. Ordering the explore map fixed the drawing; without
+ * this the plan request carries nothing but a trip id, so pressing "Generate
+ * full plan" put the detour straight back.
+ */
+describe('lockedRouteOrder', () => {
+  it('names the locked stops in routeIndex order', () => {
+    expect(
+      lockedRouteOrder([
+        { name: 'Saaremaa', lat: 58.2, lng: 22.5, status: 'locked', routeIndex: 1 },
+        { name: 'Öland', lat: 56.7, lng: 16.5, status: 'locked', routeIndex: 0 },
+      ]),
+    ).toEqual(['Öland', 'Saaremaa'])
+  })
+
+  it('ignores stops the traveler has not locked in', () => {
+    expect(
+      lockedRouteOrder([
+        { name: 'Kept', lat: 56.7, lng: 16.5, status: 'locked', routeIndex: 0 },
+        { name: 'Merely suggested', lat: 57, lng: 17, status: 'candidate', routeIndex: 1 },
+      ]),
+    ).toEqual(['Kept'])
+  })
+
+  // A stop that has never been drawn on a route has no position. Sorting it
+  // to the FRONT would invent exactly the kind of order this exists to stop
+  // being invented, so it goes last.
+  it('puts a stop with no routeIndex last rather than first', () => {
+    expect(
+      lockedRouteOrder([
+        { name: 'Never drawn', lat: 57, lng: 17, status: 'locked' },
+        { name: 'Second', lat: 58, lng: 18, status: 'locked', routeIndex: 1 },
+        { name: 'First', lat: 56, lng: 16, status: 'locked', routeIndex: 0 },
+      ]),
+    ).toEqual(['First', 'Second', 'Never drawn'])
+  })
+
+  it('is empty for a trip nobody has explored', () => {
+    expect(lockedRouteOrder([])).toEqual([])
   })
 })

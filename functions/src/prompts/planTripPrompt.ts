@@ -89,8 +89,10 @@ You will be given the trip's settings (dates, travelers, interests, start/finish
 
 THIS IS NOT A SHORTEST-PATH ITINERARY. Your job is to SELECT sights from candidateHighlights, sequence them into an actual day-by-day route, and DERIVE each night's overnight town from the sights that day is built around — not to invent a new route from scratch and not to just connect startPoint to endPoint along the most direct line.
 
+When "lockedRoute" is given, it is not a suggestion. Those sights are already committed by the traveler, and the ORDER they are listed in is the driving order, worked out against real roads and sea crossings — which is something you cannot work out from coordinates, because a straight line between two points says nothing about whether the road between them exists. Every one of them must appear in the route, in that order, with no reordering and none dropped. Where reaching the next one in sequence means a ferry, a long transit day, or a route that looks nothing like a straight line, plan that day as the crossing it is and say so in its "highlightReason". Everything else — which further candidates to add, where the nights in between fall, how the days are paced — is still yours to decide.
+
 Work in this order:
-1. Choose the sights worth building this trip around, and put them in geographic order along the corridor.
+1. Choose the sights worth building this trip around, and put them in geographic order along the corridor. (When "lockedRoute" is given, its own order is fixed and the rest are placed around it.)
 2. Give each chosen sight a day, and set that day's overnight to the sight's own "town" — or, where several sights sit close together, one town that covers them all. A sight is seen from the town the travelers sleep in that night or the one they slept in the night before, never from three towns away.
 3. Fill the gaps: where two chosen sights are further apart than one day's drive, add a plain connecting overnight between them (somewhere sensible, ideally still near something worthwhile). Those days have no sight and say so.
 
@@ -133,11 +135,24 @@ export function buildRouteOutlinePrompt(input: {
   settings: TripSettings
   notesFreeText: string
   highlights: RegionHighlightsResponse
+  /**
+   * The sights the traveler has already locked in, by name, in the driving
+   * order Google worked out for them against real roads — see
+   * corridorStopSchema.routeIndex.
+   *
+   * Given because this phase cannot derive it. It has coordinates and a
+   * straight line, and a straight line between two points on opposite sides
+   * of the Baltic says nothing about whether you drive round the Gulf of
+   * Bothnia or take a ferry. Omitted when nothing is locked, which is the
+   * ordinary case for a trip generated without exploring first.
+   */
+  lockedRoute?: string[]
 }): { system: string; user: string } {
   const user = JSON.stringify({
     settings: input.settings,
     notes: input.notesFreeText,
     candidateHighlights: input.highlights.regions,
+    ...(input.lockedRoute?.length ? { lockedRoute: input.lockedRoute } : {}),
   })
   return { system: OUTLINE_SYSTEM_PROMPT, user }
 }

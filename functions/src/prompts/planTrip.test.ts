@@ -1034,3 +1034,49 @@ describe('generateSkeletonFromHighlights — detailing only some days', () => {
     await expect(run(2, [0])).rejects.toThrow(/never returned detail/i)
   })
 })
+
+/**
+ * The route phase cannot work out a driving order from coordinates: a
+ * straight line between two points on opposite sides of the Baltic says
+ * nothing about whether you drive round the Gulf of Bothnia or take a ferry.
+ * So the order the traveler committed to on the map — Google's, against real
+ * roads — is handed to it.
+ */
+describe('buildRouteOutlinePrompt — the committed order', () => {
+  it('sends lockedRoute when the traveler has locked stops in', async () => {
+    const { buildRouteOutlinePrompt } = await import('./planTripPrompt.js')
+    const { user, system } = buildRouteOutlinePrompt({
+      settings: {} as never,
+      notesFreeText: '',
+      highlights: { regions: [] },
+      lockedRoute: ['Öland', 'Saaremaa'],
+    })
+
+    expect(JSON.parse(user).lockedRoute).toEqual(['Öland', 'Saaremaa'])
+    expect(system).toMatch(/lockedRoute[\s\S]*not a suggestion/i)
+    expect(system).toMatch(/ferry/i)
+  })
+
+  it('omits it entirely for a trip nobody has explored', async () => {
+    const { buildRouteOutlinePrompt } = await import('./planTripPrompt.js')
+    const { user } = buildRouteOutlinePrompt({
+      settings: {} as never,
+      notesFreeText: '',
+      highlights: { regions: [] },
+    })
+
+    expect(JSON.parse(user)).not.toHaveProperty('lockedRoute')
+  })
+
+  it('omits it rather than sending an empty list', async () => {
+    const { buildRouteOutlinePrompt } = await import('./planTripPrompt.js')
+    const { user } = buildRouteOutlinePrompt({
+      settings: {} as never,
+      notesFreeText: '',
+      highlights: { regions: [] },
+      lockedRoute: [],
+    })
+
+    expect(JSON.parse(user)).not.toHaveProperty('lockedRoute')
+  })
+})
