@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { describeDetailWindow, NON_INVALIDATING_SETTINGS } from './detailWindow'
+import {
+  DETAIL_WINDOW_LABEL,
+  describeDetailWindow,
+  NON_INVALIDATING_SETTINGS,
+} from './detailWindow'
 
 const updateDocMock = vi.fn().mockResolvedValue(undefined)
 vi.mock('firebase/firestore', () => ({
@@ -10,21 +14,35 @@ vi.mock('./firebase', () => ({ db: {} }))
 
 const { updateTripSettings } = await import('./updateTripSettings')
 
-// The sentence under the slider. Its job is to stop "Plan ahead: 3 days"
-// reading as "only 3 days of this trip are planned" — the route and the
-// overnight stops are settled end to end whatever this is set to.
+// Reported 2026-08-17: "Asked to plan 2 days. Got all." Set to 2 on a
+// six-day trip, the plan came back with all six days routed — which is
+// correct and necessary, and which "Plan ahead: 2 days" gave every reason to
+// read as a bug. The label and this sentence are the fix; the behaviour was
+// never the problem.
 describe('describeDetailWindow', () => {
-  it('says the whole trip is still routed', () => {
-    expect(describeDetailWindow(3)).toMatch(/whole trip/i)
+  it('leads with the whole trip being routed, rather than mentioning it second', () => {
+    const said = describeDetailWindow(3)
+    expect(said).toMatch(/^Your whole trip is always routed/)
+    expect(said).toMatch(/every night’s town and every drive/i)
+  })
+
+  // The old opening — "The first N days are filled in up front" — is the
+  // sentence that reads as "and the rest are not planned".
+  it('never opens by counting the days that are filled in', () => {
+    expect(describeDetailWindow(3)).not.toMatch(/^The first/)
   })
 
   it('names the number of days it was given', () => {
-    expect(describeDetailWindow(5)).toContain('first 5 days')
+    expect(describeDetailWindow(5)).toContain('next 5 days')
   })
 
   it('reads correctly at one day', () => {
-    expect(describeDetailWindow(1)).toContain('Only the first day')
+    expect(describeDetailWindow(1)).toContain('today only')
     expect(describeDetailWindow(1)).not.toContain('1 days')
+  })
+
+  it('says what the window is actually made of', () => {
+    expect(describeDetailWindow(3)).toMatch(/activities and.*restaurants/i)
   })
 
   // Not a warning against choosing it — a two-week window is allowed. Just
@@ -77,6 +95,11 @@ describe('updateTripSettings — what actually invalidates a plan', () => {
 
     const [, written] = updateDocMock.mock.calls[0]
     expect(written).not.toHaveProperty('planMeta.status')
+  })
+
+  it('is named for what it controls, not for planning the trip', () => {
+    expect(DETAIL_WINDOW_LABEL).not.toMatch(/plan/i)
+    expect(DETAIL_WINDOW_LABEL).toMatch(/activities/i)
   })
 
   it('lists the detail window as the non-invalidating setting', () => {

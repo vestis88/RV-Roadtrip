@@ -11,29 +11,44 @@ import { DEFAULT_DETAIL_WINDOW_DAYS } from '@rv/shared'
 const CHATTY_ABOVE_DAYS = 7
 
 /**
- * What "Plan ahead: N days" actually buys, in the traveler's terms.
+ * What the slider is called.
  *
- * The slider sets how far ahead activities and restaurants are worked out —
- * NOT how much of the trip is planned, which is always all of it. That
- * distinction is the whole reason this sentence exists: "plan ahead 3 days"
- * on a three-week trip reads like the other eighteen days are missing, and
- * they are not. The route, the overnight towns and the driving are settled
- * end to end either way.
+ * It was "Plan ahead", and that was wrong in a way that cost a traveler an
+ * evening: set to 2 on a six-day trip it produced a full six-day route, and
+ * the obvious reading of the label is that it should have produced two days
+ * of trip. It never controlled that. The route is whole-trip by necessity —
+ * a trip has a fixed finish on a fixed date, so where you sleep on night one
+ * is decided by how far there is left to go and how many days remain, and
+ * two days of route have nothing to compute that from. What the slider
+ * controls is the part that genuinely is per-day and genuinely is expensive:
+ * each day's activities and restaurants. So the label says that instead.
+ */
+export const DETAIL_WINDOW_LABEL = 'Activities & food filled in'
+
+/**
+ * What that setting actually buys, in the traveler's terms.
+ *
+ * Leads with the whole-trip fact rather than mentioning it second. The old
+ * wording opened with "The first N days are filled in up front", which is
+ * the sentence that reads as "and the rest are not planned" — the very
+ * misreading this has to prevent.
  */
 export function describeDetailWindow(days: number): string {
   const opening =
+    'Your whole trip is always routed — every night’s town and every drive,' +
+    ' start to finish. This is only how far ahead each day’s activities and' +
+    ' restaurants are worked out: '
+  const window =
     days === 1
-      ? 'Only the first day is filled in up front'
-      : `The first ${days} days are filled in up front`
-  const rest =
-    ' — the route and overnight stops are planned for the whole trip either' +
-    ' way. Later days fill in when you open them, a few seconds each.'
+      ? 'today only.'
+      : `the next ${days} days.`
+  const rest = ' The rest fill in when you open them, a few seconds each.'
   const cost =
     days > CHATTY_ABOVE_DAYS
       ? ` Generating a plan takes longer at ${days} days, and re-planning` +
         ' redoes all of them.'
       : ''
-  return `${opening}${rest}${cost}`
+  return `${opening}${window}${rest}${cost}`
 }
 
 /**

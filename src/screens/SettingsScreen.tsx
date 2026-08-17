@@ -31,7 +31,10 @@ import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { updateTripSettings } from '../lib/updateTripSettings'
 import { hasRoute } from '../lib/validateRoute'
-import { describeDetailWindow } from '../lib/detailWindow'
+import {
+  DETAIL_WINDOW_LABEL,
+  describeDetailWindow,
+} from '../lib/detailWindow'
 
 interface SettingsScreenProps {
   tripId: string
@@ -482,16 +485,19 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           />
         </label>
 
-        {/* How far ahead the days are filled in. The whole trip is routed
-          * either way — this is only the activities and restaurants, which
-          * are what cost a Claude call and a run of Places lookups per day
-          * (see "route eagerly, detail lazily"). Exposed because three was
-          * a guess about how people use this: someone booking restaurants a
-          * week out and someone improvising tomorrow want different numbers,
-          * and neither is wrong. */}
+        {/* How far ahead each day's activities and restaurants are worked
+          * out. NOT how much of the trip is planned — the route is
+          * whole-trip by necessity, since a fixed finish on a fixed date is
+          * what decides how far to drive on night one. Named for what it
+          * does after "Plan ahead" was read, reasonably, as the other thing.
+          * Exposed at all because three was a guess about how people use
+          * this: someone booking restaurants a week out and someone
+          * improvising tomorrow want different numbers, and neither is
+          * wrong. */}
         <label className="block">
           <span className="field-label">
-            Plan ahead: {detailWindowDays} day{detailWindowDays === 1 ? '' : 's'}
+            {DETAIL_WINDOW_LABEL}: {detailWindowDays} day
+            {detailWindowDays === 1 ? '' : 's'} ahead
           </span>
           <input
             type="range"

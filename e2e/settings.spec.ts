@@ -237,7 +237,7 @@ test('editing settings on a trip with a ready plan marks it stale', async ({
 
 // Added 2026-08-17: "I want the option to decide how many days ahead it
 // should plan as a slider in trip setup."
-test('the "Plan ahead" slider persists, and does not send a finished plan stale', async ({
+test('the detail-window slider persists, and does not send a finished plan stale', async ({
   page,
 }) => {
   await signIn(page)
@@ -248,7 +248,11 @@ test('the "Plan ahead" slider persists, and does not send a finished plan stale'
   // A trip that predates the setting shows the default rather than a blank
   // or a zero.
   await expect(page.getByTestId('detail-window-input')).toHaveValue('3')
-  await expect(page.getByTestId('detail-window-hint')).toContainText('whole trip')
+  // Reported as "Asked to plan 2 days. Got all." — the hint has to lead with
+  // the whole trip being routed, because that is the misreading.
+  await expect(page.getByTestId('detail-window-hint')).toContainText(
+    'Your whole trip is always routed',
+  )
 
   await adminDb
     .collection('trips')
