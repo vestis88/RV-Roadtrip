@@ -274,6 +274,9 @@ export const rescanCorridor = onCall(
         // Recorded so "nothing found" can stop being said when it isn't
         // true — see droppedForDistance.
         'planMeta.rescanLastDroppedTooFar': droppedTooFar,
+        // The circle that was actually searched, so the result can name it —
+        // see planMeta.rescanLastRadiusKm.
+        'planMeta.rescanLastRadiusKm': radiusKm,
         // Proposed and then not findable on the map at all — see notLocated.
         'planMeta.rescanLastNotLocated': unlocatable,
         // A run that worked answers the last one that didn't.

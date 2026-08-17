@@ -428,6 +428,7 @@ test('a scan that found places outside the area says so, not "nothing"', async (
       'planMeta.rescanLastRunAt': new Date().toISOString(),
       'planMeta.rescanLastFoundCount': 0,
       'planMeta.rescanLastDroppedTooFar': 4,
+      'planMeta.rescanLastRadiusKm': 50,
     })
 
   await page.getByTestId('nav-map').click()
@@ -435,7 +436,12 @@ test('a scan that found places outside the area says so, not "nothing"', async (
 
   const status = page.getByTestId('rescan-corridor-status')
   await expect(status).toContainText('4 places')
-  await expect(status).toContainText('zoom out')
+  // Names the circle it is talking about, and points INWARD. "Zoom out" was
+  // the old advice and it was backwards: the search radius is already capped,
+  // so zooming out only enlarges the part of the view that is not searched.
+  await expect(status).toContainText('50 km')
+  await expect(status).toContainText('zoom in')
+  await expect(status).not.toContainText('zoom out')
   await expect(status).not.toContainText('Nothing new found')
 })
 

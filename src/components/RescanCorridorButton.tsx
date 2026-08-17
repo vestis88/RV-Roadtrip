@@ -74,12 +74,25 @@ function describeResult(
   found: number,
   droppedTooFar: number,
   notLocated: number,
+  radiusKm: number | undefined,
 ): string {
   if (found > 0) {
     return `Found ${found} new stop${found === 1 ? '' : 's'} nearby.`
   }
   if (droppedTooFar > 0) {
-    return `Found ${droppedTooFar} place${droppedTooFar === 1 ? '' : 's'}, but ${droppedTooFar === 1 ? 'it was' : 'they were'} outside the area searched — zoom out and scan again to include ${droppedTooFar === 1 ? 'it' : 'them'}.`
+    // "Zoom out and scan again" was the advice here, and it was backwards.
+    // The search is a circle around the map's centre capped at
+    // MAX_RESCAN_RADIUS_KM, so zooming out cannot widen it — it only makes
+    // the part of the view that ISN'T searched bigger. Reported from a map
+    // showing the whole of Lithuania: two finds, both in view, both outside
+    // the 50 km circle, and an instruction that would guarantee the same
+    // answer again.
+    const circle = radiusKm
+      ? `the ${Math.round(radiusKm)} km searched`
+      : 'the area searched'
+    return droppedTooFar === 1
+      ? `Found 1 place, but it was outside ${circle} around the middle of the map — zoom in on it and scan again.`
+      : `Found ${droppedTooFar} places, but they were outside ${circle} around the middle of the map — zoom in on them and scan again.`
   }
   // Not the traveler's problem to fix, and saying "nothing here" would blame
   // the area for what is a map-data failure — see notLocated().
@@ -182,12 +195,19 @@ export function RescanCorridorButton({
           planMeta.rescanLastFoundCount ?? 0,
           planMeta.rescanLastDroppedTooFar ?? 0,
           planMeta.rescanLastNotLocated ?? 0,
+          planMeta.rescanLastRadiusKm,
         )
       : null
 
   // Falls back to the old fixed circle only until the map has reported a
   // camera change, which in practice is immediately.
   const area = bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }
+  // `cappedFrom` was computed and never read, which is how a map showing a
+  // whole country could run a 50 km search and say nothing about it. On any
+  // view wider than about 100 km across, most of what the traveler is looking
+  // at is not being searched — and being told that BEFORE pressing the button
+  // is the difference between a narrow search and an inexplicable one.
+  const capped = 'cappedFrom' in area ? area.cappedFrom : undefined
 
   async function rescan() {
     setSubmitting(true)
@@ -253,6 +273,15 @@ export function RescanCorridorButton({
             )
           : 'Rescan this area'}
       </button>
+      {!scanning && capped !== undefined && (
+        <p
+          data-testid="rescan-corridor-scope"
+          className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
+        >
+          Searches {area.radiusKm} km around the middle of the map — zoom in to
+          cover more of what you can see.
+        </p>
+      )}
       {status && (
         <p
           data-testid="rescan-corridor-status"

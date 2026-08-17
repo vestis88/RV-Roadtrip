@@ -196,6 +196,16 @@ export const planMetaSchema = z.object({
   // describes a different failure from the one that happened and is what
   // made a narrow search look like a broken one.
   rescanLastDroppedTooFar: z.number().int().nonnegative().optional(),
+  // How big the circle actually searched was, in kilometres.
+  //
+  // "Rescan this area" searches a circle around the map's centre, capped at
+  // MAX_RESCAN_RADIUS_KM — so on any view wider than about 100 km across, the
+  // area searched is a fraction of the area on screen, and nothing used to
+  // say so. Reported from a map showing the whole of Lithuania that answered
+  // "found 2 places, but they were outside the area searched": both were in
+  // view, neither was within 50 km of the centre. Stored with the run so the
+  // result can name the circle it is talking about.
+  rescanLastRadiusKm: z.number().positive().optional(),
   // Places the search proposed that could not be found on the map at all.
   // Recorded apart from the count above because the two mean opposite
   // things: "the area you searched was too narrow" versus "these could not
