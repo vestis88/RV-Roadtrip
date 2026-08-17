@@ -601,7 +601,13 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     expect(hunderfossen.lng).toBeUndefined()
   })
 
-  it('degrades to a candidate with no coordinates when the lookup throws (e.g. no Places key)', async () => {
+  // A lookup that THREW is not a sight that does not exist, and when EVERY
+  // lookup throws the difference stops being academic: that is the place
+  // lookup being down. Reported from the map as "Suggested 5 places, but none
+  // of them could be found on the map" — a sentence about the places, when
+  // the sentence should have been about Places. Surfacing the real cause is
+  // what puts it on the trip and on the screen like every other failure.
+  it('surfaces the real cause when every lookup throws (e.g. no Places key)', async () => {
     createMock.mockReset()
     createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
     geocodeQueryMock.mockReset()
@@ -611,15 +617,36 @@ describe('generateRegionHighlights + generateSkeletonFromHighlights (review-paus
     verifyPlaceLocationMock.mockReset()
 
     const { generateRegionHighlights } = await import('./planTrip.js')
+    await expect(
+      generateRegionHighlights({
+        settings: SETTINGS_WITH_START,
+        notesFreeText: '',
+      }),
+    ).rejects.toThrow(/GOOGLE_PLACES_API_KEY/)
+  })
+
+  // The best-effort contract still holds where it was meant to: one flaky
+  // lookup among several is not worth failing a whole trip generation over,
+  // and the candidate it could not place keeps everything else it has.
+  it('still degrades a single failed lookup rather than failing the run', async () => {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(textResponse(RECORDED_HIGHLIGHTS))
+    geocodeQueryMock.mockReset()
+    geocodeQueryMock.mockResolvedValue({ lat: 61.1, lng: 10.4 })
+    verifyPlaceLocationMock.mockReset()
+    verifyPlaceLocationMock
+      .mockRejectedValueOnce(new Error('transient Places blip'))
+      .mockResolvedValue({ name: 'Located', lat: 61.2, lng: 10.5 })
+
+    const { generateRegionHighlights } = await import('./planTrip.js')
     const highlights = await generateRegionHighlights({
       settings: SETTINGS_WITH_START,
       notesFreeText: '',
     })
 
-    const [hunderfossen] = highlights.regions[0].candidateStops
-    expect(hunderfossen.town).toBe('Lillehammer')
-    expect(hunderfossen.why).toContain('Olympic')
-    expect(hunderfossen.lat).toBeUndefined()
+    const stops = highlights.regions.flatMap((region) => region.candidateStops)
+    expect(stops.some((stop) => stop.lat === undefined)).toBe(true)
+    expect(stops.some((stop) => stop.lat !== undefined)).toBe(true)
   })
 
   it('does not even look for the sight when its base town does not resolve', async () => {

@@ -370,16 +370,35 @@ async function geocodeHighlights(
     return point
   }
 
+  // A lookup that THREW is not a sight that does not exist. Collected so the
+  // two can be told apart below — see the check after the map.
+  const lookupErrors: unknown[] = []
   const located = await Promise.all(
     highlights.regions.map(async (region) => ({
       ...region,
       candidateStops: await Promise.all(
         region.candidateStops.map((stop) =>
-          locateCandidateSight(stop, townPointOf),
+          locateCandidateSight(stop, townPointOf, lookupErrors),
         ),
       ),
     })),
   )
+
+  // Every sight proposed, every lookup thrown, nothing located: the place
+  // lookup is down (missing key, quota, outage), and saying "none of them
+  // could be found on the map" describes the places rather than the failure.
+  // The callable's own all-unlocated guard still covers the genuine case
+  // where Places answered and answered no.
+  const proposed = located.reduce(
+    (total, region) => total + region.candidateStops.length,
+    0,
+  )
+  const anyLocated = located.some((region) =>
+    region.candidateStops.some((stop) => stop.lat != null && stop.lng != null),
+  )
+  if (proposed > 0 && !anyLocated && lookupErrors.length > 0) {
+    throw lookupErrors[0]
+  }
 
   return { regions: located }
 }
@@ -387,6 +406,9 @@ async function geocodeHighlights(
 async function locateCandidateSight(
   stop: RegionHighlightCandidate,
   townPointOf: (town: string, country: string) => Promise<LatLng | null>,
+  // Appended to when the lookup THROWS, as opposed to answering "no such
+  // place" — see geocodeHighlights' check on it.
+  lookupErrors: unknown[],
 ): Promise<RegionHighlightCandidate> {
   // Already located — a candidate rebuilt from stored curation carries the
   // coordinates a previous pass paid for, and Places has nothing to add.
@@ -425,6 +447,7 @@ async function locateCandidateSight(
       ...(sight.googleMapsUrl ? { googleMapsUrl: sight.googleMapsUrl } : {}),
     }
   } catch (error) {
+    lookupErrors.push(error)
     console.warn(
       `Locating highlight candidate "${stop.sight}, ${stop.town}, ${stop.country}" failed — continuing without coordinates`,
       error,

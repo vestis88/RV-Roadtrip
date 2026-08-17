@@ -285,6 +285,9 @@ export async function generateRescanCandidates(input: {
   if (!found) throw lastError
   if (found.finds.length === 0) return []
 
+  // A lookup that THREW is not a place that does not exist. Keeping them
+  // apart is the whole point of this list — see the check below.
+  const lookupErrors: unknown[] = []
   const located = await Promise.all(
     found.finds.map(async (find) => {
       try {
@@ -322,11 +325,25 @@ export async function generateRescanCandidates(input: {
           ...(verified.googleMapsUrl ? { googleMapsUrl: verified.googleMapsUrl } : {}),
         }
       } catch (error) {
+        lookupErrors.push(error)
         console.warn(`Verifying rescan find "${find.name}, ${find.country}" failed — dropping it`, error)
         return null
       }
     }),
   )
+
+  // Every find proposed, every lookup thrown, nothing located: that is the
+  // place lookup being down, not five places that do not exist. Reported as
+  // "Suggested 5 places, but none of them could be found on the map" — a
+  // sentence about the places, when the sentence should have been about
+  // Places. Throwing puts the real cause where every other failure now goes:
+  // onto the trip, onto the screen, and into the logs with its own message.
+  if (
+    lookupErrors.length > 0 &&
+    located.every((find) => find === null)
+  ) {
+    throw lookupErrors[0]
+  }
 
   return filterFindsToCorridor(located, input)
 }

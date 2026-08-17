@@ -798,3 +798,72 @@ describe('generateRescanCandidates — taking the name from the map, not the mod
     )
   })
 })
+
+/**
+ * "Suggested 5 places, but none of them could be found on the map, so they
+ * were dropped" — said about five real places in Latvia and Lithuania, when
+ * what had actually happened was that the place lookup never answered.
+ *
+ * A lookup that THREW is not a place that does not exist. Five out of five is
+ * the signature of the lookup being down, not of five bad names, and the
+ * sentence on screen was about the places when it should have been about
+ * Places.
+ */
+describe('generateRescanCandidates — a lookup that fails is not a place that is missing', () => {
+  const NEAR = { lat: 56.9, lng: 24.1 }
+
+  beforeEach(() => {
+    vi.stubEnv('CLAUDE_API_KEY', 'test-key')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('surfaces the real cause when every lookup throws', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValue(responseWithFinds(['One', 'Two', 'Three']))
+    verifyPlaceMock
+      .mockReset()
+      .mockRejectedValue(new Error('GOOGLE_PLACES_API_KEY is not configured'))
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await expect(
+      generateRescanCandidates({ center: NEAR, radiusKm: 25 }),
+    ).rejects.toThrow(/GOOGLE_PLACES_API_KEY/)
+  })
+
+  // Places answering "no such place" for everything is a different thing
+  // entirely, and stays a result rather than becoming an error — it is what
+  // notLocated() is for.
+  it('still reports an honest empty answer when the lookup works and finds nothing', async () => {
+    const { generateRescanCandidates, notLocated } = await import(
+      './rescanCorridor.js'
+    )
+    createMock.mockReset().mockResolvedValue(responseWithFinds(['One', 'Two']))
+    verifyPlaceMock.mockReset().mockResolvedValue(null)
+
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(finds).toHaveLength(0)
+    expect(notLocated(finds)).toBe(2)
+  })
+
+  // One flaky lookup among several is not an outage, and must not fail a scan
+  // that found something.
+  it('keeps going when only some lookups throw', async () => {
+    createMock.mockReset().mockResolvedValue(responseWithFinds(['Bad', 'Good']))
+    verifyPlaceMock
+      .mockReset()
+      .mockImplementationOnce(() => Promise.reject(new Error('transient blip')))
+      .mockImplementation((_query: string, expectedName: string) =>
+        Promise.resolve({ name: expectedName, lat: 56.95, lng: 24.15 }),
+      )
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
+
+    expect(finds.map((find) => find.name)).toEqual(['Good'])
+  })
+})
