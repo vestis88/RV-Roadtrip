@@ -20,9 +20,16 @@ beforeAll(() => {
 // generate-before-delete ordering, pacing — is verified deterministically
 // against the real Firestore emulator, without needing real credentials.
 const planTripMock = vi.fn()
-vi.mock('./prompts/planTrip.js', () => ({
-  planTrip: (...args: unknown[]) => planTripMock(...args),
-}))
+// Spread the real module rather than replacing it wholesale: replanTrip
+// also reads eagerDetailIndexes from here, and a bare object mock silently
+// removes every export it does not list.
+vi.mock('./prompts/planTrip.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./prompts/planTrip.js')>()
+  return {
+    ...actual,
+    planTrip: (...args: unknown[]) => planTripMock(...args),
+  }
+})
 
 const resolveSkeletonDaysMock = vi.fn()
 vi.mock('./planPipeline.js', async (importOriginal) => {

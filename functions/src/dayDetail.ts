@@ -3,6 +3,16 @@ import { enrichActivities, enrichRestaurantsForMeal } from './placesApi.js'
 import type { PlanTripSkeletonDay } from './prompts/planTripSchema.js'
 
 /**
+ * How many days are worked out at a time — the rolling window.
+ *
+ * Three is what a traveler can actually act on: today, tomorrow, the day
+ * after. Small enough that opening a day costs one short Claude call plus
+ * that many days of Places lookups, and bigger windows buy nothing, because
+ * the days past it are exactly the ones a replan would throw away again.
+ */
+export const DETAIL_WINDOW_DAYS = 3
+
+/**
  * Where a day's activities and restaurants should be searched for.
  *
  * The rule is the outline prompt's own default (planTripPrompt.ts): "drive

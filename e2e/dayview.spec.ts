@@ -278,3 +278,57 @@ test('selecting an activity reveals a time-of-day picker that writes the chosen 
   })
   expect(activityId).toBeTruthy()
 })
+
+// "Route eagerly, detail lazily" (2026-08-16): generation works out the
+// route for the whole trip and the activities/restaurants for only the first
+// few days. Everything past that window carries its route and is filled in
+// when it is opened.
+test('a day past the eager window says it is being worked out, and asks for itself', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-11')
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .update({ detailStatus: 'pending' })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('day-detail-gate')).toBeVisible()
+
+  // CLAUDE_API_KEY isn't configured in this credential-less emulator, so the
+  // request it just fired fails — and the point is that the failure lands on
+  // the day, where it outlives the connection that asked for it, rather than
+  // leaving a spinner and no explanation.
+  await expect(page.getByTestId('day-detail-error')).toBeVisible({
+    timeout: 30_000,
+  })
+  const day = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .get()
+  // Back to pending, not stuck 'generating' — a day left claiming to be
+  // running is a spinner forever.
+  expect(day.data()?.detailStatus).toBe('pending')
+  expect(day.data()?.detailError).toBeTruthy()
+})
+
+// Absent means ready. Every day written before the split carries its detail
+// already, and a trip planned last week must not come back looking like it
+// lost half of itself.
+test('a day from before the split shows no gate at all', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('activities-row')).toBeVisible()
+  await expect(page.getByTestId('day-detail-gate')).toHaveCount(0)
+})

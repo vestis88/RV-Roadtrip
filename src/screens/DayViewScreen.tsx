@@ -8,6 +8,7 @@ import type { ActivityTimeOfDay, Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
+import { DayDetailGate } from '../components/DayDetailGate'
 import { buildDayRoutePoints } from '../lib/buildOverviewRoute'
 import { CardRow } from '../components/CardRow'
 import { FitToPoints } from '../components/FitToPoints'
@@ -291,6 +292,10 @@ export function DayViewScreen() {
     )
   }
 
+  const detailGate = (
+    <DayDetailGate tripId={tripId} dayId={dayId} day={day} />
+  )
+
   const breakfast = restaurants.filter((r) => r.meal === 'breakfast')
   const lunch = restaurants.filter((r) => r.meal === 'lunch')
   const dinner = restaurants.filter((r) => r.meal === 'dinner')
@@ -547,6 +552,8 @@ export function DayViewScreen() {
             lng: day.overnight.lng,
           }}
         />
+
+        {detailGate}
 
         <PlaceCardSection
           title="Activities"

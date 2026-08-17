@@ -584,9 +584,24 @@ export async function planTrip(input: {
   settings: TripSettings
   notesFreeText: string
   tripId?: string
+  /** See generateSkeletonFromHighlights — passed straight through. */
+  detailDayIndexes?: number[]
   onProgress?: (progress: PlanTripProgress) => void
 }): Promise<PlanTripSkeleton> {
   input.onProgress?.({ phase: 'highlights' })
   const highlights = await generateRegionHighlights(input)
   return generateSkeletonFromHighlights({ ...input, highlights })
+}
+
+/**
+ * The indexes of the first `windowDays` days of a route — what generation and
+ * a replan detail up front, so a traveler arriving at a finished plan can
+ * open today and tomorrow without waiting for anything.
+ *
+ * Everything past it is left `pending` and worked out when it is opened. On a
+ * sixty-day trip that is three days of detail instead of sixty, and on the
+ * replan that follows it is three again instead of the entire remainder.
+ */
+export function eagerDetailIndexes(windowDays: number): number[] {
+  return Array.from({ length: windowDays }, (_, i) => i)
 }

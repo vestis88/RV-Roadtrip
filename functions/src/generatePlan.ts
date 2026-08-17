@@ -34,10 +34,12 @@ import { runReplan, type ReplanContext } from './replanTrip.js'
 import { googleRoutesApiKey } from './routesApi.js'
 import {
   claudeApiKey,
+  eagerDetailIndexes,
   generateSkeletonFromHighlights,
   planTrip,
   type PlanTripProgress,
 } from './prompts/planTrip.js'
+import { DETAIL_WINDOW_DAYS } from './dayDetail.js'
 import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
 import { buildRegionHighlightsFromCandidates } from './exploreCandidates.js'
 import { googlePlacesApiKey } from './placesApi.js'
@@ -178,18 +180,27 @@ export async function generateRealPlan(
           console.error('Failed to report planTrip progress', error),
         )
     }
+    // The route is worked out for the whole trip; the activities and
+    // restaurants only for the first few days. Everything past the window is
+    // written `detailStatus: 'pending'` and filled in when it is opened —
+    // see dayDetail.ts and detailDaysCallable.ts. On a sixty-day trip that
+    // is three days of detail instead of sixty, and the replan that follows
+    // costs three again rather than the entire remainder.
+    const detailDayIndexes = eagerDetailIndexes(DETAIL_WINDOW_DAYS)
     skeleton = highlights
       ? await generateSkeletonFromHighlights({
           settings: trip.settings,
           notesFreeText: trip.notes.freeText,
           highlights,
           tripId: tripRef.id,
+          detailDayIndexes,
           onProgress,
         })
       : await planTrip({
           settings: trip.settings,
           notesFreeText: trip.notes.freeText,
           tripId: tripRef.id,
+          detailDayIndexes,
           onProgress,
         })
     await saveSkeletonCheckpoint(tripRef, settingsHash, skeleton)

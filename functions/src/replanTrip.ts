@@ -12,7 +12,8 @@ import {
 } from '@rv/shared'
 import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
-import { planTrip } from './prompts/planTrip.js'
+import { eagerDetailIndexes, planTrip } from './prompts/planTrip.js'
+import { DETAIL_WINDOW_DAYS } from './dayDetail.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
 import { planAliveFields } from './planLock.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
@@ -118,6 +119,12 @@ export async function runReplan(
     settings: remainderSettings,
     notesFreeText,
     tripId,
+    // The whole point of the split, on the path that pays for it most: a
+    // replan today re-details every remaining day, so changing one week of a
+    // sixty-day trip regenerates fifty-five days of activities and
+    // restaurants. The days past the window have no detail to throw away and
+    // get none back — they are worked out when they are opened.
+    detailDayIndexes: eagerDetailIndexes(DETAIL_WINDOW_DAYS),
     onProgress: (progress) => {
       tripRef
         .update({

@@ -17,19 +17,12 @@ import { describeCause } from './describeCause.js'
 import { outlineFromDays } from './dayOutline.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { googlePlacesApiKey } from './placesApi.js'
-import { dayActivityAnchor, enrichDayDetail } from './dayDetail.js'
+import {
+  DETAIL_WINDOW_DAYS,
+  dayActivityAnchor,
+  enrichDayDetail,
+} from './dayDetail.js'
 import { claudeApiKey, generateChunkDetail } from './prompts/planTrip.js'
-
-/**
- * How many days one request works out at a time.
- *
- * The rolling window. Three is what a traveler can actually act on — today,
- * tomorrow, the day after — and it is small enough that opening a day never
- * costs more than one short Claude call plus that many days of Places
- * lookups. Bigger windows buy nothing: the days past it are exactly the ones
- * a replan would throw away again.
- */
-export const DETAIL_WINDOW_DAYS = 3
 
 /**
  * How often a run in progress says it is still alive.
