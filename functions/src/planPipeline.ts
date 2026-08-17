@@ -1,5 +1,6 @@
 import type {
   Activity,
+  LatLng,
   NamedPoint,
   OvernightStop,
   Restaurant,
@@ -13,6 +14,74 @@ import {
   enrichRestaurantsForMeal,
   geocodeQuery,
 } from './placesApi.js'
+
+/**
+ * Where a day's activities and restaurants should be searched for.
+ *
+ * The rule is the outline prompt's own default (planTripPrompt.ts): "drive
+ * after that day's activities and dinner, arriving at the new overnight town
+ * late". So on the default 'evening' slot the day is actually spent where it
+ * STARTED — last night's town — and the new overnight is only reached once
+ * everything else is done. Only a 'morning'/'midday' slot means the drive
+ * already happened, making the new town the right anchor. A rest day never
+ * moves, and its two points are the same place anyway.
+ *
+ * Extracted (2026-08-16) because detail is no longer resolved only here: the
+ * lazy path works from stored days rather than from a skeleton, and the two
+ * getting a day's anchor subtly different would put one day's restaurants in
+ * the wrong town with nothing to show it had happened.
+ */
+export function dayActivityAnchor(input: {
+  type: 'drive' | 'rest'
+  driveSlot?: 'morning' | 'midday' | 'evening'
+  /** This day's own town. */
+  townPoint: LatLng
+  /** The town the day started in — last night's. */
+  arrivedFrom: LatLng
+}): LatLng {
+  return input.type === 'drive' && (input.driveSlot ?? 'evening') !== 'evening'
+    ? input.townPoint
+    : input.arrivedFrom
+}
+
+/**
+ * Turns one day's proposed activity/restaurant names into real, Places-backed
+ * entries. Shared by generation and by the lazy per-day path so both resolve
+ * a day the same way.
+ */
+export async function enrichDayDetail(
+  detail: {
+    activities: NonNullable<PlanTripSkeletonDay['activities']>
+    restaurants: NonNullable<PlanTripSkeletonDay['restaurants']>
+  },
+  near: LatLng,
+): Promise<{ activities: Activity[]; restaurants: Restaurant[] }> {
+  // Shared across the three meals so the same restaurant cannot be proposed
+  // for breakfast and again for dinner.
+  const excludeIds = new Set<string>()
+  const [activities, breakfast, lunch, dinner] = await Promise.all([
+    enrichActivities(detail.activities, near),
+    enrichRestaurantsForMeal(
+      detail.restaurants.filter((r) => r.meal === 'breakfast'),
+      'breakfast',
+      near,
+      excludeIds,
+    ),
+    enrichRestaurantsForMeal(
+      detail.restaurants.filter((r) => r.meal === 'lunch'),
+      'lunch',
+      near,
+      excludeIds,
+    ),
+    enrichRestaurantsForMeal(
+      detail.restaurants.filter((r) => r.meal === 'dinner'),
+      'dinner',
+      near,
+      excludeIds,
+    ),
+  ])
+  return { activities, restaurants: [...breakfast, ...lunch, ...dinner] }
+}
 
 export interface GeneratedDay {
   day: Omit<TripDay, 'drive'> & { drive?: TripDay['drive'] }
@@ -105,43 +174,24 @@ export async function resolveSkeletonDay(
     }
   }
 
-  // Which town this day's activities/restaurants are searched near depends
-  // on when the drive happens (OUTLINE_SYSTEM_PROMPT's own default, see
-  // planTripPrompt.ts): "drive after that day's activities and dinner,
-  // arriving at the new overnight town late" — so for the default 'evening'
-  // slot, the day is actually spent at currentLocation (where it started,
-  // i.e. last night's overnight) and `overnight` is only reached after
-  // everything else that day is done. Only a 'morning'/'midday' slot means
-  // the drive already happened before the day's activities, making the new
-  // `overnight` the right anchor. Rest days have no drive at all, and
-  // `townPoint` is already set to currentLocation for them above, so the
-  // 'drive'-only guard below is a no-op either way for those.
-  const near =
-    skDay.type === 'drive' && (skDay.drive?.slot ?? 'evening') !== 'evening'
-      ? townPoint
-      : { lat: currentLocation.lat, lng: currentLocation.lng }
-  const excludeIds = new Set<string>()
-  const [activities, breakfast, lunch, dinner] = await Promise.all([
-    enrichActivities(skDay.activities, near),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'breakfast'),
-      'breakfast',
-      near,
-      excludeIds,
-    ),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'lunch'),
-      'lunch',
-      near,
-      excludeIds,
-    ),
-    enrichRestaurantsForMeal(
-      skDay.restaurants.filter((r) => r.meal === 'dinner'),
-      'dinner',
-      near,
-      excludeIds,
-    ),
-  ])
+  const near = dayActivityAnchor({
+    type: skDay.type,
+    driveSlot: skDay.drive?.slot,
+    townPoint,
+    arrivedFrom: { lat: currentLocation.lat, lng: currentLocation.lng },
+  })
+
+  // No detail asked for: the route for this day is decided and its
+  // activities/restaurants are somebody else's problem, later. See
+  // planTripSkeletonDaySchema and detailDaysCallable.ts.
+  const detail = skDay.activities &&
+    skDay.restaurants && {
+      activities: skDay.activities,
+      restaurants: skDay.restaurants,
+    }
+  const { activities, restaurants } = detail
+    ? await enrichDayDetail(detail, near)
+    : { activities: [], restaurants: [] }
 
   return {
     generated: {
@@ -160,9 +210,12 @@ export async function resolveSkeletonDay(
           ? { highlightReason: skDay.highlightReason }
           : {}),
         ...(skDay.sights?.length ? { sights: skDay.sights } : {}),
+        // Absent means ready — see tripDaySchema.detailStatus. Only a day
+        // deliberately left undetailed says so.
+        ...(detail ? {} : { detailStatus: 'pending' as const }),
       },
       activities,
-      restaurants: [...breakfast, ...lunch, ...dinner],
+      restaurants,
     },
     // The town, not the campsite: this seeds the next day's geocoding bias
     // and its activity anchor, and both want "the place we are", not the

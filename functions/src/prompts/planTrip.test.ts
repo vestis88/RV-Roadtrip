@@ -906,3 +906,131 @@ describe('salvage on the highlights call', () => {
     ).rejects.toThrow()
   })
 })
+
+/**
+ * "Route eagerly, detail lazily" (2026-08-16). The route is a whole-trip
+ * constraint problem — where you sleep on day 12 depends on everything
+ * before and after it — so it stays whole-trip. A day's activities and
+ * restaurants depend on nothing outside that day, and producing sixty days
+ * of them up front is paid for again in full on every replan.
+ */
+describe('generateSkeletonFromHighlights — detailing only some days', () => {
+  function outlineOf(dayCount: number) {
+    return {
+      days: Array.from({ length: dayCount }, (_, index) => ({
+        index,
+        date: `2026-07-${String(10 + index).padStart(2, '0')}`,
+        type: 'drive',
+        overnight: { name: `Stop ${index}`, town: `Town ${index}`, country: 'NO' },
+        drive: { fromTown: `Town ${index - 1}`, toTown: `Town ${index}`, slot: 'evening' },
+        highlightReason: `Day ${index} is for the thing in Town ${index}.`,
+      })),
+    }
+  }
+
+  function detailOf(indexes: number[]) {
+    return {
+      days: indexes.map((index) => ({
+        index,
+        summary: `Detailed day ${index}`,
+        activities: Array.from({ length: 5 }, (_, i) => ({
+          name: `Activity ${index}-${i}`,
+          town: `Town ${index}`,
+          category: 'sight',
+          kidFriendly: true,
+          blurb: 'Nice.',
+        })),
+        restaurants: Array.from({ length: 9 }, (_, i) => ({
+          name: `Restaurant ${index}-${i}`,
+          town: `Town ${index}`,
+          meal: (['breakfast', 'lunch', 'dinner'] as const)[i % 3],
+          blurb: 'Tasty.',
+        })),
+      })),
+    }
+  }
+
+  /** Queues one outline response followed by one detail response. */
+  function queue(dayCount: number, detailedIndexes: number[]) {
+    createMock.mockReset()
+    createMock.mockResolvedValueOnce(
+      textResponse(JSON.stringify(outlineOf(dayCount))),
+    )
+    createMock.mockResolvedValue(
+      textResponse(JSON.stringify(detailOf(detailedIndexes))),
+    )
+  }
+
+  async function run(dayCount: number, detailDayIndexes?: number[]) {
+    const { generateSkeletonFromHighlights } = await import('./planTrip.js')
+    return generateSkeletonFromHighlights({
+      settings: {} as never,
+      notesFreeText: '',
+      highlights: { regions: [] },
+      ...(detailDayIndexes ? { detailDayIndexes } : {}),
+    })
+  }
+
+  it('details every day when no subset is asked for, exactly as before', async () => {
+    queue(3, [0, 1, 2])
+
+    const skeleton = await run(3)
+
+    expect(skeleton.days.every((day) => day.activities?.length === 5)).toBe(true)
+  })
+
+  it('leaves the days outside the window with a route and no detail', async () => {
+    queue(3, [0])
+
+    const skeleton = await run(3, [0])
+
+    expect(skeleton.days[0].activities).toHaveLength(5)
+    expect(skeleton.days[1].activities).toBeUndefined()
+    expect(skeleton.days[2].restaurants).toBeUndefined()
+    // The route survives in full — that is the half that stays eager.
+    expect(skeleton.days.map((day) => day.overnight.town)).toEqual([
+      'Town 0',
+      'Town 1',
+      'Town 2',
+    ])
+  })
+
+  // TripDay.summary is required and the detail call is what normally writes
+  // it, so an undetailed day borrows the outline's own sentence about the
+  // same day rather than shipping an empty string.
+  it('stands the outline reason in for the summary until detail arrives', async () => {
+    queue(2, [0])
+
+    const skeleton = await run(2, [0])
+
+    expect(skeleton.days[1].summary).toBe(skeleton.days[1].highlightReason)
+    expect(skeleton.days[1].summary.length).toBeGreaterThan(0)
+  })
+
+  it('asks Claude for detail on only the days in the window', async () => {
+    queue(9, [3, 4])
+
+    await run(9, [3, 4])
+
+    // One outline call plus ONE detail chunk. All nine days would have been
+    // two chunks at CHUNK_SIZE 7, and that is the cost this removes.
+    expect(createMock).toHaveBeenCalledTimes(2)
+    const detailCall = createMock.mock.calls[1][0] as {
+      messages: { content: { text: string }[] }[]
+    }
+    const variable = JSON.parse(detailCall.messages[0].content[1].text) as {
+      daysNeedingDetail: { index: number }[]
+    }
+    expect(variable.daysNeedingDetail.map((d) => d.index)).toEqual([3, 4])
+  })
+
+  // A day asked for and not returned is still a hard failure: shipping it
+  // undetailed would look identical to the lazy case and never be filled in.
+  // (Answering with NO days at all fails the response schema before reaching
+  // this, so the case worth pinning is an answer about the wrong day.)
+  it('still throws when a day inside the window comes back missing', async () => {
+    queue(2, [1])
+
+    await expect(run(2, [0])).rejects.toThrow(/never returned detail/i)
+  })
+})

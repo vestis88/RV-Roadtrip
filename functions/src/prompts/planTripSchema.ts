@@ -53,8 +53,14 @@ export const planTripSkeletonDaySchema = z.object({
   // know how much of the day the sights themselves eat, and the detail call
   // neither knows nor echoes that back.
   sights: z.array(z.string()).optional(),
-  activities: z.array(skeletonActivitySchema).length(5),
-  restaurants: z.array(skeletonRestaurantSchema).length(9),
+  // Optional since "route eagerly, detail lazily" (2026-08-16): a skeleton
+  // day with no activities/restaurants is a day whose route is decided and
+  // whose detail has not been worked out yet. resolveSkeletonDay skips the
+  // Places enrichment for it and marks the written day `detailStatus:
+  // 'pending'`; detailDaysCallable fills it in later. Present, they still
+  // have to be the full set — a half-detailed day is not a thing.
+  activities: z.array(skeletonActivitySchema).length(5).optional(),
+  restaurants: z.array(skeletonRestaurantSchema).length(9).optional(),
 })
 
 export const planTripSkeletonSchema = z.object({

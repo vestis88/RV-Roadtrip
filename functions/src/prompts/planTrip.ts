@@ -444,6 +444,17 @@ export async function generateSkeletonFromHighlights(input: {
   notesFreeText: string
   highlights: RegionHighlightsResponse
   tripId?: string
+  /**
+   * Which days to work out activities and restaurants for now, by index.
+   *
+   * "Route eagerly, detail lazily" (2026-08-16). The route is a whole-trip
+   * constraint problem and stays whole-trip; a day's detail depends on
+   * nothing outside that day, and detailing sixty of them up front is paid
+   * for again in full on every replan. Omitted, every day is detailed —
+   * which is what every caller did before this existed and what
+   * corridorReconciliation still wants for the one day it adds.
+   */
+  detailDayIndexes?: number[]
   onProgress?: (
     progress: Extract<PlanTripProgress, { phase: 'outline' | 'detail' }>,
   ) => void
@@ -465,9 +476,14 @@ export async function generateSkeletonFromHighlights(input: {
     { callType: 'outline', tripId: input.tripId },
   )
 
+  const wanted = input.detailDayIndexes && new Set(input.detailDayIndexes)
+  const daysToDetail = wanted
+    ? outline.days.filter((day) => wanted.has(day.index))
+    : outline.days
+
   const chunks: RouteOutline['days'][] = []
-  for (let i = 0; i < outline.days.length; i += CHUNK_SIZE) {
-    chunks.push(outline.days.slice(i, i + CHUNK_SIZE))
+  for (let i = 0; i < daysToDetail.length; i += CHUNK_SIZE) {
+    chunks.push(daysToDetail.slice(i, i + CHUNK_SIZE))
   }
 
   const detailByIndex = new Map<number, ChunkDetailResponse['days'][number]>()
@@ -500,21 +516,33 @@ export async function generateSkeletonFromHighlights(input: {
 
   const days: PlanTripSkeletonDay[] = outline.days.map((outlineDay) => {
     const detail = detailByIndex.get(outlineDay.index)
-    if (!detail) {
-      throw new Error(
-        `Claude never returned detail for day index ${outlineDay.index}`,
-      )
-    }
-    return {
+    const route = {
       index: outlineDay.index,
       date: outlineDay.date,
       type: outlineDay.type,
       overnight: outlineDay.overnight,
       drive: outlineDay.drive,
-      summary: detail.summary,
-      extraTimeReason: detail.extraTimeReason,
       highlightReason: outlineDay.highlightReason,
       sights: outlineDay.sights,
+    }
+    if (!detail) {
+      // Deliberately undetailed, so the day carries its route and waits.
+      // TripDay.summary is required and the detail call is what normally
+      // writes it, so the outline's own one-sentence justification for this
+      // stop stands in until then — see routeOutlineDaySchema.highlightReason,
+      // which is the same kind of sentence about the same day, and is
+      // overwritten the moment real detail arrives.
+      if (wanted && !wanted.has(outlineDay.index)) {
+        return { ...route, summary: outlineDay.highlightReason }
+      }
+      throw new Error(
+        `Claude never returned detail for day index ${outlineDay.index}`,
+      )
+    }
+    return {
+      ...route,
+      summary: detail.summary,
+      extraTimeReason: detail.extraTimeReason,
       activities: detail.activities,
       restaurants: detail.restaurants,
     }

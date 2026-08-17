@@ -316,6 +316,34 @@ export const tripDaySchema = z.object({
   // diversions. Absent on a plain connecting overnight, and on every day
   // written before this existed.
   sights: z.array(z.string()).optional(),
+  /**
+   * Whether this day's activities and restaurants have been worked out yet
+   * (2026-08-16, "route eagerly, detail lazily").
+   *
+   * The route is a whole-trip constraint problem — where you sleep on day 12
+   * depends on everything before and after it — so it is still solved for
+   * every day up front. A day's activities and restaurants are not: they
+   * depend on nothing outside that day, and producing sixty days of them at
+   * generation is paid for again in full on every replan, which re-details
+   * the entire remainder of the trip to change one week.
+   *
+   * ABSENT MEANS READY. Every day written before this existed carries its
+   * detail already, and a trip planned last week must not come back looking
+   * like it lost half of itself.
+   */
+  detailStatus: z.enum(['pending', 'generating', 'ready']).optional(),
+  /**
+   * Heartbeat while detail is being worked out, refreshed for as long as the
+   * function is alive — not written once at the start. A single timestamp
+   * cannot tell a slow run from a container that died two minutes ago, which
+   * is how a spinner ends up on screen forever. See detailDaysCallable.ts.
+   */
+  detailStatusUpdatedAt: isoDateTime.optional(),
+  /**
+   * Why the last attempt to detail this day failed, kept where it outlives
+   * the connection that asked for it. Cleared when detail succeeds.
+   */
+  detailError: z.string().optional(),
 })
 
 // Persistent, always-editable route corridor (2026-07-29): one entry per
