@@ -75,6 +75,8 @@ export function DirectionsRoute({
   points,
   onError,
   onTotals,
+  optimizeOrder = false,
+  onOrder,
 }: {
   points: LatLng[]
   onError: (message: string | null) => void
@@ -92,6 +94,32 @@ export function DirectionsRoute({
    * total shows as unknown.
    */
   onTotals?: (totals: RouteTotals | null) => void
+  /**
+   * Let Google choose the order of the intermediate points, rather than
+   * driving them in the order given.
+   *
+   * OFF by default, and it must stay off for a generated plan: those points
+   * are days, in date order, and re-ordering the drawn line would have it
+   * contradict the itinerary underneath it.
+   *
+   * ON for explore mode, where the order was only ever our own guess — a
+   * scalar projection onto the straight start→end line (sortAlongRoute),
+   * which cannot know that the sea is in the way. Reported as a trip that
+   * drove north through Sweden and around the Gulf of Bothnia to reach
+   * Estonia, because "northern Sweden" projected before "Saaremaa" on that
+   * line and the waypoints were then handed to Directions as a fixed
+   * sequence. Google routes on real roads and, since nothing here sets
+   * avoidFerries, real ferries.
+   */
+  optimizeOrder?: boolean
+  /**
+   * The order Google chose, as indices into the intermediate points (i.e.
+   * `points` without its first and last). Fires only when the order was
+   * actually optimized, so a caller can bring everything else that depends
+   * on the route order — the corridor it sends to the server, the names it
+   * puts in a search prompt — into line with what is drawn.
+   */
+  onOrder?: (order: number[]) => void
 }) {
   const map = useMap()
   const routesLibrary = useMapsLibrary('routes')
@@ -118,6 +146,13 @@ export function DirectionsRoute({
       // the same key the rest of the app is already using, and firing them
       // together is the reliable way to get rate-limited on exactly the trips
       // that need chunking in the first place.
+      // Optimization is only meaningful over the whole route. Chunked, each
+      // request would reorder within its own slice and leave the slices in
+      // the original sequence — a locally tidy, globally wrong answer, and
+      // worse than not trying. A trip long enough to chunk keeps the order
+      // it was given.
+      const canOptimize = optimizeOrder && segments.length === 1
+
       for (const segment of segments) {
         const result = await service.route({
           origin: segment[0],
@@ -126,9 +161,15 @@ export function DirectionsRoute({
             .slice(1, -1)
             .map((location) => ({ location, stopover: true })),
           travelMode: routesLibrary.TravelMode.DRIVING,
+          ...(canOptimize ? { optimizeWaypoints: true } : {}),
         })
         if (cancelled) return
         results.push(result)
+      }
+
+      if (canOptimize) {
+        const order = results[0]?.routes[0]?.waypoint_order
+        if (order) onOrder?.(order)
       }
 
       // Nothing is drawn until every segment is in hand, so the polyline
@@ -163,7 +204,7 @@ export function DirectionsRoute({
       cancelled = true
       for (const renderer of renderers) renderer.setMap(null)
     }
-  }, [map, routesLibrary, points, onError, onTotals])
+  }, [map, routesLibrary, points, onError, onTotals, optimizeOrder, onOrder])
 
   if (routedPoints === points || points.length < 2) return null
   return <Polyline path={points} {...ROUTE_STROKE} />

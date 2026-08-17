@@ -94,9 +94,32 @@ export function buildRouteBackbone(
   orderedPoints: LatLng[],
   end: LatLng | undefined,
 ): LatLng[] {
+  return routeBackboneFrom(
+    start,
+    sortAlongRoute(start, end, orderedPoints, (point) => point),
+    end,
+  )
+}
+
+/**
+ * The same start→middle→end shape, taking the middle points in the order
+ * given instead of sorting them.
+ *
+ * For a caller that already has a BETTER order than the projection above can
+ * produce — explore mode, once Google has reordered the stops against real
+ * roads (and real ferries). The projection is a scalar onto the straight
+ * start→end line and cannot know the sea is in the way: it sorted a stop in
+ * northern Sweden before one on Saaremaa, and the resulting fixed waypoint
+ * sequence could only be driven around the Gulf of Bothnia.
+ */
+export function routeBackboneFrom(
+  start: LatLng | undefined,
+  middle: LatLng[],
+  end: LatLng | undefined,
+): LatLng[] {
   return [
     isUsablePoint(start) ? start : undefined,
-    ...sortAlongRoute(start, end, orderedPoints, (point) => point),
+    ...middle.filter(isUsablePoint),
     isUsablePoint(end) ? end : undefined,
   ].filter(isUsablePoint)
 }

@@ -5,6 +5,7 @@ import {
   estimateDetourKm,
   estimateDriveMinutes,
   haversineDistanceKm,
+  routeBackboneFrom,
   sortAlongRoute,
 } from './geo.js'
 
@@ -275,5 +276,61 @@ describe('sortAlongRoute', () => {
     const points = [INNSBRUCK, LILLEHAMMER]
     sortAlongRoute(OSLO, ROME, points, (p) => p)
     expect(points).toEqual([INNSBRUCK, LILLEHAMMER])
+  })
+})
+
+/**
+ * The projection above is a scalar onto the straight start→end line, which
+ * is fine for choosing a starting guess and hopeless at knowing the sea is
+ * in the way. Reported as a trip that drove north through Sweden and around
+ * the Gulf of Bothnia to reach Estonia: "northern Sweden" projected before
+ * "Saaremaa" on the straight line, that order went to Directions as a fixed
+ * waypoint sequence, and the only road answer was the long way round.
+ */
+describe('routeBackboneFrom', () => {
+  const START = { lat: 55.6, lng: 12.6 } // Copenhagen-ish
+  const END = { lat: 59.4, lng: 24.7 } // Tallinn-ish
+
+  it('keeps the middle points in the order given, unlike buildRouteBackbone', () => {
+    const north = { lat: 63.8, lng: 20.3 } // Umeå-ish
+    const island = { lat: 58.2, lng: 22.5 } // Saaremaa-ish
+
+    // Same input to both, and they disagree. The projection reorders it —
+    // and note WHICH way: it puts northern Sweden ahead of Saaremaa on a
+    // Copenhagen→Tallinn line, which is exactly the sequence that can only
+    // be driven around the Gulf of Bothnia.
+    expect(buildRouteBackbone(START, [island, north], END)).toEqual([
+      START,
+      north,
+      island,
+      END,
+    ])
+    expect(routeBackboneFrom(START, [island, north], END)).toEqual([
+      START,
+      island,
+      north,
+      END,
+    ])
+  })
+
+  it('still brackets the middle with start and end', () => {
+    const mid = { lat: 57, lng: 18 }
+    expect(routeBackboneFrom(START, [mid], END)).toEqual([START, mid, END])
+  })
+
+  it('drops an end that has not been filled in yet', () => {
+    const mid = { lat: 57, lng: 18 }
+    expect(routeBackboneFrom(undefined, [mid], END)).toEqual([mid, END])
+    expect(routeBackboneFrom(START, [mid], undefined)).toEqual([START, mid])
+  })
+
+  it('drops an unusable middle point rather than passing NaN through', () => {
+    const mid = { lat: 57, lng: 18 }
+    const broken = { lat: Number.NaN, lng: 18 }
+    expect(routeBackboneFrom(START, [broken, mid], END)).toEqual([START, mid, END])
+  })
+
+  it('is just the two ends when there is nothing in between', () => {
+    expect(routeBackboneFrom(START, [], END)).toEqual([START, END])
   })
 })

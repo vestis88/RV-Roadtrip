@@ -5,7 +5,8 @@ import {
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
 import {
-  buildRouteBackbone,
+  routeBackboneFrom,
+  sortAlongRoute,
   estimateDetourKm,
   type CorridorStopPriority,
   type LatLng,
@@ -164,20 +165,61 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   //
   // The two now mean different things. Votes are triage — how much the
   // traveler cares, which is what sorts the list. Locking in is the commitment,
-  // and it is the only thing that moves the route. buildRouteBackbone sorts
-  // these along the corridor itself, so the order they were kept in never
-  // matters.
-  const routeStops = useMemo(
+  // and it is the only thing that moves the route. The order they were kept
+  // in never matters: the route order is worked out below, and by Google
+  // rather than by us.
+  const lockedStops = useMemo(
     () => candidates.filter((c) => c.status === 'locked'),
     [candidates],
   )
+  // The starting guess: each stop's position projected onto the straight
+  // start→end line. It is only a guess — a scalar projection cannot know
+  // that the Baltic is between two of these points, which is how a trip
+  // ended up driving north through Sweden and around the Gulf of Bothnia to
+  // reach Estonia. Google replaces it below, against real roads.
+  const guessedOrder = useMemo(
+    () =>
+      sortAlongRoute(
+        trip.settings.startPoint,
+        trip.settings.endPoint,
+        lockedStops,
+        (stop) => ({ lat: stop.lat, lng: stop.lng }),
+      ),
+    [trip.settings.startPoint, trip.settings.endPoint, lockedStops],
+  )
+  // Keyed by which stops it describes: an order is a list of positions, and
+  // applying yesterday's positions to a different set of stops would shuffle
+  // them into nonsense. A changed set simply falls back to the guess until
+  // Directions answers again.
+  const [routeOrder, setRouteOrder] = useState<{
+    key: string
+    order: number[]
+  } | null>(null)
+  const orderKey = useMemo(
+    () => guessedOrder.map((stop) => stop.id).join(','),
+    [guessedOrder],
+  )
+  const handleOrder = useCallback(
+    (order: number[]) => setRouteOrder({ key: orderKey, order }),
+    [orderKey],
+  )
+  const routeStops = useMemo(() => {
+    if (!routeOrder || routeOrder.key !== orderKey) return guessedOrder
+    const reordered = routeOrder.order
+      .map((index) => guessedOrder[index])
+      .filter((stop) => stop !== undefined)
+    return reordered.length === guessedOrder.length ? reordered : guessedOrder
+  }, [guessedOrder, routeOrder, orderKey])
   const routeStopIds = useMemo(
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
   )
+  // Built in routeStops' order rather than re-sorted: that order is now
+  // Google's answer, and buildRouteBackbone would throw it away and put the
+  // projection back.
   const backbone = useMemo(
     () =>
-      buildRouteBackbone(
+      routeBackboneFrom(
         trip.settings.startPoint,
         routeStops.map((s) => ({ lat: s.lat, lng: s.lng })),
         trip.settings.endPoint,
@@ -187,22 +229,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // The same corridor the backbone describes, in words — so the search
   // prompt can say "along the route through Helsingør, Hillerød…" instead
   // of listing latitudes (see reverseGeocode.ts for what that cost).
-  // buildRouteBackbone sorts its middle points along the corridor, so these
-  // are named in geographic order too.
+  // routeStops is in route order, so these are named in the order they are
+  // actually driven past.
   const waypointNames = useMemo(
     () =>
       [
         trip.settings.startPoint.name,
-        ...[...routeStops]
-          .sort(
-            (a, b) =>
-              backbone.findIndex((p) => p.lat === a.lat && p.lng === a.lng) -
-              backbone.findIndex((p) => p.lat === b.lat && p.lng === b.lng),
-          )
-          .map((stop) => stop.name),
+        // routeStops is already in route order, so no re-derivation by
+        // coordinate lookup — which also stops two stops that happen to
+        // share a coordinate collapsing onto the same index.
+        ...routeStops.map((stop) => stop.name),
         trip.settings.endPoint.name,
       ].filter((name) => name.trim() !== ''),
-    [trip.settings.startPoint.name, trip.settings.endPoint.name, routeStops, backbone],
+    [trip.settings.startPoint.name, trip.settings.endPoint.name, routeStops],
   )
 
   const detourByStopId = useMemo(() => {
@@ -450,6 +489,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               points={backbone}
               onError={setRouteError}
               onTotals={handleRouteTotals}
+              // Explore mode only. Nobody has committed to this order — it
+              // is our own projection guess — so Google reordering it
+              // against real roads is strictly better information. The
+              // generated plan's route is NOT optimized: those points are
+              // days with dates on them.
+              optimizeOrder
+              onOrder={handleOrder}
             />
             <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
             <AdvancedMarker
