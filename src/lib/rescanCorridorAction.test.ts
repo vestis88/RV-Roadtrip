@@ -46,3 +46,38 @@ describe('visibleRadiusKm', () => {
     expect(cappedFrom).toBeGreaterThan(MAX_RESCAN_RADIUS_KM)
   })
 })
+
+/**
+ * The circle is drawn on the map now (see SearchAreaCircle), so the number
+ * that draws it and the number that is searched have to be the same one —
+ * which is why the screen computes it once and hands it to both.
+ */
+describe('visibleRadiusKm at the raised cap', () => {
+  // The cost basis for the old 50 km cap was web search, which this path no
+  // longer uses: one tool-free call returns at most MAX_RESCAN_RESULTS finds
+  // whether it is asked about 25 km or 150. A normal regional view now fits.
+  it('covers a regional view without capping', () => {
+    const { radiusKm, cappedFrom } = visibleRadiusKm({
+      north: 57.5,
+      south: 56.0,
+      east: 25.0,
+      west: 23.0,
+    })
+    expect(cappedFrom).toBeUndefined()
+    expect(radiusKm).toBeLessThanOrEqual(MAX_RESCAN_RADIUS_KM)
+    expect(radiusKm).toBeGreaterThan(50)
+  })
+
+  // And a whole-continent view still caps, still says so, and — now that the
+  // circle is drawn — shows exactly how much of the view it covers.
+  it('still caps a view far too big to search, and reports it', () => {
+    const { radiusKm, cappedFrom } = visibleRadiusKm({
+      north: 69,
+      south: 45,
+      east: 30,
+      west: 5,
+    })
+    expect(radiusKm).toBe(MAX_RESCAN_RADIUS_KM)
+    expect(cappedFrom).toBeGreaterThan(MAX_RESCAN_RADIUS_KM)
+  })
+})

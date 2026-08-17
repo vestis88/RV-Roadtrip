@@ -319,6 +319,18 @@ export const driveLegSchema = z.object({
   durationMin: z.number().nonnegative(),
   slot: daySlotSchema,
   polyline: z.string().optional(),
+  /**
+   * Set when this leg's distance and time are a straight-line ESTIMATE
+   * rather than a real route (2026-08-17).
+   *
+   * computeRouteLeg falls back to a haversine estimate whenever the Routes
+   * API has no key or fails, so a plan can carry numbers that were never
+   * driveable — across water, most obviously — while reading exactly like
+   * measured ones. They also feed pacing validation, so a fictional short
+   * leg can make a bad route look well paced. Recorded so the day can say so
+   * instead of presenting a guess as a measurement.
+   */
+  estimated: z.boolean().optional(),
 })
 
 export const tripDaySchema = z.object({

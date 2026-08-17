@@ -22,6 +22,13 @@ import { claudeApiKey, generateRegionHighlights } from './prompts/planTrip.js'
 // this only ever kicks in for an actually-abandoned lock, not a slow one.
 const STALE_EXPLORE_LOCK_MS = 5 * 60 * 1000
 
+/**
+ * How often a run in progress says it is still alive — see the heartbeat
+ * below. Comfortably inside STALE_EXPLORE_LOCK_MS, so a living run can never
+ * be mistaken for an abandoned one.
+ */
+const EXPLORE_HEARTBEAT_MS = 20_000
+
 
 /**
  * Explore mode's own generation entry point (2026-07-30) — deliberately NOT
@@ -78,6 +85,19 @@ export async function generateExploreHighlightsForTrip(
       'Already finding great stops for this trip — hang tight.',
     )
   }
+
+  // A real heartbeat, for the reason the rescan and day-detail paths both
+  // needed one: exploreStatusUpdatedAt was written once, at the claim, and
+  // then read as a liveness signal. A start timestamp cannot tell a slow run
+  // from a container that died, so the lock could only ever be given a fixed
+  // grace period and hope. Refreshed while alive, silence means over.
+  const heartbeat = setInterval(() => {
+    void tripRef
+      .update({ 'planMeta.exploreStatusUpdatedAt': new Date().toISOString() })
+      .catch((error: unknown) =>
+        console.warn('Explore heartbeat write failed', error),
+      )
+  }, EXPLORE_HEARTBEAT_MS)
 
   try {
     const tripSnap = await tripRef.get()
@@ -173,6 +193,7 @@ export async function generateExploreHighlightsForTrip(
       `Could not find stops: ${describeCause(error)}`,
     )
   } finally {
+    clearInterval(heartbeat)
     await tripRef.update({ 'planMeta.exploreStatus': 'idle' })
   }
 }

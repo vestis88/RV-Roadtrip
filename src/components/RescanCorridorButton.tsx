@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { LatLng, PlanMeta } from '@rv/shared'
-import {
-  RESCAN_RADIUS_KM,
-  rescanCorridorArea,
-  visibleRadiusKm,
-} from '../lib/rescanCorridorAction'
+import { rescanCorridorArea } from '../lib/rescanCorridorAction'
 import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
@@ -15,10 +11,12 @@ interface RescanCorridorButtonProps {
   tripId: string
   center: LatLng
   /**
-   * The visible map rectangle. "This area" means what the traveler can see,
-   * not a fixed circle around the centre — see visibleRadiusKm.
+   * The circle that will actually be searched, computed by the screen so the
+   * SAME number draws it on the map (see SearchAreaCircle). Computing it in
+   * both places would let the drawn circle and the searched one disagree,
+   * which is a new instance of the bug this is fixing.
    */
-  bounds?: { north: number; south: number; east: number; west: number }
+  area: { radiusKm: number; cappedFrom?: number }
   /** Live from the trip doc — see the note on durable status below. */
   planMeta: PlanMeta
 }
@@ -124,7 +122,7 @@ function elapsedLabel(startedAt: string | undefined, now: number): string {
 export function RescanCorridorButton({
   tripId,
   center,
-  bounds,
+  area,
   planMeta,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
@@ -199,15 +197,10 @@ export function RescanCorridorButton({
         )
       : null
 
-  // Falls back to the old fixed circle only until the map has reported a
-  // camera change, which in practice is immediately.
-  const area = bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }
-  // `cappedFrom` was computed and never read, which is how a map showing a
-  // whole country could run a 50 km search and say nothing about it. On any
-  // view wider than about 100 km across, most of what the traveler is looking
-  // at is not being searched — and being told that BEFORE pressing the button
-  // is the difference between a narrow search and an inexplicable one.
-  const capped = 'cappedFrom' in area ? area.cappedFrom : undefined
+  // The cap is now drawn rather than described — see SearchAreaCircle. This
+  // only decides whether to say anything at all, for the one case where the
+  // circle is smaller than the view.
+  const capped = area.cappedFrom
 
   async function rescan() {
     setSubmitting(true)
@@ -278,8 +271,7 @@ export function RescanCorridorButton({
           data-testid="rescan-corridor-scope"
           className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
         >
-          Searches {area.radiusKm} km around the middle of the map — zoom in to
-          cover more of what you can see.
+          Searching the circle — zoom in to search everything you can see.
         </p>
       )}
       {status && (

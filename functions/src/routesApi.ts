@@ -11,6 +11,8 @@ export interface RouteLeg {
   distanceKm: number
   durationMin: number
   polyline?: string
+  /** See driveLegSchema.estimated — set only by the haversine fallback. */
+  estimated?: boolean
 }
 
 const EARTH_RADIUS_KM = 6371
@@ -34,7 +36,11 @@ function haversineKm(a: LatLng, b: LatLng): number {
 function estimateRouteLeg(origin: LatLng, destination: LatLng): RouteLeg {
   const distanceKm = haversineKm(origin, destination) * ROAD_DISTANCE_FACTOR
   const durationMin = (distanceKm / ASSUMED_AVG_SPEED_KMH) * 60
-  return { distanceKm, durationMin }
+  // Marked, so a day can say these numbers are a guess. A straight line
+  // scaled by a road factor is not a route: between two points either side
+  // of the Baltic it describes driving across water, and it feeds pacing
+  // validation exactly as though it had been measured.
+  return { distanceKm, durationMin, estimated: true }
 }
 
 interface ComputeRoutesResponse {

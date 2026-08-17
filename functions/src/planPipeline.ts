@@ -89,6 +89,9 @@ export async function resolveSkeletonDay(
       durationMin: leg.durationMin,
       slot: skDay.drive?.slot ?? 'evening',
       ...(leg.polyline ? { polyline: leg.polyline } : {}),
+      // Carried onto the day so it can say the distance is a guess — see
+      // driveLegSchema.estimated.
+      ...(leg.estimated ? { estimated: true } : {}),
     }
   } else {
     overnight = {

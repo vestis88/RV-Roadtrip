@@ -539,6 +539,19 @@ export function DayViewScreen() {
                 </span>
                 <span className="chip chip-neutral">{day.drive.slot}</span>
               </div>
+              {/* A straight-line guess, not a measured route — see
+                  driveLegSchema.estimated. Said out loud because these
+                  numbers are indistinguishable from real ones on the card,
+                  and pacing was validated against them. */}
+              {day.drive.estimated && (
+                <p
+                  data-testid="drive-card-estimated"
+                  className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400"
+                >
+                  Distance and time are a straight-line estimate — the routing
+                  service could not be reached for this leg.
+                </p>
+              )}
             </div>
           )
         )}

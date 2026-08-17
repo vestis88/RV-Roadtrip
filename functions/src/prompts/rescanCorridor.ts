@@ -61,7 +61,7 @@ const DEFAULT_SEARCH_BUDGET_MS = 240_000
  * single call bounded, per master_plan.md's "explicit cap/viewport-scoping
  * story" requirement for this phase.
  */
-export const MAX_RESCAN_RADIUS_KM = 50
+export const MAX_RESCAN_RADIUS_KM = 150
 
 /** Caps how many proposed stops one rescan can add — a single search
  * shouldn't be able to flood the corridor with dozens of unreviewed pins. */

@@ -1098,6 +1098,39 @@ Update 2026-08-13: the entries below cover a two-month-trip-shaped batch — the
   - **Position-following was considered and deferred.** The execution-mode geolocation check (Section 7.4) already knows where the RV is, so the window could follow it automatically. Held back in favour of an explicit button until the calendar drift is known: a trip that runs two days behind would have the window silently detailing the wrong days, and guessing at that before there is a real trip to measure is how the last few latency diagnoses went wrong.
   - **It also makes the segmented-generation machinery largely redundant** — `GENERATION_TIME_BUDGET_MS`, the continuation chaining, most of the per-day staging. All of it exists to survive the day-detail phase inside a 540 s ceiling, and that phase leaves generation. Not a reason to do this, but a reason not to invest further in that machinery in the meantime, and something to remove deliberately rather than leave as dead weight.
 
+### Audited 2026-08-17 — failures reported as facts about the world
+
+A pass over the whole codebase for the pattern behind most of this week's
+reports: the app describing its own failure as something true about the
+trip. "Nothing new found nearby" (the interests were never sent), a bike
+park named after the wrong village (the verified name was discarded),
+"outside the area searched — zoom out" (a silent cap, and advice that made it
+worse), "none could be found on the map" (the map was never asked). All four
+are the same shape.
+
+Fixed in that pass:
+- A Places lookup that THREW was counted as a place that does not exist, in
+  both the rescan and curation paths. Total failure now surfaces the real
+  cause; "Places answered no" stays a result; a single flaky lookup still
+  degrades.
+- `computeRouteLeg`'s haversine fallback produced distances and times
+  indistinguishable from measured ones, which also fed pacing validation.
+  Legs are marked `estimated` and the day says so.
+- `exploreStatusUpdatedAt` was a start timestamp read as a liveness signal —
+  the third instance of that bug. It is a real heartbeat now, like the rescan
+  and day-detail locks.
+- The rescan's search area is drawn on the map (`SearchAreaCircle`) instead
+  of being described, and the cap rose from 50 km to 150: what set it at 50
+  was web-search cost, and this path no longer uses web search.
+
+Still open, deliberately:
+- A failed free-camping rules lookup is planned as "not permitted". Correct
+  and conservative, but the night cannot distinguish "illegal here" from "we
+  could not check".
+- The segmented-generation machinery (`GENERATION_TIME_BUDGET_MS`,
+  continuation chaining) is now rarely needed but still correct — see the
+  "route eagerly, detail lazily" entry above.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

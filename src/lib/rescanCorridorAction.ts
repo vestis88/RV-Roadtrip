@@ -9,8 +9,19 @@ import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
  */
 export const RESCAN_RADIUS_KM = 25
 
-/** The callable's own cap, mirrored so the client can say when it bites. */
-export const MAX_RESCAN_RADIUS_KM = 50
+/**
+ * The callable's own cap, mirrored so the client can say when it bites.
+ *
+ * Raised from 50 on 2026-08-17, because what set it at 50 no longer applies.
+ * It was a cost guard from when a rescan ran up to three web searches per
+ * turn and the bill grew with the ground covered. The search is now one
+ * tool-free Claude call returning at most MAX_RESCAN_RESULTS finds, and that
+ * costs the same whether it is asked about 25 km or 150. What remains is a
+ * quality bound — "what is worth stopping for within 500 km of here" is a
+ * worse question than "within 100 km", not a more expensive one — so the cap
+ * stays, at a size that covers a normal regional view instead of a city one.
+ */
+export const MAX_RESCAN_RADIUS_KM = 150
 
 /**
  * How far "this area" actually reaches, from what the traveler can see.

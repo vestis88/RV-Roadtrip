@@ -332,3 +332,37 @@ test('a day from before the split shows no gate at all', async ({ page }) => {
   await expect(page.getByTestId('activities-row')).toBeVisible()
   await expect(page.getByTestId('day-detail-gate')).toHaveCount(0)
 })
+
+// A straight-line guess and a measured route are indistinguishable on the
+// card — same chips, same units — and pacing was validated against whichever
+// it got. computeRouteLeg falls back to haversine whenever the Routes API has
+// no key or fails, so a plan can carry numbers that were never driveable.
+test('a drive leg that is only an estimate says so', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+    .update({ 'drive.estimated': true })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('drive-card-estimated')).toContainText(
+    'straight-line estimate',
+  )
+})
+
+// A real leg must not carry the caveat, or it stops meaning anything.
+test('a measured drive leg carries no estimate caveat', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('drive-card')).toBeVisible()
+  await expect(page.getByTestId('drive-card-estimated')).toHaveCount(0)
+})

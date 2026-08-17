@@ -39,6 +39,11 @@ import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
+import { SearchAreaCircle } from '../components/SearchAreaCircle'
+import {
+  RESCAN_RADIUS_KM,
+  visibleRadiusKm,
+} from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { DirectionsRoute, type RouteTotals } from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
@@ -70,6 +75,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [bounds, setBounds] = useState<
     { north: number; south: number; east: number; west: number } | undefined
   >(undefined)
+
+  // The circle "Rescan this area" will search, computed ONCE here so the same
+  // number both draws it on the map and is sent to the server. It follows the
+  // viewport, which makes the map itself the size control: pinch to zoom and
+  // the search resizes with it. Falls back to a fixed circle only until the
+  // map has reported a camera change, which in practice is immediately.
+  const searchArea = useMemo(
+    () => (bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }),
+    [bounds],
+  )
   // "Rescan this area"/"Add stop" both anchor to wherever the traveler is
   // actually looking, not a fixed point — OverviewMapScreen already tracks
   // this the same way; this screen previously didn't, so both actions
@@ -525,6 +540,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               optimizeOrder
               onOrder={handleOrder}
             />
+            <SearchAreaCircle
+              center={center}
+              radiusKm={searchArea.radiusKm}
+              capped={searchArea.cappedFrom !== undefined}
+            />
             <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
             <AdvancedMarker
               position={{ lat: trip.settings.startPoint.lat, lng: trip.settings.startPoint.lng }}
@@ -570,7 +590,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           <RescanCorridorButton
             tripId={tripId}
             center={center}
-            bounds={bounds}
+            area={searchArea}
             planMeta={trip.planMeta}
           />
         </div>
