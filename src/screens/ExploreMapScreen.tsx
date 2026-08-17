@@ -14,6 +14,12 @@ import {
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
 import {
+  applyRouteOrder,
+  isNewRouteOrder,
+  routeOrderKey,
+  type RouteOrder,
+} from '../lib/routeOrder'
+import {
   rejectCorridorStop,
   setCorridorStopStatus,
   saveRouteOrder,
@@ -192,25 +198,23 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // applying yesterday's positions to a different set of stops would shuffle
   // them into nonsense. A changed set simply falls back to the guess until
   // Directions answers again.
-  const [routeOrder, setRouteOrder] = useState<{
-    key: string
-    order: number[]
-  } | null>(null)
-  const orderKey = useMemo(
-    () => guessedOrder.map((stop) => stop.id).join(','),
-    [guessedOrder],
-  )
+  const [routeOrder, setRouteOrder] = useState<RouteOrder | null>(null)
+  const orderKey = useMemo(() => routeOrderKey(guessedOrder), [guessedOrder])
   const handleOrder = useCallback(
-    (order: number[]) => setRouteOrder({ key: orderKey, order }),
+    (order: number[]) => {
+      // Only when it actually says something new. Google agreeing with the
+      // order it was given is the steady state, and storing that agreement
+      // would re-render, rebuild the arrays and ask again — see routeOrder.ts.
+      setRouteOrder((held) =>
+        isNewRouteOrder(held, orderKey, order) ? { key: orderKey, order } : held,
+      )
+    },
     [orderKey],
   )
-  const routeStops = useMemo(() => {
-    if (!routeOrder || routeOrder.key !== orderKey) return guessedOrder
-    const reordered = routeOrder.order
-      .map((index) => guessedOrder[index])
-      .filter((stop) => stop !== undefined)
-    return reordered.length === guessedOrder.length ? reordered : guessedOrder
-  }, [guessedOrder, routeOrder, orderKey])
+  const routeStops = useMemo(
+    () => applyRouteOrder(guessedOrder, routeOrder, orderKey),
+    [guessedOrder, routeOrder, orderKey],
+  )
   const routeStopIds = useMemo(
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
@@ -224,9 +228,23 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       console.error('Saving the route order failed', error),
     )
   }, [tripId, routeStops])
-  // Built in routeStops' order rather than re-sorted: that order is now
-  // Google's answer, and buildRouteBackbone would throw it away and put the
-  // projection back.
+  // What is ASKED. Built from the guess and nothing else, so its identity
+  // changes only when the locked stops themselves do. DirectionsRoute lists
+  // its points in an effect dependency array; handing it the answer to its
+  // own last question is what made the route thrash — see routeOrder.ts.
+  const askedBackbone = useMemo(
+    () =>
+      routeBackboneFrom(
+        trip.settings.startPoint,
+        guessedOrder.map((s) => ({ lat: s.lat, lng: s.lng })),
+        trip.settings.endPoint,
+      ),
+    [trip.settings.startPoint, trip.settings.endPoint, guessedOrder],
+  )
+  // What is TRUE, once Google has answered: the real driving order. Drawn by
+  // the Directions renderer from its own optimized result, and used for
+  // everything downstream — the corridor sent to the server, the names in a
+  // search prompt — but never fed back into the request above.
   const backbone = useMemo(
     () =>
       routeBackboneFrom(
@@ -496,7 +514,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             }}
           >
             <DirectionsRoute
-              points={backbone}
+              points={askedBackbone}
               onError={setRouteError}
               onTotals={handleRouteTotals}
               // Explore mode only. Nobody has committed to this order — it
