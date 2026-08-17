@@ -68,6 +68,9 @@ export function OverviewMapScreen() {
   // viewport, which makes the map itself the size control: pinch to zoom and
   // the search resizes with it. Falls back to a fixed circle only until the
   // map has reported a camera change, which in practice is immediately.
+  // First tap on "Rescan this area" aims, second searches — see
+  // RescanCorridorButton. Held here because the circle is drawn here.
+  const [aimingSearch, setAimingSearch] = useState(false)
   const searchArea = useMemo(
     () => (bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }),
     [bounds],
@@ -435,11 +438,15 @@ export function OverviewMapScreen() {
             }}
           >
             <DirectionsRoute points={routePoints} onError={setRouteError} />
-            <SearchAreaCircle
-              center={center}
-              radiusKm={searchArea.radiusKm}
-              capped={searchArea.cappedFrom !== undefined}
-            />
+            {/* Only while aiming. Drawn on every map all the time, it
+                buried the pins under a boundary nobody had asked to see. */}
+            {aimingSearch && (
+              <SearchAreaCircle
+                center={center}
+                radiusKm={searchArea.radiusKm}
+                capped={searchArea.cappedFrom !== undefined}
+              />
+            )}
             <MapPanner target={selectedPlace} />
 
             <AdvancedMarker
@@ -586,6 +593,8 @@ export function OverviewMapScreen() {
             center={center}
             area={searchArea}
             planMeta={trip.planMeta}
+            armed={aimingSearch}
+            onArmedChange={setAimingSearch}
           />
         </div>
 

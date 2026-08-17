@@ -19,6 +19,16 @@ interface RescanCorridorButtonProps {
   area: { radiusKm: number; cappedFrom?: number }
   /** Live from the trip doc — see the note on durable status below. */
   planMeta: PlanMeta
+  /**
+   * Whether the search area is currently being aimed — the first tap arms it,
+   * the second runs the search.
+   *
+   * Owned by the screen rather than here because the screen is what draws the
+   * circle (SearchAreaCircle), and the button and the circle must never
+   * disagree about whether one is being aimed.
+   */
+  armed: boolean
+  onArmedChange: (armed: boolean) => void
 }
 
 /**
@@ -124,6 +134,8 @@ export function RescanCorridorButton({
   center,
   area,
   planMeta,
+  armed,
+  onArmedChange,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -203,6 +215,7 @@ export function RescanCorridorButton({
   const capped = area.cappedFrom
 
   async function rescan() {
+    onArmedChange(false)
     setSubmitting(true)
     setError(null)
     setDisconnected(false)
@@ -253,7 +266,11 @@ export function RescanCorridorButton({
         type="button"
         data-testid="rescan-corridor-button"
         disabled={scanning}
-        onClick={rescan}
+        // Two taps, deliberately. The circle was drawn on every map all the
+        // time, which buries the pins under a boundary nobody asked to see —
+        // so the first tap asks for it and the second searches it. Aiming
+        // happens in between, by moving the map.
+        onClick={armed ? rescan : () => onArmedChange(true)}
         className="btn btn-sm border border-dashed border-neutral-300 bg-white/95 text-neutral-600 shadow-md backdrop-blur-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
         {scanning
@@ -264,14 +281,28 @@ export function RescanCorridorButton({
               planMeta.rescanStartedAt ?? planMeta.rescanStatusUpdatedAt,
               now,
             )
-          : 'Rescan this area'}
+          : armed
+            ? `Search this circle (${area.radiusKm} km)`
+            : 'Rescan this area'}
       </button>
-      {!scanning && capped !== undefined && (
+      {armed && !scanning && (
+        <button
+          type="button"
+          data-testid="rescan-corridor-cancel"
+          onClick={() => onArmedChange(false)}
+          className="btn btn-sm border border-neutral-300 bg-white/95 text-neutral-600 shadow-md backdrop-blur-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          Cancel
+        </button>
+      )}
+      {armed && !scanning && (
         <p
           data-testid="rescan-corridor-scope"
           className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
         >
-          Searching the circle — zoom in to search everything you can see.
+          {capped !== undefined
+            ? 'Zoom and pan to aim — the circle is as wide as the search can reach.'
+            : 'Zoom and pan to aim, then search the circle.'}
         </p>
       )}
       {status && (

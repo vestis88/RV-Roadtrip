@@ -245,10 +245,40 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
   await page.getByTestId('nav-map').click()
   await page.getByTestId('map-header').waitFor()
 
+  // Two taps: the first aims the search circle, the second runs it.
+  await page.getByTestId('rescan-corridor-button').click()
   await page.getByTestId('rescan-corridor-button').click()
   await expect(page.getByTestId('rescan-corridor-error')).toBeVisible({
     timeout: 10_000,
   })
+})
+
+// The circle was drawn on every map all the time, which buried the pins under
+// a boundary nobody had asked to see. It appears when the search is aimed and
+// not before.
+test('the search area is only shown while aiming a rescan', async ({ page }) => {
+  await createTripWithPlan(page)
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  await expect(page.getByTestId('rescan-corridor-scope')).toHaveCount(0)
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText(
+    'Rescan this area',
+  )
+
+  await page.getByTestId('rescan-corridor-button').click()
+
+  // Aiming: the button now names what it will search, and there is a way out.
+  await expect(page.getByTestId('rescan-corridor-scope')).toBeVisible()
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText(
+    'Search this circle',
+  )
+
+  await page.getByTestId('rescan-corridor-cancel').click()
+  await expect(page.getByTestId('rescan-corridor-scope')).toHaveCount(0)
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText(
+    'Rescan this area',
+  )
 })
 
 // Reported as "changing tab during a rescan breaks the search". It never
@@ -351,6 +381,8 @@ test('losing the connection to a running scan is not reported as a failure', asy
 
   // ...while this device's request dies on the network.
   await page.route('**/rescanCorridor', (route) => route.abort('failed'))
+  // Two taps — aim, then search.
+  await page.getByTestId('rescan-corridor-button').click({ force: true })
   await page.getByTestId('rescan-corridor-button').click({ force: true })
 
   // No error banner — the scan it would be reporting on is still running.
