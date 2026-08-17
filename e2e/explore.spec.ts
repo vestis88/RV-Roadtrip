@@ -321,6 +321,50 @@ test('marking a stop must-see does not put it in the route', async ({
   await expect(card).toHaveClass(/border-orange-600/)
 })
 
+// Requested 2026-08-17: "Add color coding to pins of the suggestions...
+// Green is must see. Yellow is worth a detour. Red is if convenient. Of
+// course update color for the pin if the priority is changed." The pin reads
+// the level off the same live corridorStops doc the card writes to, so this
+// checks the round trip rather than the component in isolation.
+test('a pin is coloured by its interest level, and recolours when the level changes', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    priority: 'nice-if-convenient',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  const pin = page.getByTestId(`explore-marker-${ottaId}`)
+
+  await expect(pin.locator('div').first()).toHaveClass(/rose/)
+
+  // Changed from the card; the pin follows with nothing wiring them
+  // together beyond the document they both render from.
+  await page
+    .getByTestId(`explore-candidate-interest-must-see-${ottaId}`)
+    .click()
+  await expect(pin.locator('div').first()).toHaveClass(/emerald/)
+  await expect(pin.locator('div').first()).not.toHaveClass(/rose/)
+
+  await page
+    .getByTestId(`explore-candidate-interest-worth-a-detour-${ottaId}`)
+    .click()
+  await expect(pin.locator('div').first()).toHaveClass(/amber/)
+
+  // And the key that says what the colours mean.
+  await expect(page.getByTestId('explore-pin-legend')).toContainText('Must see')
+  await expect(page.getByTestId('explore-pin-legend')).toContainText(
+    'If convenient',
+  )
+})
+
 // Locking used to be a one-way door: a locked stop offered only "Remove",
 // which rejected it outright, so changing your mind about committing to a
 // place cost you the place — and because a rejection is remembered as a

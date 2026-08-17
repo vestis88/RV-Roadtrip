@@ -1190,6 +1190,47 @@ faithful execution of that instruction.
   reads it off the trip now, names the countries that came back empty, and
   points at the country list as the thing to check.
 
+One more the same week, from a screenshot of a card headed "Bruzaholms
+Gokart" — Google's own listing calls it a Gokartbana — carrying a description
+of a lift-free downhill and enduro trail network, filed under "mountain
+biking". Nothing had gone wrong with the description. Curation proposed a
+mountain-bike spot in Bruzaholm; Places was asked for it and answered with
+the best-known business in that village sharing its name; the name check said
+yes.
+
+The arithmetic was the whole story. `nameLooksRight` required half the
+requested name's identifying words with a floor of one, so a TWO-word name
+needed ONE match — and "place + category" is the commonest shape a sight name
+takes. The place name alone satisfied it, leaving the category word, the only
+word that says what the thing IS, free to be anything at all.
+
+No string rule separates "Kronborg Slot" → "Kronborg Castle" (right, a
+translation) from "Bruzaholms MTB" → "Bruzaholms Gokart" (wrong, a different
+sport): both share one word and differ in one. The missing signal is that
+slot and castle mean the same thing and MTB and gokart do not. So:
+
+- `CATEGORY_GROUPS`, a small explicit table of category words across the
+  languages this corridor actually uses, read in two directions — as
+  equivalence, so a translated category still matches, and as **conflict**,
+  so two stated, different categories reject outright regardless of word
+  count. Silence is not disagreement: a result naming no category
+  contradicts nothing. Compounds are read by substring, because
+  "Bergscykelpark" and "Gokartbana" are one token each.
+- The threshold is every word for a name of one or two, and all-but-one
+  beyond that. Two words no longer means "the place name will do".
+- Nordic genitive `-s` is matched across ("Lunds Domkyrka" is listed as
+  "Lund Cathedral"). Found while fixing the above, and it only ever loosens
+  — it recovers candidates that were being dropped, and the category check
+  still refuses a different kind of place.
+
+Also that day, requested: pins coloured by interest level — green must-see,
+amber worth-a-detour, red if-convenient, repainting when the level changes.
+The pin reads the level off the same live `corridorStops` document the card
+writes to, so there is nothing to keep in sync. Tap-to-view (orange) and
+in-my-route (blue) still win: a pin that stopped answering taps because it
+was green would be a worse map. A key sits under the map, because colour is
+only information once the reader is told what it means.
+
 Still open, deliberately:
 - A failed free-camping rules lookup is planned as "not permitted". Correct
   and conservative, but the night cannot distinguish "illegal here" from "we

@@ -283,16 +283,179 @@ function nameTokens(name: string): string[] {
  * those callers are asking for "a good museum near here", where any museum is
  * a correct answer.
  */
+/**
+ * What KIND of place a name says it is, by the words in it.
+ *
+ * Reported 2026-08-17 with a screenshot: a card headed "Bruzaholms Gokart" —
+ * a go-kart track, per Google's own listing — carrying a description of a
+ * lift-free downhill and enduro trail network, filed under the interest
+ * "mountain biking". Nothing had gone wrong with the description. Curation
+ * proposed a mountain-bike spot in Bruzaholm; Places was asked for it, and
+ * answered with the best-known business in that village that shares its
+ * name.
+ *
+ * The name check let it through, and the arithmetic is the whole story:
+ * half of the requested words had to be found, floor of one, so a
+ * two-word name needed ONE match. "Place + category" is the commonest shape
+ * a sight name takes, and under that rule the place name alone was enough —
+ * leaving the category word, the only word that says what the thing IS, free
+ * to be anything at all.
+ *
+ * No amount of string arithmetic separates "Kronborg Slot" → "Kronborg
+ * Castle" (right, a translation) from "Bruzaholms MTB" → "Bruzaholms Gokart"
+ * (wrong, a different sport): both share one word and differ in one. The
+ * missing signal is that slot and castle mean the same thing and MTB and
+ * gokart do not, so that is what this encodes.
+ *
+ * Deliberately a small, explicit table rather than anything cleverer. It is
+ * used in two directions — as equivalence, so a translated category still
+ * matches, and as conflict, so two DIFFERENT categories reject outright —
+ * and a word that is in no group simply carries no category signal, which
+ * leaves the existing behaviour exactly as it was.
+ */
+const CATEGORY_GROUPS: Record<string, string[]> = {
+  castle: ['slot', 'slott', 'castle', 'schloss', 'borg', 'fastning', 'fortress', 'festning', 'palace', 'palats'],
+  church: ['kyrka', 'kyrkan', 'kirke', 'kirche', 'church', 'domkyrka', 'katedral', 'cathedral', 'kloster', 'abbey'],
+  bike: ['mtb', 'cykel', 'bike', 'biking', 'sykkel', 'downhill', 'enduro', 'bikepark', 'singletrack'],
+  gokart: ['gokart', 'gocart', 'kart', 'karting', 'gokartbana'],
+  motorsport: ['motorbana', 'racetrack', 'raceway', 'speedway', 'motocross'],
+  golf: ['golf', 'golfbana', 'golfklubb'],
+  zoo: ['zoo', 'djurpark', 'dyrepark', 'tierpark', 'safaripark', 'akvarium', 'aquarium'],
+  waterpark: ['badhus', 'simhall', 'vattenland', 'aquapark', 'badeland', 'waterpark', 'tropikariet'],
+  ski: ['skid', 'slalom', 'alpint', 'skisenter', 'skianlaggning', 'skiing', 'liftsystem'],
+  beach: ['strand', 'beach', 'badplats', 'stranden'],
+  cave: ['grotta', 'grotte', 'cave', 'hule'],
+  lighthouse: ['fyr', 'fyren', 'lighthouse', 'leuchtturm'],
+  waterfall: ['vattenfall', 'foss', 'fossen', 'waterfall', 'wasserfall'],
+  climbing: ['klattring', 'klatring', 'climbing', 'klettersteig', 'via ferrata'],
+  themepark: ['tivoli', 'nojespark', 'fornoyelsespark', 'freizeitpark', 'themepark'],
+  campsite: ['camping', 'campingplats', 'campingplass', 'stellplatz', 'ställplats'],
+}
+
+/**
+ * Short keywords are matched whole; longer ones are matched inside a word
+ * too, because Scandinavian names compound relentlessly —
+ * "Bergscykelpark" and "Gokartbana" are one token each and would otherwise
+ * carry no category at all. Four characters is the point where a substring
+ * stops being likely to appear by accident.
+ */
+const CATEGORY_SUBSTRING_MIN = 4
+
+const CATEGORY_OF_KEYWORD = new Map<string, string>(
+  Object.entries(CATEGORY_GROUPS).flatMap(([group, words]) =>
+    words.map((word) => [word, group] as [string, string]),
+  ),
+)
+
+/**
+ * Raw words of a name — case-folded and de-accented like nameTokens, but
+ * with NOTHING removed. Category detection has to see the words nameTokens
+ * drops as noise ("park", "museum"), because for this question they are the
+ * signal rather than the noise.
+ */
+function rawTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/ø/g, 'o')
+    .replace(/æ/g, 'ae')
+    .replace(/ß/g, 'ss')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+}
+
+/** The category one word states, if any — exact for short keywords, inside
+ * the word for longer ones. The single place that rule lives, so detection
+ * and equivalence cannot disagree about what a word means. */
+function categoryOfToken(token: string): string | undefined {
+  for (const [keyword, group] of CATEGORY_OF_KEYWORD) {
+    if (
+      token === keyword ||
+      (keyword.length >= CATEGORY_SUBSTRING_MIN && token.includes(keyword))
+    ) {
+      return group
+    }
+  }
+  return undefined
+}
+
+function categoriesIn(name: string): Set<string> {
+  const found = new Set<string>()
+  for (const token of rawTokens(name)) {
+    const group = categoryOfToken(token)
+    if (group) found.add(group)
+  }
+  return found
+}
+
+/**
+ * Nordic names take a genitive -s that Places' own listing often drops, or
+ * adds: "Lunds Domkyrka" is listed as "Lund Cathedral", "Kolmårdens" as
+ * "Kolmården". Compared literally these are different words, and the whole
+ * place name is exactly the word a match cannot afford to lose. Only ever
+ * loosens, and only for the comparison — the stored name is still Places'.
+ */
+function withoutGenitive(token: string): string {
+  return token.length > 3 && token.endsWith('s') ? token.slice(0, -1) : token
+}
+
+/**
+ * True when both names say what kind of place they are and disagree.
+ *
+ * One-directional silence is not disagreement: a result that names no
+ * category ("Bruzaholm") contradicts nothing, and neither does a request
+ * that names none. Only two stated, different answers reject — which is the
+ * go-kart track standing in for a bike park, and nothing else.
+ */
+function categoryConflict(expectedName: string, actual: string): boolean {
+  const wanted = categoriesIn(expectedName)
+  if (wanted.size === 0) return false
+  const got = categoriesIn(actual)
+  if (got.size === 0) return false
+  return ![...wanted].some((group) => got.has(group))
+}
+
+/**
+ * How many of the requested name's identifying words the result actually
+ * has. A word whose category the result states in another language counts:
+ * that is what keeps "Kronborg Slot" matching "Kronborg Castle" under the
+ * stricter threshold below.
+ */
 function nameMatchHits(expected: string[], actual: string): number {
   const found = new Set(nameTokens(actual))
-  return expected.filter((token) => found.has(token)).length
+  const stems = new Set([...found].map(withoutGenitive))
+  const actualCategories = categoriesIn(actual)
+  return expected.filter((token) => {
+    if (found.has(token) || stems.has(withoutGenitive(token))) return true
+    const group = categoryOfToken(token)
+    return group !== undefined && actualCategories.has(group)
+  }).length
+}
+
+/**
+ * How much of the requested name has to be found.
+ *
+ * Everything, for a name of one or two identifying words — because at two
+ * words, "half" meant the place name on its own, and that is precisely the
+ * hole the go-kart track came through. Longer names keep a word of slack,
+ * where losing one still leaves two or more distinctive words agreeing.
+ */
+function requiredNameHits(expectedCount: number): number {
+  return expectedCount <= 2 ? expectedCount : expectedCount - 1
 }
 
 function nameLooksRight(expectedName: string | undefined, actual: string): boolean {
   if (!expectedName) return true
+  // Checked before the word count, and independently of it: two names can
+  // agree on every word they share and still be a bike park and a go-kart
+  // track.
+  if (categoryConflict(expectedName, actual)) return false
   const expected = nameTokens(expectedName)
   if (expected.length === 0) return true
-  return nameMatchHits(expected, actual) >= Math.max(1, Math.ceil(expected.length / 2))
+  return nameMatchHits(expected, actual) >= requiredNameHits(expected.length)
 }
 
 /**

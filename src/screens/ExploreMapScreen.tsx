@@ -26,6 +26,9 @@ import {
 } from '../lib/corridorStopActions'
 import {
   GENERIC_STOPS_ERROR,
+  TIER_LABEL,
+  TIER_ORDER,
+  candidatePriority,
   describeEmptyCandidateList,
   describeEmptyCountries,
   describeExploreHighlightsError,
@@ -38,7 +41,7 @@ import {
 import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { countryName } from '../lib/countries'
-import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
+import { CORRIDOR_CANDIDATE_ICON, PRIORITY_PIN_CLASS } from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
@@ -516,6 +519,26 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         </p>
       )}
 
+      {/* Colour is only information if the reader is told what it means, and
+        * the list is below the fold on a phone — so the key sits with the
+        * map rather than with the cards. Only shown once there are pins to
+        * explain. */}
+      {candidates.length > 0 && (
+        <p
+          data-testid="explore-pin-legend"
+          className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-2 pb-1 text-xs text-neutral-500 dark:text-neutral-400"
+        >
+          {TIER_ORDER.map((tier) => (
+            <span key={tier} className="flex items-center gap-1">
+              <span
+                className={`inline-block h-2.5 w-2.5 rounded-full border-2 ${PRIORITY_PIN_CLASS[tier]}`}
+              />
+              {TIER_LABEL[tier]}
+            </span>
+          ))}
+        </p>
+      )}
+
       <div className="relative" style={{ height: '45vh', minHeight: '260px' }} data-testid="explore-map-canvas">
         {apiKey ? (
           <GoogleMap
@@ -599,6 +622,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   // can never disagree about which stops are in.
                   selected={routeStopIds.has(stop.id)}
                   highlighted={selectedId === stop.id}
+                  // Green/amber/red by interest level. Read straight off the
+                  // stop through the same helper the card's selector uses,
+                  // so a level changed on the card repaints the pin on the
+                  // next snapshot with nothing to keep in sync — corridorStops
+                  // is a live subscription and the write goes to the doc both
+                  // of them render from.
+                  priority={candidatePriority(stop)}
                 />
               </AdvancedMarker>
             ))}

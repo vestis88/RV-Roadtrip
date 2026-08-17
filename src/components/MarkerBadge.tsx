@@ -1,9 +1,17 @@
+import { PRIORITY_PIN_CLASS, type MarkerPriority } from '../lib/mapIcons'
+
 interface MarkerBadgeProps {
   icon: string
   /** status === 'selected' — "this is actually in my plan", distinct from tap-to-view. */
   selected?: boolean
   /** Tap-to-view state (Day View's selectedPlace) — takes visual priority over `selected`. */
   highlighted?: boolean
+  /**
+   * Interest level, for the explore map's candidate pins. Absent everywhere
+   * else — a restaurant or an overnight stop has no such level, and giving
+   * them a neutral ring is the point.
+   */
+  priority?: MarkerPriority
 }
 
 /**
@@ -15,16 +23,28 @@ interface MarkerBadgeProps {
  * `selected` (status==='selected', a real plan commitment) and
  * `highlighted` (the traveler just tapped this card/pin to look at it).
  */
-export function MarkerBadge({ icon, selected, highlighted }: MarkerBadgeProps) {
+export function MarkerBadge({
+  icon,
+  selected,
+  highlighted,
+  priority,
+}: MarkerBadgeProps) {
+  // Ordered deliberately, and the two transient states still win. Tapping a
+  // pin has to visibly answer the tap, and "this one is in my route" is a
+  // decision the traveler has made — an interest level is a property of a
+  // suggestion they are still weighing. A pin that stopped responding to
+  // taps because it was green would be a worse map than one that shows the
+  // level a moment later.
+  const ring = highlighted
+    ? 'scale-125 border-orange-600 ring-2 ring-orange-400'
+    : selected
+      ? 'border-sky-600 ring-2 ring-sky-400'
+      : priority
+        ? PRIORITY_PIN_CLASS[priority]
+        : 'border-neutral-300 dark:border-neutral-700'
   return (
     <div
-      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-base shadow-md transition-transform dark:bg-neutral-900 ${
-        highlighted
-          ? 'scale-125 border-orange-600 ring-2 ring-orange-400'
-          : selected
-            ? 'border-sky-600 ring-2 ring-sky-400'
-            : 'border-neutral-300 dark:border-neutral-700'
-      }`}
+      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-base shadow-md transition-transform dark:bg-neutral-900 ${ring}`}
     >
       {icon}
     </div>

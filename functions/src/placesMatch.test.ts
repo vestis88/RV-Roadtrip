@@ -221,3 +221,92 @@ describe('bestFromLadder', () => {
     ).toBeDefined()
   })
 })
+
+/**
+ * Reported 2026-08-17 with a screenshot: a card headed "Bruzaholms Gokart" —
+ * Google's own listing calls it a Gokartbana — carrying a description of a
+ * lift-free downhill and enduro trail network, under the interest "mountain
+ * biking". Curation had proposed a mountain-bike spot in Bruzaholm; Places
+ * answered with the best-known business in that village sharing its name,
+ * and the name check said yes.
+ */
+describe('nameLooksRight — a place of a different KIND is a different place', () => {
+  it('rejects the go-kart track that stood in for a bike park', () => {
+    expect(nameLooksRight('Bruzaholms MTB', 'Bruzaholms Gokart')).toBe(false)
+    expect(nameLooksRight('Bruzaholms Bike Park', 'Bruzaholms Gokart')).toBe(
+      false,
+    )
+    expect(nameLooksRight('Bruzaholms cykelpark', 'Bruzaholms Gokartbana')).toBe(
+      false,
+    )
+  })
+
+  // The arithmetic that let it through: half the words, floor of one, so a
+  // two-word "place + category" name needed only the place.
+  it('no longer lets the place name alone carry a two-word request', () => {
+    expect(nameLooksRight('Åre Bike Park', 'Åre Skidområde')).toBe(false)
+    expect(nameLooksRight('Kolmårdens Djurpark', 'Kolmårdens Camping')).toBe(
+      false,
+    )
+  })
+
+  // Both halves matter: silence is not disagreement. A result that names no
+  // category contradicts nothing.
+  it('does not reject a result that simply does not say what it is', () => {
+    expect(nameLooksRight('Møns Klint', 'Møns Klint')).toBe(true)
+    expect(nameLooksRight('Kronborg', 'Kronborg Castle')).toBe(true)
+  })
+
+  // And the case no string rule can separate from the go-kart one without
+  // knowing that these two words mean the same thing.
+  it('still matches a category translated into another language', () => {
+    expect(nameLooksRight('Kronborg Slot', 'Kronborg Castle')).toBe(true)
+    expect(nameLooksRight('Frederiksborg Castle', 'Frederiksborg Slot')).toBe(
+      true,
+    )
+    expect(nameLooksRight('Lunds Domkyrka', 'Lund Cathedral')).toBe(true)
+  })
+
+  // Scandinavian names compound, so the category is routinely inside a word
+  // rather than beside it.
+  it('reads the category out of a compound word', () => {
+    expect(nameLooksRight('Järvsö Bergscykelpark', 'Järvsö Gokartbana')).toBe(
+      false,
+    )
+    expect(nameLooksRight('Järvsö Bergscykelpark', 'Järvsö Bike Park')).toBe(
+      true,
+    )
+  })
+
+  // A category search asks for a kind of place, not a named one — every
+  // result is a correct answer and this check must stay out of the way.
+  it('leaves the category backfill paths alone', () => {
+    expect(nameLooksRight(undefined, 'Bruzaholms Gokart')).toBe(true)
+    expect(nameLooksRight('The Restaurant', 'Bruzaholms Gokart')).toBe(true)
+  })
+})
+
+// Found while fixing the above: Nordic names take a genitive -s that Places'
+// own listing routinely drops or adds, and the place name is the one word a
+// match cannot afford to lose. This direction only ever loosens — it recovers
+// candidates that were being dropped, it does not admit a different kind of
+// place, which the category check still refuses.
+describe('nameLooksRight — the Nordic genitive -s', () => {
+  it('matches a name across the genitive', () => {
+    expect(nameLooksRight('Lunds Domkyrka', 'Lund Cathedral')).toBe(true)
+    expect(nameLooksRight('Kolmårdens Djurpark', 'Kolmården Zoo')).toBe(true)
+  })
+
+  it('does not let it reunite two different kinds of place', () => {
+    expect(nameLooksRight('Kolmårdens Djurpark', 'Kolmården Camping')).toBe(
+      false,
+    )
+  })
+
+  // Only a trailing -s on a word long enough for it to be a suffix rather
+  // than the word.
+  it('leaves short words alone', () => {
+    expect(nameTokens('Aas')).toEqual(['aas'])
+    expect(nameLooksRight('Aas Gaard', 'Aa Gaard')).toBe(false)
+  })
+})
