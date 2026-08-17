@@ -1,22 +1,16 @@
+import type { EmptyCountry } from '@rv/shared'
 import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
 
 /**
  * Why a country the traveler chose ended up with nothing on the map.
  *
- * The two cases are worth telling apart because they have completely
- * different fixes — and because both used to look identical from the map,
- * which is to say like nothing at all.
+ * The shape moved to @rv/shared once it stopped being only a return value
+ * and started being written onto the trip (planMeta.exploreLastEmptyCountries)
+ * — re-exported here so the callers that already import it from this module
+ * keep working, and so this file stays the one place the rule is computed.
  */
-export type EmptyCountryReason = 'not-proposed' | 'not-located'
-
-export interface EmptyCountry {
-  country: string
-  reason: EmptyCountryReason
-  /** How many sights were proposed there — 0 when the reason is not-proposed. */
-  proposed: number
-  /** The region's own explanation, when curation gave one. */
-  note?: string
-}
+export type { EmptyCountry }
+export type EmptyCountryReason = EmptyCountry['reason']
 
 /**
  * The chosen countries that came back with nothing, and which kind of

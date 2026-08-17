@@ -1,7 +1,12 @@
 import { doc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { sortAlongRoute } from '@rv/shared'
-import type { CorridorStopPriority, LatLng, Trip } from '@rv/shared'
+import type {
+  CorridorStopPriority,
+  EmptyCountry,
+  LatLng,
+  Trip,
+} from '@rv/shared'
 import { db, functions } from './firebase'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
@@ -260,12 +265,11 @@ export function exploreFailureMessage(
  * `alreadyKnown` is how much of the answer was already on the list — an
  * older deployment returns only the former, hence the fallback.
  */
-export interface EmptyCountry {
-  country: string
-  reason: 'not-proposed' | 'not-located'
-  proposed: number
-  note?: string
-}
+/**
+ * Re-exported from the shared schema, which is where this shape lives now
+ * that it is written onto the trip as well as returned from the callable.
+ */
+export type { EmptyCountry }
 
 export async function generateExploreHighlights(
   tripId: string,
@@ -318,4 +322,50 @@ export function describeEmptyCountries(
         : `${name}: nothing suggested for this trip.`
     })
     .join(' ')
+}
+
+/** Never searched. */
+const NEVER_SEARCHED_MESSAGE =
+  'No stops yet — tap "Find great stops" to get suggestions for your route, ' +
+  'or drop a pin / rescan an area on the map above.'
+
+/** Searched, and the answer really was nothing. */
+const SEARCHED_AND_EMPTY_MESSAGE =
+  'Nothing stood out along this route — for a short or local trip, that can ' +
+  'be the honest answer. Try "Rescan this area," describe what you\'re ' +
+  'looking for with "Add stop," or drop a pin yourself.'
+
+/** Searched, nothing found, and the trip knows something about why. */
+const SEARCHED_AND_EMPTY_WITH_REASON =
+  'The last search came back with nothing to add.'
+
+const CHECK_COUNTRIES_HINT =
+  'If that looks wrong, check the countries picked in Trip Setup — a new ' +
+  'trip carries the previous one\'s country list over but not its route, so ' +
+  'the list can end up naming nowhere this trip actually goes.'
+
+/**
+ * What an empty candidate list should say (2026-08-17).
+ *
+ * Three different situations used to produce two sentences between them, and
+ * the wrong one at the worst moment: a Copenhagen–München trip that returned
+ * nothing was told "for a short or local trip, that can be the honest
+ * answer". It is 1,300 km. The reason the answer was empty had been worked
+ * out server-side, handed back through the callable, and then dropped,
+ * because the search had been fired from Trip Setup and Trip Setup navigates
+ * here on success — so the screen holding the explanation unmounted before
+ * it could show it. planMeta.exploreLastEmptyCountries is that explanation,
+ * kept on the trip where the screen that has to say it can read it.
+ */
+export function describeEmptyCandidateList(
+  planMeta: Trip['planMeta'],
+  nameOf: (code: string) => string,
+): string {
+  if (!planMeta.exploreLastRunAt) return NEVER_SEARCHED_MESSAGE
+  const gaps = describeEmptyCountries(
+    planMeta.exploreLastEmptyCountries ?? [],
+    nameOf,
+  )
+  if (!gaps) return SEARCHED_AND_EMPTY_MESSAGE
+  return `${SEARCHED_AND_EMPTY_WITH_REASON} ${gaps} ${CHECK_COUNTRIES_HINT}`
 }

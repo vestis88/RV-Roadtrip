@@ -1107,3 +1107,67 @@ describe('buildRouteOutlinePrompt — the committed order', () => {
     expect(JSON.parse(user)).not.toHaveProperty('lockedRoute')
   })
 })
+
+/**
+ * Reported 2026-08-17: a Copenhagen–München trip whose curation came back
+ * with nothing at all, shown as "Nothing stood out along this route".
+ *
+ * The cause was in this prompt. The countries-first rewrite (which fixed a
+ * chosen country being quietly dropped for being "off the corridor") went one
+ * step too far and made preferredCountries the SCOPE of the research — with
+ * the start-to-finish corridor demoted to a fallback used "if
+ * preferredCountries is empty, and only then". A new trip carries the
+ * previous trip's country list over while getting a brand-new route
+ * (useTripSession.startNewTrip), so a stale list naming none of the countries
+ * the trip drives through turned the whole route into out-of-scope ground.
+ */
+describe('buildRegionHighlightsPrompt — countries are a floor, not a ceiling', () => {
+  it('puts the countries the trip drives through in scope on every trip', async () => {
+    const { buildRegionHighlightsPrompt } = await import('./planTripPrompt.js')
+    const { system } = buildRegionHighlightsPrompt({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(system).toMatch(/startPoint's country[\s\S]*endPoint's country/i)
+    expect(system).toMatch(/in scope on every single trip/i)
+  })
+
+  it('says outright that preferredCountries never narrows the research', async () => {
+    const { buildRegionHighlightsPrompt } = await import('./planTripPrompt.js')
+    const { system } = buildRegionHighlightsPrompt({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(system).toMatch(/FLOOR, never a ceiling/i)
+    // The old wording, which is what produced the empty answer.
+    expect(system).not.toMatch(/it is the scope of this research/i)
+    expect(system).not.toMatch(/If preferredCountries is empty, and only then/i)
+  })
+
+  // The chosen countries still have to be researched in their own right —
+  // that is the Estonia fix, and this must not undo it.
+  it('still requires every chosen country to be researched on its own merits', async () => {
+    const { buildRegionHighlightsPrompt } = await import('./planTripPrompt.js')
+    const { system } = buildRegionHighlightsPrompt({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(system).toMatch(/as though it were the only country on the list/i)
+    expect(system).toMatch(/EVERY country in preferredCountries MUST appear/)
+  })
+
+  // The "an empty answer is honest" licence is what let a 1,300 km trip
+  // return nothing without anything objecting.
+  it('withholds the empty-answer licence from a trip that crosses countries', async () => {
+    const { buildRegionHighlightsPrompt } = await import('./planTripPrompt.js')
+    const { system } = buildRegionHighlightsPrompt({
+      settings: {} as never,
+      notesFreeText: '',
+    })
+
+    expect(system).toMatch(/does not cover a trip that crosses countries/i)
+  })
+})

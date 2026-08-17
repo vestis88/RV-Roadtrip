@@ -152,16 +152,6 @@ export async function generateExploreHighlightsForTrip(
 
     await commitInChunks(db, merge.writes)
 
-    // A completed run only — not attempted-but-failed — so the frontend
-    // can tell "never searched" apart from "searched and genuinely found
-    // nothing" regardless of which screen fired the call. See
-    // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
-    await tripRef.update({
-      'planMeta.exploreLastRunAt': new Date().toISOString(),
-      // A run that worked answers the last one that didn't.
-      'planMeta.exploreLastError': FieldValue.delete(),
-      'planMeta.exploreLastFailedAt': FieldValue.delete(),
-    })
     // Which chosen countries came back with nothing, and why. Without this a
     // country the traveler explicitly picked can vanish from the answer with
     // no explanation anywhere — see countryCoverage.ts.
@@ -176,6 +166,25 @@ export async function generateExploreHighlightsForTrip(
           .join(', ')}`,
       )
     }
+
+    // A completed run only — not attempted-but-failed — so the frontend
+    // can tell "never searched" apart from "searched and genuinely found
+    // nothing" regardless of which screen fired the call. See
+    // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
+    await tripRef.update({
+      'planMeta.exploreLastRunAt': new Date().toISOString(),
+      // Written to the trip for the same reason, and it is the half that was
+      // missing: the explanation reached whichever screen made the call, and
+      // the primary entry point ("Generate overview") navigates away from
+      // that screen the instant the call succeeds. Deleted rather than
+      // written empty so "this run had nothing to explain" and "this trip
+      // predates the field" stay the same thing.
+      'planMeta.exploreLastEmptyCountries':
+        emptyCountries.length > 0 ? emptyCountries : FieldValue.delete(),
+      // A run that worked answers the last one that didn't.
+      'planMeta.exploreLastError': FieldValue.delete(),
+      'planMeta.exploreLastFailedAt': FieldValue.delete(),
+    })
     return {
       candidateCount: merge.added,
       alreadyKnown: merge.alreadyKnown,

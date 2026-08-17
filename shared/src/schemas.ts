@@ -69,6 +69,26 @@ export function offGridToleranceOf(settings: {
   return settings.offGridTolerance ?? DEFAULT_OFF_GRID_TOLERANCE
 }
 
+/**
+ * A country the traveler chose that the last curation pass came back empty
+ * for, and which kind of empty it was.
+ *
+ * Lives here rather than in functions/ because it is written onto the trip
+ * (planMeta.exploreLastEmptyCountries) and read by the map — the callable's
+ * return value is no longer its only route to a screen. The reasons are worth
+ * telling apart because their fixes are completely different: nothing was
+ * suggested there, versus things were suggested and none of them could be
+ * found on the map.
+ */
+export const emptyCountrySchema = z.object({
+  country: z.string().length(2),
+  reason: z.enum(['not-proposed', 'not-located']),
+  /** How many sights were proposed there — 0 when the reason is not-proposed. */
+  proposed: z.number().int().nonnegative(),
+  /** Curation's own explanation for the gap, when it gave one. */
+  note: z.string().optional(),
+})
+
 export const tripMetaSchema = z.object({
   name: z.string(),
   shareCode: z.string().length(6),
@@ -151,6 +171,19 @@ export const planMetaSchema = z.object({
   // mounts fresh with no memory of the search that just ran — the exact
   // primary entry point this distinction exists for.
   exploreLastRunAt: isoDateTime.optional(),
+  // The chosen countries that last came back with nothing, and which kind of
+  // nothing it was — see functions/src/countryCoverage.ts.
+  //
+  // Kept on the trip for exactly the reason exploreLastRunAt is: "Generate
+  // overview" navigates to /map on success, so the screen that has to explain
+  // the result is a fresh mount of a component that never made the call. That
+  // is the app's PRIMARY entry point into this search, and it was the one
+  // where the explanation was computed, returned, and then dropped on the
+  // floor — leaving the map to say "nothing stood out along this route" about
+  // a trip crossing half of Europe, with the reason (an inherited country
+  // list that named none of the countries it drives through) visible nowhere.
+  // Rewritten by every completed run, so it always describes the newest one.
+  exploreLastEmptyCountries: z.array(emptyCountrySchema).optional(),
   // Why the last "Generate overview" / "Find great stops" run failed, in one
   // line, written where it survives the connection that started it.
   //
@@ -846,6 +879,7 @@ export type TripSettings = z.infer<typeof tripSettingsSchema>
 export type TripMeta = z.infer<typeof tripMetaSchema>
 export type TripNotes = z.infer<typeof tripNotesSchema>
 export type PlanStatus = z.infer<typeof planStatusSchema>
+export type EmptyCountry = z.infer<typeof emptyCountrySchema>
 export type PlanMeta = z.infer<typeof planMetaSchema>
 export type Trip = z.infer<typeof tripSchema>
 export type DaySlot = z.infer<typeof daySlotSchema>

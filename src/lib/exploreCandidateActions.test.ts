@@ -19,6 +19,7 @@ vi.mock('./firebase', () => ({ db: {}, functions: {} }))
 
 const {
   candidatePriority,
+  describeEmptyCandidateList,
   describeExploreHighlightsError,
   exploreAttemptBaseline,
   exploreFailureMessage,
@@ -423,5 +424,66 @@ describe('exploreFailureMessage', () => {
     expect(
       exploreFailureMessage({ lastRunAt: undefined, lastFailedAt: undefined }, idle),
     ).toEqual({ tone: 'error', message: GENERIC })
+  })
+})
+
+// Reported 2026-08-17 with a screenshot of a Copenhagen–München route:
+// "Nothing stood out along this route — for a short or local trip, that can
+// be the honest answer." It is 1,300 km. The reason the answer was empty had
+// been computed server-side and dropped on the way to this screen.
+describe('describeEmptyCandidateList', () => {
+  const nameOf = (code: string) => ({ EE: 'Estonia', SE: 'Sweden' })[code] ?? code
+
+  it('tells a trip nobody has searched to search', () => {
+    expect(describeEmptyCandidateList({ status: 'idle' }, nameOf)).toContain(
+      'No stops yet',
+    )
+  })
+
+  it('still allows the honest empty answer when there is nothing to explain', () => {
+    const said = describeEmptyCandidateList(
+      { status: 'idle', exploreLastRunAt: '2026-08-17T17:00:00.000Z' },
+      nameOf,
+    )
+    expect(said).toContain('Nothing stood out along this route')
+  })
+
+  // The case that produced the report: countries were searched, came back
+  // empty, and the screen said nothing about them at all.
+  it('names the countries that came back empty instead of blaming the trip length', () => {
+    const said = describeEmptyCandidateList(
+      {
+        status: 'idle',
+        exploreLastRunAt: '2026-08-17T17:00:00.000Z',
+        exploreLastEmptyCountries: [
+          { country: 'EE', reason: 'not-proposed', proposed: 0 },
+          { country: 'SE', reason: 'not-proposed', proposed: 0 },
+        ],
+      },
+      nameOf,
+    )
+
+    expect(said).toContain('Estonia')
+    expect(said).toContain('Sweden')
+    // The excuse that was wrong for a trip crossing Europe.
+    expect(said).not.toContain('short or local trip')
+  })
+
+  // A stale inherited country list is invisible otherwise: the new trip
+  // carries it over while getting a brand-new route.
+  it('points at the country list as the thing to check', () => {
+    const said = describeEmptyCandidateList(
+      {
+        status: 'idle',
+        exploreLastRunAt: '2026-08-17T17:00:00.000Z',
+        exploreLastEmptyCountries: [
+          { country: 'EE', reason: 'not-proposed', proposed: 0 },
+        ],
+      },
+      nameOf,
+    )
+
+    expect(said).toMatch(/countries picked in Trip Setup/i)
+    expect(said).toMatch(/carries the previous one's country list over/i)
   })
 })

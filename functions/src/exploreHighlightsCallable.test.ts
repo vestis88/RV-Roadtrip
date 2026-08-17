@@ -523,3 +523,67 @@ describe('generateExploreHighlights callable', () => {
     expect(generateRegionHighlightsMock).not.toHaveBeenCalled()
   })
 })
+
+// Reported 2026-08-17 as "in all of Lithuania there is nothing to see?" and
+// again for a Copenhagen–München trip: the map said "Nothing stood out along
+// this route" while the reason — chosen countries that came back empty — had
+// been worked out, returned through the callable, and then lost, because
+// "Generate overview" navigates to the map and the screen holding the answer
+// unmounts on the way.
+describe('generateExploreHighlights — the empty countries survive the trip', () => {
+  it('records which chosen countries came back with nothing', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreEmptyCountriesKept')
+    await db
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.preferredCountries': ['NO', 'EE'] })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue({
+      regions: [
+        ...FIXTURE_HIGHLIGHTS.regions,
+        {
+          region: 'Estonia',
+          country: 'EE',
+          reasoning: 'nothing here answers downhill mountain biking',
+          candidateStops: [],
+        },
+      ],
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await generateExploreHighlightsForTrip(tripId)
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(meta?.exploreLastEmptyCountries).toEqual([
+      {
+        country: 'EE',
+        reason: 'not-proposed',
+        proposed: 0,
+        note: 'nothing here answers downhill mountain biking',
+      },
+    ])
+  })
+
+  // Absent rather than an empty array, so "this run had nothing to explain"
+  // and "this trip predates the field" stay one thing rather than two.
+  it('clears the record when the newest run has nothing to explain', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreEmptyCountriesCleared')
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreLastEmptyCountries': [
+        { country: 'EE', reason: 'not-proposed', proposed: 0 },
+      ],
+    })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await generateExploreHighlightsForTrip(tripId)
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(meta?.exploreLastEmptyCountries).toBeUndefined()
+  })
+})

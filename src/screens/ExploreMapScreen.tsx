@@ -26,6 +26,7 @@ import {
 } from '../lib/corridorStopActions'
 import {
   GENERIC_STOPS_ERROR,
+  describeEmptyCandidateList,
   describeEmptyCountries,
   describeExploreHighlightsError,
   exploreAttemptBaseline,
@@ -165,17 +166,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       ),
     [corridorStops],
   )
-  // Distinguishes "never searched" from "searched and genuinely found
-  // nothing" for the empty-state message below — both look identical
-  // otherwise (zero candidates), but a short/local trip legitimately
-  // producing no highlights (see planTripPrompt.ts's own doc comment: "It
-  // is fine — expected, even — for a short or local trip to have... no
-  // regions with a genuine highlight") reads as broken without this.
-  // Derived from trip.planMeta.exploreLastRunAt rather than local state —
-  // the search that just ran might have been fired from SettingsScreen's
-  // "Generate overview", which navigates here on success, mounting this
-  // screen fresh with no memory of it.
-  const searchedEmpty = candidates.length === 0 && !!trip.planMeta.exploreLastRunAt
   // Route order, not interest order: the list reads as the drive itself, so
   // a stop's neighbours in it are its neighbours on the map. Interest level
   // lives on each card instead (see ExploreCandidateCard).
@@ -643,9 +633,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400"
             data-testid="explore-empty-state"
           >
-            {searchedEmpty
-              ? 'Nothing stood out along this route — for a short or local trip, that can be the honest answer. Try "Rescan this area," describe what you\'re looking for with "Add stop," or drop a pin yourself.'
-              : 'No stops yet — tap "Find great stops" to get suggestions for your route, or drop a pin / rescan an area on the map above.'}
+            {describeEmptyCandidateList(trip.planMeta, countryName)}
           </p>
         ) : (
           <div className="space-y-2">

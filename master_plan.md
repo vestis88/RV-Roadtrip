@@ -1156,6 +1156,38 @@ nothing.
   error on its way out: a trip deleted mid-run used to replace "Claude
   returned unparseable JSON" with "no document to update".
 
+And again that evening, from a Copenhagen–München trip whose curation came
+back completely empty, shown as "Nothing stood out along this route — for a
+short or local trip, that can be the honest answer." It is 1,300 km.
+
+The cause was the countries-first rewrite two entries above, overshooting. It
+fixed a chosen country being quietly dropped for sitting "off the corridor" —
+but it did so by making `preferredCountries` **the scope** of the research,
+with the start-to-finish corridor demoted to a fallback used "if
+preferredCountries is empty, and only then". That reading is a ceiling, and
+the country list is routinely stale in exactly the way that makes a ceiling
+catastrophic: `startNewTrip` carries the previous trip's country list over
+while deliberately NOT carrying its start and finish points, so a new trip
+begins with a list describing the *last* trip's route. A list naming Sweden
+and the Baltics, over a route through Denmark and Germany, meant the ground
+the trip actually drives across was out of scope — and an empty answer was the
+faithful execution of that instruction.
+
+- The prompt now names two sets of countries, neither limiting the other: the
+  ones the trip travels through (always in scope, on every trip), and the
+  chosen ones (each researched on its own merits, as before). Stated
+  outright: `preferredCountries` is a floor, never a ceiling, and it is
+  expected to be out of date.
+- The "an empty answer is honest" licence is scoped to what it was written
+  for — an afternoon in one valley — and explicitly withheld from a trip that
+  crosses countries.
+- `planMeta.exploreLastEmptyCountries`, for the same reason
+  `exploreLastRunAt` exists: the explanation was computed, returned through
+  the callable, and then dropped, because "Generate overview" navigates to
+  the map on success and the screen holding it unmounts on the way. The map
+  reads it off the trip now, names the countries that came back empty, and
+  points at the country list as the thing to check.
+
 Still open, deliberately:
 - A failed free-camping rules lookup is planned as "not permitted". Correct
   and conservative, but the night cannot distinguish "illegal here" from "we
