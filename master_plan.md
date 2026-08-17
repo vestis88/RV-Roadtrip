@@ -1123,6 +1123,39 @@ Fixed in that pass:
   of being described, and the cap rose from 50 km to 150: what set it at 50
   was web-search cost, and this path no longer uses web search.
 
+Added later the same day, from a report of "Could not find stops right now —
+please try again." on a trip already back at `idle`:
+
+That sentence turns out to be reachable by exactly one route. Every failure
+the callable itself raises carries a written message, so the generic line is
+what the app says when the rejection carried **no server account at all** —
+and `@firebase/functions` produces precisely that (`internal` / `"internal"`,
+via `postJSON`'s `status: 0`) for a fetch that never completed. Its own source
+comment says the browser cannot tell a network drop from a backend that
+crashed before setting the CORS header. So the message was, at best, unfounded
+advice: the run it describes may have been alive, may have finished, may have
+failed for a reason nobody could see. There was no way to find out afterwards,
+because this path — unlike the rescan path since 2026-08-16 — recorded
+nothing.
+
+- `planMeta.exploreLastError` / `exploreLastFailedAt`: the cause, written
+  where it outlives the request, in the exact words the caller would have been
+  given. Cleared by a run that works; not written by the busy guard, which is
+  a button press colliding with a healthy run rather than a failure.
+- The two screens that fire the search stop letting the socket decide.
+  `exploreFailureMessage` reads the trip instead: still generating → say the
+  search is running and its finds will arrive on their own; finished →
+  say so, because a search that succeeded unwatched is the likeliest outcome
+  of a phone locking mid-call and "try again" would charge for it twice;
+  failed → say what broke. The generic line is now the last resort rather
+  than the only answer.
+- Which run those signals belong to is decided by comparing the trip against
+  itself before and after the attempt, not by comparing a server timestamp to
+  a phone's clock.
+- `generateExploreHighlightsForTrip`'s `finally` no longer throws over the
+  error on its way out: a trip deleted mid-run used to replace "Claude
+  returned unparseable JSON" with "no document to update".
+
 Still open, deliberately:
 - A failed free-camping rules lookup is planned as "not permitted". Correct
   and conservative, but the night cannot distinguish "illegal here" from "we

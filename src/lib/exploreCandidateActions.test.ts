@@ -20,6 +20,8 @@ vi.mock('./firebase', () => ({ db: {}, functions: {} }))
 const {
   candidatePriority,
   describeExploreHighlightsError,
+  exploreAttemptBaseline,
+  exploreFailureMessage,
   setCandidatePriority,
   sortCandidatesForList,
 } = await import('./exploreCandidateActions')
@@ -315,5 +317,111 @@ describe('describeEmptyCountries', () => {
     )
     expect(said).toContain('Estonia')
     expect(said).toContain('Latvia')
+  })
+})
+
+// Reported 2026-08-17: "Could not find stops right now — please try again"
+// under a Generate overview, on a trip whose status had already gone back to
+// idle. That line is what the client says when the rejection carried no
+// cause at all — a dropped connection, or a container that died without
+// answering — and it is the wrong thing to say for every one of those cases.
+describe('exploreFailureMessage', () => {
+  const idle = { status: 'idle' as const, exploreStatus: 'idle' as const }
+
+  it('says nothing at all when the call did not fail this way', () => {
+    expect(exploreFailureMessage(null, idle)).toBeNull()
+  })
+
+  // The most common outcome of a phone locking mid-call: the function keeps
+  // running, because the client hanging up does not cancel it.
+  it('reports a search still running rather than a failure', () => {
+    const notice = exploreFailureMessage(
+      { lastRunAt: undefined, lastFailedAt: undefined },
+      { ...idle, exploreStatus: 'generating' },
+    )
+    expect(notice?.tone).toBe('info')
+    expect(notice?.message).toContain('running on the server')
+  })
+
+  // And when it turns out to have worked: telling the traveler to try again
+  // would charge them a second Claude call for a search that succeeded.
+  it('reports a search that finished after the connection dropped', () => {
+    const notice = exploreFailureMessage(
+      { lastRunAt: undefined, lastFailedAt: undefined },
+      { ...idle, exploreLastRunAt: '2026-08-17T17:03:00.000Z' },
+    )
+    expect(notice?.tone).toBe('info')
+    expect(notice?.message).toContain('finished on the server')
+  })
+
+  it('shows the server-recorded cause when the run really did fail', () => {
+    const notice = exploreFailureMessage(
+      { lastRunAt: undefined, lastFailedAt: undefined },
+      {
+        ...idle,
+        exploreLastFailedAt: '2026-08-17T17:03:00.000Z',
+        exploreLastError: 'Could not find stops: Places refused the key.',
+      },
+    )
+    expect(notice).toEqual({
+      tone: 'error',
+      message: 'Could not find stops: Places refused the key.',
+    })
+  })
+
+  // The whole reason the baseline is a before/after comparison rather than
+  // "is the server's timestamp after I pressed the button": a stale failure
+  // from last week is not news about the search just fired, and the two
+  // clocks involved are a phone's and a datacentre's.
+  it('ignores a failure that was already on the trip beforehand', () => {
+    const planMeta = {
+      ...idle,
+      exploreLastFailedAt: '2026-08-10T09:00:00.000Z',
+      exploreLastError: 'Could not find stops: an old problem.',
+    }
+    const notice = exploreFailureMessage(
+      exploreAttemptBaseline(planMeta),
+      planMeta,
+    )
+    expect(notice).toEqual({ tone: 'error', message: GENERIC })
+  })
+
+  it('ignores a successful run that predates this attempt', () => {
+    const planMeta = { ...idle, exploreLastRunAt: '2026-08-10T09:00:00.000Z' }
+    const notice = exploreFailureMessage(
+      exploreAttemptBaseline(planMeta),
+      planMeta,
+    )
+    expect(notice).toEqual({ tone: 'error', message: GENERIC })
+  })
+
+  // A trip that has both, from this attempt, is a retry: the later one is
+  // what happened.
+  it('prefers whichever of the two happened last', () => {
+    const before = { lastRunAt: undefined, lastFailedAt: undefined }
+    const failedLater = exploreFailureMessage(before, {
+      ...idle,
+      exploreLastRunAt: '2026-08-17T17:00:00.000Z',
+      exploreLastFailedAt: '2026-08-17T17:05:00.000Z',
+      exploreLastError: 'Could not find stops: the second try broke.',
+    })
+    expect(failedLater?.tone).toBe('error')
+    expect(failedLater?.message).toContain('the second try broke')
+
+    const ranLater = exploreFailureMessage(before, {
+      ...idle,
+      exploreLastRunAt: '2026-08-17T17:05:00.000Z',
+      exploreLastFailedAt: '2026-08-17T17:00:00.000Z',
+      exploreLastError: 'Could not find stops: the first try broke.',
+    })
+    expect(ranLater?.tone).toBe('info')
+  })
+
+  // Nothing to report is still better said plainly than dressed up as a
+  // diagnosis — but it is now the last resort rather than the only answer.
+  it('falls back to the generic line when the trip says nothing', () => {
+    expect(
+      exploreFailureMessage({ lastRunAt: undefined, lastFailedAt: undefined }, idle),
+    ).toEqual({ tone: 'error', message: GENERIC })
   })
 })

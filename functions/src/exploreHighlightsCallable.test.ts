@@ -313,6 +313,98 @@ describe('generateExploreHighlightsForTrip', () => {
     })
   })
 
+  // Reported 2026-08-17: "Could not find stops right now — please try again"
+  // on a trip already back at idle, with nothing anywhere saying what had
+  // gone wrong. The cause existed only in the promise the phone had stopped
+  // following. The rescan path has recorded its failures since 2026-08-16;
+  // this is the same record for the search that runs far more often.
+  it('records why the run failed, where it outlives the request', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenDurableError')
+    generateRegionHighlightsMock
+      .mockReset()
+      .mockRejectedValue(new Error('Places lookup refused: REQUEST_DENIED'))
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toThrow(
+      'REQUEST_DENIED',
+    )
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(meta?.exploreLastError).toContain('REQUEST_DENIED')
+    expect(meta?.exploreLastFailedAt).toBeTruthy()
+  })
+
+  // The stored sentence and the rejected one must be the same string, so a
+  // phone reading the failure off the trip and a phone reading it off the
+  // rejection are not shown two paraphrases of one fault.
+  it('stores exactly the message the caller would have been told', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenSameWords')
+    generateRegionHighlightsMock
+      .mockReset()
+      .mockRejectedValue(new Error('no JSON in the response'))
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    let thrown = ''
+    try {
+      await generateExploreHighlightsForTrip(tripId)
+    } catch (error) {
+      thrown = (error as { message: string }).message
+    }
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(thrown).toContain('no JSON in the response')
+    expect(meta?.exploreLastError).toBe(thrown)
+  })
+
+  it('clears a recorded failure once a run succeeds', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenClearsError')
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreLastError': 'Could not find stops: an old problem',
+      'planMeta.exploreLastFailedAt': new Date().toISOString(),
+    })
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await generateExploreHighlightsForTrip(tripId)
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(meta?.exploreLastError).toBeUndefined()
+    expect(meta?.exploreLastFailedAt).toBeUndefined()
+  })
+
+  // A run rejected by the busy guard has not failed — it never started, and
+  // the run it collided with may still be perfectly healthy. Recording it
+  // would overwrite the real last failure with a message about a button
+  // press.
+  it('does not record the busy guard as a failure of the trip', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidExploreGenBusyNoRecord')
+    generateRegionHighlightsMock.mockReset().mockResolvedValue(FIXTURE_HIGHLIGHTS)
+    await db.collection('trips').doc(tripId).update({
+      'planMeta.exploreStatus': 'generating',
+      'planMeta.exploreStatusUpdatedAt': new Date().toISOString(),
+    })
+
+    const { generateExploreHighlightsForTrip } = await import(
+      './exploreHighlightsCallable.js'
+    )
+    await expect(generateExploreHighlightsForTrip(tripId)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    })
+
+    const meta = (await db.collection('trips').doc(tripId).get()).data()?.planMeta
+    expect(meta?.exploreLastError).toBeUndefined()
+  })
+
   it('clears planMeta.exploreStatus back to idle even after a failure', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidExploreGenFail')

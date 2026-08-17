@@ -16,9 +16,13 @@ import {
 import { PRESET_INTERESTS } from '../lib/interests'
 import { mergeRemoteSettings } from '../lib/mergeRemoteSettings'
 import {
+  GENERIC_STOPS_ERROR,
   describeExploreHighlightsError,
+  exploreAttemptBaseline,
+  exploreFailureMessage,
   generateExploreHighlights,
 } from '../lib/exploreCandidateActions'
+import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { updateTripSettings } from '../lib/updateTripSettings'
@@ -42,6 +46,11 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [overviewSubmitting, setOverviewSubmitting] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
+  // Set when the overview call rejects without the server having said
+  // anything, to the trip as it stood when the call was fired — see
+  // exploreFailureMessage, which turns it into what actually happened.
+  const [overviewDisconnected, setOverviewDisconnected] =
+    useState<ExploreAttemptBaseline | null>(null)
   const [refreshingOvernight, setRefreshingOvernight] = useState(false)
   const [overnightResult, setOvernightResult] = useState<string | null>(null)
   // Shared between "Generate overview" and "Generate full plan" — see
@@ -58,6 +67,12 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // now does — read too), so it survives navigation and stays accurate
   // regardless of which screen fired the call.
   const exploring = overviewSubmitting || trip.planMeta.exploreStatus === 'generating'
+  // Resolved during render, not in the catch: the snapshot carrying the
+  // server's account of the failure usually arrives after the rejection.
+  const overviewNotice = exploreFailureMessage(
+    overviewDisconnected,
+    trip.planMeta,
+  )
   // The same window, on the plan's own status rather than exploreStatus:
   // `submitting` clears the instant the planRequest write resolves, but the
   // trip stays 'idle'/'stale'/'error' until generatePlan's trigger claims it
@@ -212,6 +227,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // rather than triggering it and leaving them wondering where it went.
   async function generateOverview() {
     setOverviewError(null)
+    setOverviewDisconnected(null)
     setRouteError(null)
     // Checked client-side, before spending a Claude call: a start/finish
     // point defaults to blank ({name: '', lat: 0, lng: 0}), and (0, 0) is a
@@ -225,12 +241,19 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
       return
     }
     setOverviewSubmitting(true)
+    const before = exploreAttemptBaseline(trip.planMeta)
     try {
       await generateExploreHighlights(tripId)
       navigate('/map')
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
-      setOverviewError(describeExploreHighlightsError(error))
+      // Only a server that actually answered gets to put an error here. A
+      // rejection with no cause in it is this phone losing the call, not the
+      // search failing — and the search is very likely still running. See
+      // exploreFailureMessage.
+      const described = describeExploreHighlightsError(error)
+      if (described === GENERIC_STOPS_ERROR) setOverviewDisconnected(before)
+      else setOverviewError(described)
     } finally {
       setOverviewSubmitting(false)
     }
@@ -538,6 +561,18 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
             data-testid="generate-overview-error"
           >
             {overviewError}
+          </p>
+        )}
+        {!overviewError && overviewNotice && (
+          <p
+            className={
+              overviewNotice.tone === 'error'
+                ? 'mt-2 text-sm text-red-600 dark:text-red-400'
+                : 'mt-2 text-sm text-neutral-600 dark:text-neutral-300'
+            }
+            data-testid="generate-overview-error"
+          >
+            {overviewNotice.message}
           </p>
         )}
         {routeError && (

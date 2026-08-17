@@ -1,7 +1,7 @@
 import { doc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { sortAlongRoute } from '@rv/shared'
-import type { CorridorStopPriority, LatLng } from '@rv/shared'
+import type { CorridorStopPriority, LatLng, Trip } from '@rv/shared'
 import { db, functions } from './firebase'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
@@ -152,6 +152,106 @@ export function describeExploreHighlightsError(error: unknown): string {
     return GENERIC_STOPS_ERROR
   }
   return named
+}
+
+/**
+ * What to say when the server never answered this phone.
+ *
+ * Holding a callable open for three minutes from a phone does not reliably
+ * work — a locked screen, a tab switch or a cellular NAT timeout drops the
+ * request — and the function keeps running regardless, because the client
+ * hanging up does not cancel it. Telling the traveler to "try again" then
+ * asks them to pay for a second Claude call on top of one that is still
+ * working. RescanCorridorButton has drawn this distinction since 2026-08-16.
+ */
+const STILL_RUNNING_MESSAGE =
+  'Still searching — this phone stopped following it, but the search is ' +
+  'running on the server. Its finds appear on their own; you can leave ' +
+  'this screen.'
+
+/** And when that search turns out to have worked after all. */
+const FINISHED_WITHOUT_US_MESSAGE =
+  'That search finished on the server after this phone lost the connection — ' +
+  'anything it found is already on the map.'
+
+export interface ExploreFailureNotice {
+  /** 'info' means nothing has gone wrong — the search is alive, or done. */
+  tone: 'info' | 'error'
+  message: string
+}
+
+/**
+ * What the trip already said before this attempt, so its own outcome can be
+ * told apart from one left over from last week.
+ *
+ * Deliberately a before/after comparison rather than "is the server's
+ * timestamp later than when I pressed the button": those two clocks are a
+ * phone's and a datacentre's, and a phone a minute fast would discount a
+ * result that had genuinely just arrived.
+ */
+export interface ExploreAttemptBaseline {
+  lastRunAt?: string
+  lastFailedAt?: string
+}
+
+export function exploreAttemptBaseline(
+  planMeta: Trip['planMeta'],
+): ExploreAttemptBaseline {
+  return {
+    lastRunAt: planMeta.exploreLastRunAt,
+    lastFailedAt: planMeta.exploreLastFailedAt,
+  }
+}
+
+/**
+ * What to say when the call rejected without the server having said anything
+ * (2026-08-17).
+ *
+ * `before` is the trip as it stood when this attempt was fired, and null when
+ * there is nothing to report. Being here at all means
+ * describeExploreHighlightsError found no real cause in the rejection — no
+ * server-authored code, or the bare word "internal" — which is what a dropped
+ * connection and a container that died without answering both look like from
+ * the phone. Neither is something the traveler did, and neither is grounds
+ * for the flat "please try again" that was being shown: reported as exactly
+ * that line, on a trip already back at idle, with no record anywhere of what
+ * had gone wrong.
+ *
+ * So the trip decides rather than the socket, and only what changed since
+ * `before` counts. It is still running: say so. It finished: say that,
+ * because a search that succeeded unwatched is the likeliest outcome of a
+ * phone locking mid-call, and "please try again" would charge for it twice.
+ * It failed and the server recorded why (planMeta.exploreLastError, written
+ * where it outlives the request): say what broke.
+ *
+ * Read live during render, deliberately, rather than resolved once in the
+ * catch — every one of those signals arrives after the promise rejects.
+ */
+export function exploreFailureMessage(
+  before: ExploreAttemptBaseline | null,
+  planMeta: Trip['planMeta'],
+): ExploreFailureNotice | null {
+  if (!before) return null
+  if (planMeta.exploreStatus === 'generating') {
+    return { tone: 'info', message: STILL_RUNNING_MESSAGE }
+  }
+  const failedAt =
+    planMeta.exploreLastFailedAt !== before.lastFailedAt
+      ? planMeta.exploreLastFailedAt
+      : undefined
+  const ranAt =
+    planMeta.exploreLastRunAt !== before.lastRunAt
+      ? planMeta.exploreLastRunAt
+      : undefined
+  if (ranAt && (!failedAt || ranAt > failedAt)) {
+    return { tone: 'info', message: FINISHED_WITHOUT_US_MESSAGE }
+  }
+  // Shown as stored: the callable writes the same sentence it rejects with,
+  // so this is the message that connection would have carried.
+  if (failedAt && planMeta.exploreLastError) {
+    return { tone: 'error', message: planMeta.exploreLastError }
+  }
+  return { tone: 'error', message: GENERIC_STOPS_ERROR }
 }
 
 /**

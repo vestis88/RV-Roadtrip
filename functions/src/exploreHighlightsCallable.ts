@@ -1,4 +1,4 @@
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import type { CorridorStop, Trip } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
@@ -156,7 +156,12 @@ export async function generateExploreHighlightsForTrip(
     // can tell "never searched" apart from "searched and genuinely found
     // nothing" regardless of which screen fired the call. See
     // planMeta.exploreLastRunAt's own doc comment in shared/src/schemas.ts.
-    await tripRef.update({ 'planMeta.exploreLastRunAt': new Date().toISOString() })
+    await tripRef.update({
+      'planMeta.exploreLastRunAt': new Date().toISOString(),
+      // A run that worked answers the last one that didn't.
+      'planMeta.exploreLastError': FieldValue.delete(),
+      'planMeta.exploreLastFailedAt': FieldValue.delete(),
+    })
     // Which chosen countries came back with nothing, and why. Without this a
     // country the traveler explicitly picked can vanish from the answer with
     // no explanation anywhere — see countryCoverage.ts.
@@ -177,6 +182,33 @@ export async function generateExploreHighlightsForTrip(
       emptyCountries,
     }
   } catch (error) {
+    // The cause, written where it outlives this request (2026-08-17).
+    //
+    // Until now the only copy lived in the promise this is about to reject,
+    // so a phone that had stopped following the call — locked screen, tab
+    // switch, cellular NAT timeout, or simply a container that died without
+    // answering at all — lost it entirely, and the traveler was left with
+    // "please try again" over a trip already back at idle. That is precisely
+    // what was reported, and there was nothing on the server side of the
+    // conversation to look up afterwards. rescanCorridorCallable has recorded
+    // its failures since 2026-08-16; this is the same record for the search
+    // that runs far more often.
+    // Stored as the exact sentence the caller would have been told, so the
+    // message a returning phone reads off the trip and the message a
+    // connected one reads off the rejection are the same string rather than
+    // two paraphrases of one fault.
+    const reported =
+      error instanceof HttpsError
+        ? error.message
+        : `Could not find stops: ${describeCause(error)}`
+    await tripRef
+      .update({
+        'planMeta.exploreLastError': reported,
+        'planMeta.exploreLastFailedAt': new Date().toISOString(),
+      })
+      .catch((writeError: unknown) =>
+        console.warn('Recording the failed explore run failed', writeError),
+      )
     // firebase-functions only forwards the message of an HttpsError;
     // anything else reaches the browser as the bare code 'internal' with the
     // message "INTERNAL". That is how the 2026-08-12 failure was reported:
@@ -188,13 +220,18 @@ export async function generateExploreHighlightsForTrip(
     // which the truncated preview is no substitute for.
     if (error instanceof HttpsError) throw error
     console.error(`generateExploreHighlights failed for trip ${tripId}`, error)
-    throw new HttpsError(
-      'internal',
-      `Could not find stops: ${describeCause(error)}`,
-    )
+    throw new HttpsError('internal', reported)
   } finally {
     clearInterval(heartbeat)
-    await tripRef.update({ 'planMeta.exploreStatus': 'idle' })
+    // Guarded, because a throw from a `finally` REPLACES the error on its way
+    // out: a trip deleted mid-run would turn "Claude returned unparseable
+    // JSON" into "no document to update", losing the one thing worth
+    // reporting behind a fault nobody can act on.
+    await tripRef
+      .update({ 'planMeta.exploreStatus': 'idle' })
+      .catch((clearError: unknown) =>
+        console.warn('Clearing exploreStatus after a run failed', clearError),
+      )
   }
 }
 

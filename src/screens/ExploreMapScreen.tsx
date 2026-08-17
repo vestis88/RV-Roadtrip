@@ -25,12 +25,16 @@ import {
   saveRouteOrder,
 } from '../lib/corridorStopActions'
 import {
+  GENERIC_STOPS_ERROR,
   describeEmptyCountries,
   describeExploreHighlightsError,
+  exploreAttemptBaseline,
+  exploreFailureMessage,
   generateExploreHighlights,
   setCandidatePriority,
   sortCandidatesForList,
 } from '../lib/exploreCandidateActions'
+import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { countryName } from '../lib/countries'
 import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
@@ -99,6 +103,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   })
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // Set when the call rejects without the server having said anything, to
+  // the trip as it stood when it was fired — see exploreFailureMessage,
+  // which turns it into what the trip itself says happened, at render time.
+  const [genDisconnected, setGenDisconnected] =
+    useState<ExploreAttemptBaseline | null>(null)
   // What the last refresh actually did. Worth saying out loud now that a
   // refresh merges: a run that finds ten sights the traveler already has
   // adds nothing to the list, and without a word from the app that is
@@ -135,6 +144,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // just throws the busy-guard's generic error instead of reflecting the
   // real in-progress state.
   const exploring = generating || trip.planMeta.exploreStatus === 'generating'
+  // Resolved during render, not in the catch: the snapshot that says what
+  // happened usually arrives after the promise rejects.
+  const genNotice = exploreFailureMessage(genDisconnected, trip.planMeta)
 
   // Memoised deliberately, and it matters far more than it looks: every
   // derived value below hangs off this array's IDENTITY. A bare .filter()
@@ -314,6 +326,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   async function runFindStops() {
     setGenError(null)
     setGenSummary(null)
+    setGenDisconnected(null)
     // See src/lib/validateRoute.ts's own doc comment: a blank start/finish
     // point still looks like a real (0, 0) coordinate downstream, so this
     // must be caught here rather than relying on the Claude call itself to
@@ -323,6 +336,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       return
     }
     setGenerating(true)
+    const before = exploreAttemptBaseline(trip.planMeta)
     try {
       const { candidateCount, alreadyKnown, emptyCountries } =
         await generateExploreHighlights(tripId)
@@ -340,7 +354,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       setGenSummary(gaps ? `${found} ${gaps}` : found)
     } catch (error) {
       console.error('generateExploreHighlights failed', error)
-      setGenError(describeExploreHighlightsError(error))
+      // A dead connection is not a failed search — see exploreFailureMessage.
+      // Only a server that actually answered gets to put an error on screen;
+      // everything else is decided from the trip during render, because the
+      // snapshot that explains it usually lands after this rejection does.
+      const described = describeExploreHighlightsError(error)
+      if (described === GENERIC_STOPS_ERROR) setGenDisconnected(before)
+      else setGenError(described)
     } finally {
       setGenerating(false)
     }
@@ -414,7 +434,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             {genError}
           </p>
         )}
-        {genSummary && !genError && (
+        {!genError && genNotice && (
+          <p
+            data-testid="explore-find-stops-error"
+            className={
+              genNotice.tone === 'error'
+                ? 'text-sm text-red-600'
+                : 'text-sm text-neutral-600 dark:text-neutral-300'
+            }
+          >
+            {genNotice.message}
+          </p>
+        )}
+        {genSummary && !genError && !genNotice && (
           <p
             data-testid="explore-find-stops-summary"
             className="text-sm text-neutral-600 dark:text-neutral-300"

@@ -151,6 +151,19 @@ export const planMetaSchema = z.object({
   // mounts fresh with no memory of the search that just ran — the exact
   // primary entry point this distinction exists for.
   exploreLastRunAt: isoDateTime.optional(),
+  // Why the last "Generate overview" / "Find great stops" run failed, in one
+  // line, written where it survives the connection that started it.
+  //
+  // The rescan path was given this on 2026-08-16 and this one — the older and
+  // more used of the two — was left without it, so the two searches failed
+  // very differently: a failed rescan says what broke, a failed overview says
+  // "please try again" and the reason dies with the promise on the phone.
+  // That is not a hypothetical: a run reported on 2026-08-17 showed exactly
+  // the generic line with the trip already back at idle, and there was no
+  // record anywhere of what it had hit. A search is a fact about the trip
+  // (see exploreStatus above) and so is its failure. Cleared on success.
+  exploreLastError: z.string().optional(),
+  exploreLastFailedAt: isoDateTime.optional(),
   // "Rescan this area" progress, kept on the trip rather than in the button's
   // own state (2026-08-16). Reported as "changing tab during a rescan breaks
   // the search": the search itself was fine — corridorStops is a live
