@@ -288,3 +288,73 @@ describe('runDetailDays', () => {
     )
   })
 })
+
+// Added 2026-08-17: "I want the option to decide how many days ahead it
+// should plan as a slider in trip setup." The lazy window and the eager one
+// have to be the same number, so neither the client nor this callable holds
+// its own copy — both read the trip's own setting.
+describe('runDetailDays — how far ahead is the trip\'s own setting', () => {
+  it('uses the default window when the caller names no count', async () => {
+    const { tripId, dayIds } = await tripWithDays('uidDetailWindowDefault', 6)
+    generateChunkDetailMock.mockResolvedValue(detailFor([0, 1, 2]))
+
+    const { runDetailDays } = await import('./detailDaysCallable.js')
+    const result = await runDetailDays(tripId, dayIds[0])
+
+    expect(result.detailed).toBe(3)
+  })
+
+  it('details as many days ahead as the traveler asked for', async () => {
+    const { tripId, dayIds } = await tripWithDays('uidDetailWindowWide', 10)
+    await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.detailWindowDays': 7 })
+    generateChunkDetailMock.mockResolvedValue(detailFor([0, 1, 2, 3, 4, 5, 6]))
+
+    const { runDetailDays } = await import('./detailDaysCallable.js')
+    const result = await runDetailDays(tripId, dayIds[0])
+
+    expect(result.detailed).toBe(7)
+    const snap = await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .orderBy('index')
+      .get()
+    const statuses = snap.docs.map((doc) => (doc.data() as TripDay).detailStatus)
+    expect(statuses.filter((status) => status === 'ready')).toHaveLength(7)
+  })
+
+  it('honours a window of one — just the day being opened', async () => {
+    const { tripId, dayIds } = await tripWithDays('uidDetailWindowOne', 5)
+    await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.detailWindowDays': 1 })
+    generateChunkDetailMock.mockResolvedValue(detailFor([0]))
+
+    const { runDetailDays } = await import('./detailDaysCallable.js')
+    const result = await runDetailDays(tripId, dayIds[0])
+
+    expect(result.detailed).toBe(1)
+  })
+
+  // The setting sizes paid work and arrives from a client write, so a doc
+  // edited by hand cannot make one tap detail sixty days.
+  it('clamps a stored window that is past the ceiling', async () => {
+    const { tripId, dayIds } = await tripWithDays('uidDetailWindowAbsurd', 20)
+    await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.detailWindowDays': 500 })
+    generateChunkDetailMock.mockResolvedValue(
+      detailFor(Array.from({ length: 14 }, (_, i) => i)),
+    )
+
+    const { runDetailDays } = await import('./detailDaysCallable.js')
+    const result = await runDetailDays(tripId, dayIds[0])
+
+    expect(result.detailed).toBe(14)
+  })
+})

@@ -1,6 +1,7 @@
 import { doc, updateDoc } from 'firebase/firestore'
 import type { PlanStatus, TripSettings } from '@rv/shared'
 import { db } from './firebase'
+import { NON_INVALIDATING_SETTINGS } from './detailWindow'
 
 /**
  * `currentStatus` decides whether this edit needs to invalidate anything:
@@ -19,7 +20,15 @@ export async function updateTripSettings(
   currentStatus: PlanStatus,
 ) {
   const updates: Record<string, unknown> = {}
-  if (currentStatus === 'ready') {
+  // And not every edit invalidates anything even then — see
+  // NON_INVALIDATING_SETTINGS. An edit touching only those must leave a
+  // finished plan finished, or moving a slider puts "Re-plan trip" in front
+  // of the traveler and asks them to pay for a regeneration that would
+  // change nothing they can see.
+  const invalidates = Object.keys(partial).some(
+    (key) => !NON_INVALIDATING_SETTINGS.has(key),
+  )
+  if (currentStatus === 'ready' && invalidates) {
     updates['planMeta.status'] = 'stale'
   }
   for (const [key, value] of Object.entries(partial)) {

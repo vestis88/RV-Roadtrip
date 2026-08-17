@@ -45,6 +45,11 @@ export const tripSettingsSchema = z.object({
   // that existed before this setting did has to keep validating — read it
   // through offGridToleranceOf(), never with a `?? 3` at the call site.
   offGridTolerance: z.number().int().nonnegative().optional(),
+  // How many days ahead get their activities and restaurants worked out —
+  // the rolling detail window. See DEFAULT_DETAIL_WINDOW_DAYS. Optional for
+  // the same reason as offGridTolerance, and read the same way, through
+  // detailWindowDaysOf().
+  detailWindowDays: z.number().int().positive().optional(),
   vehicle: vehicleSchema,
 })
 
@@ -67,6 +72,45 @@ export function offGridToleranceOf(settings: {
   offGridTolerance?: number
 }): number {
   return settings.offGridTolerance ?? DEFAULT_OFF_GRID_TOLERANCE
+}
+
+/**
+ * How many days ahead are worked out in full — the rolling detail window.
+ *
+ * Three is what a traveler can usually act on: today, tomorrow, the day
+ * after. It is a default rather than a rule because the right answer is a
+ * matter of taste and of how the trip is being used — someone booking
+ * restaurants a week out wants a week, someone improvising wants tomorrow —
+ * so Trip Setup exposes it (2026-08-17, "I want the option to decide how
+ * many days ahead it should plan").
+ *
+ * The route is NOT affected: the whole trip is routed either way. This only
+ * decides how far ahead the activities and restaurants are resolved, which
+ * is the part that costs a Claude call and a run of Places lookups per day
+ * — and the part a replan throws away and pays for again.
+ */
+export const DEFAULT_DETAIL_WINDOW_DAYS = 3
+
+/**
+ * The ceiling on that window.
+ *
+ * Two weeks, not "the whole trip". Past this the window stops being a window
+ * and becomes the thing the split was built to stop: a sixty-day trip
+ * detailing sixty days up front, and re-detailing the whole remainder on
+ * every replan. It is also the bound the detailDays callable validates
+ * against, so a hand-written request cannot ask for a hundred days.
+ */
+export const MAX_DETAIL_WINDOW_DAYS = 14
+
+/**
+ * The one place the default and the bounds are applied. Clamped rather than
+ * trusted: this number sizes paid work, and it arrives from a client write.
+ */
+export function detailWindowDaysOf(settings: {
+  detailWindowDays?: number
+}): number {
+  const chosen = settings.detailWindowDays ?? DEFAULT_DETAIL_WINDOW_DAYS
+  return Math.min(Math.max(Math.round(chosen), 1), MAX_DETAIL_WINDOW_DAYS)
 }
 
 /**

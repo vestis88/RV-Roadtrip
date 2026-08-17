@@ -6,6 +6,7 @@ import {
 import { onDocumentCreated } from 'firebase-functions/firestore'
 import {
   activitySchema,
+  detailWindowDaysOf,
   haversineDistanceKm,
   restaurantSchema,
   tripDaySchema,
@@ -39,7 +40,6 @@ import {
   planTrip,
   type PlanTripProgress,
 } from './prompts/planTrip.js'
-import { DETAIL_WINDOW_DAYS } from './dayDetail.js'
 import type { RegionHighlightsResponse } from './prompts/planTripSchema.js'
 import {
   buildRegionHighlightsFromCandidates,
@@ -190,7 +190,10 @@ export async function generateRealPlan(
     // see dayDetail.ts and detailDaysCallable.ts. On a sixty-day trip that
     // is three days of detail instead of sixty, and the replan that follows
     // costs three again rather than the entire remainder.
-    const detailDayIndexes = eagerDetailIndexes(DETAIL_WINDOW_DAYS)
+    // How far ahead, from the trip's own setting — see detailWindowDaysOf.
+    const detailDayIndexes = eagerDetailIndexes(
+      detailWindowDaysOf(trip.settings),
+    )
     skeleton = highlights
       ? await generateSkeletonFromHighlights({
           settings: trip.settings,

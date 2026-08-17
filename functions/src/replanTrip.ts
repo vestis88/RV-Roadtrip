@@ -1,6 +1,7 @@
 import { FieldValue, getFirestore, type DocumentReference } from 'firebase-admin/firestore'
 import {
   activitySchema,
+  detailWindowDaysOf,
   restaurantSchema,
   tripDaySchema,
   type CorridorStop,
@@ -13,7 +14,6 @@ import {
 import { pacingWarnings, validatePacing } from './pacingValidator.js'
 import { describePlanTripProgress, resolveSkeletonDays } from './planPipeline.js'
 import { eagerDetailIndexes, planTrip } from './prompts/planTrip.js'
-import { DETAIL_WINDOW_DAYS } from './dayDetail.js'
 import { buildCorridorStopWrites } from './corridorStops.js'
 import { planAliveFields } from './planLock.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
@@ -124,7 +124,7 @@ export async function runReplan(
     // sixty-day trip regenerates fifty-five days of activities and
     // restaurants. The days past the window have no detail to throw away and
     // get none back — they are worked out when they are opened.
-    detailDayIndexes: eagerDetailIndexes(DETAIL_WINDOW_DAYS),
+    detailDayIndexes: eagerDetailIndexes(detailWindowDaysOf(trip.settings)),
     onProgress: (progress) => {
       tripRef
         .update({

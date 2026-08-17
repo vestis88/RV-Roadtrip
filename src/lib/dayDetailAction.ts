@@ -16,8 +16,11 @@ import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 const STALE_HEARTBEAT_MS = 75_000
 
 /**
- * Asks the server to work out this day's activities and restaurants, and the
- * two days after it — see functions/src/detailDaysCallable.ts.
+ * Asks the server to work out this day's activities and restaurants, and as
+ * many days after it as the trip's "Plan ahead" setting says — see
+ * functions/src/detailDaysCallable.ts. No count is sent, deliberately: the
+ * server reads the setting off the trip, so this window and the one
+ * generation fills in up front cannot drift apart.
  */
 export async function detailDaysFrom(
   tripId: string,

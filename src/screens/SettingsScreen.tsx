@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { httpsCallable } from 'firebase/functions'
-import { offGridToleranceOf } from '@rv/shared'
+import {
+  MAX_DETAIL_WINDOW_DAYS,
+  detailWindowDaysOf,
+  offGridToleranceOf,
+} from '@rv/shared'
 import type { Traveler, Trip, TripSettings } from '@rv/shared'
 import { functions } from '../lib/firebase'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
@@ -27,6 +31,7 @@ import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { updateTripSettings } from '../lib/updateTripSettings'
 import { hasRoute } from '../lib/validateRoute'
+import { describeDetailWindow } from '../lib/detailWindow'
 
 interface SettingsScreenProps {
   tripId: string
@@ -120,6 +125,10 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // Trips that predate the setting have nothing stored, so the slider reads
   // the default through the one helper that applies it rather than showing 0.
   const offGridTolerance = offGridToleranceOf(settings)
+  // Same reason, same shape: read through the helper that applies the
+  // default and the bounds, so the slider and the server agree on what an
+  // unset value means.
+  const detailWindowDays = detailWindowDaysOf(settings)
 
   function commit(partial: Partial<TripSettings>) {
     setDirtyKeys((prev) => {
@@ -471,6 +480,36 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
               commit({ maxDriveHoursPerDay: Number(event.target.value) })
             }
           />
+        </label>
+
+        {/* How far ahead the days are filled in. The whole trip is routed
+          * either way — this is only the activities and restaurants, which
+          * are what cost a Claude call and a run of Places lookups per day
+          * (see "route eagerly, detail lazily"). Exposed because three was
+          * a guess about how people use this: someone booking restaurants a
+          * week out and someone improvising tomorrow want different numbers,
+          * and neither is wrong. */}
+        <label className="block">
+          <span className="field-label">
+            Plan ahead: {detailWindowDays} day{detailWindowDays === 1 ? '' : 's'}
+          </span>
+          <input
+            type="range"
+            min={1}
+            max={MAX_DETAIL_WINDOW_DAYS}
+            data-testid="detail-window-input"
+            className="w-full accent-orange-600"
+            value={detailWindowDays}
+            onChange={(event) =>
+              commit({ detailWindowDays: Number(event.target.value) })
+            }
+          />
+          <span
+            className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400"
+            data-testid="detail-window-hint"
+          >
+            {describeDetailWindow(detailWindowDays)}
+          </span>
         </label>
       </div>
 

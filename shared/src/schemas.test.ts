@@ -3,6 +3,9 @@ import {
   DEFAULT_OFF_GRID_TOLERANCE,
   activitySchema,
   countryGuideSectionSchema,
+  MAX_DETAIL_WINDOW_DAYS,
+  DEFAULT_DETAIL_WINDOW_DAYS,
+  detailWindowDaysOf,
   offGridToleranceOf,
   logEntrySchema,
   planRequestSchema,
@@ -114,5 +117,41 @@ describe('schema rejects invalid data', () => {
         },
       }),
     ).toThrow()
+  })
+})
+
+// Added 2026-08-17: "I want the option to decide how many days ahead it
+// should plan as a slider in trip setup." The number sizes paid work — a
+// Claude call and a run of Places lookups per day — and it arrives from a
+// client write, so it is clamped rather than trusted.
+describe('detailWindowDaysOf', () => {
+  it('defaults for a trip that predates the setting', () => {
+    expect(detailWindowDaysOf({})).toBe(DEFAULT_DETAIL_WINDOW_DAYS)
+  })
+
+  it('takes the traveler at their word inside the range', () => {
+    expect(detailWindowDaysOf({ detailWindowDays: 1 })).toBe(1)
+    expect(detailWindowDaysOf({ detailWindowDays: 10 })).toBe(10)
+    expect(detailWindowDaysOf({ detailWindowDays: MAX_DETAIL_WINDOW_DAYS })).toBe(
+      MAX_DETAIL_WINDOW_DAYS,
+    )
+  })
+
+  // Past the ceiling the window stops being a window and becomes the thing
+  // the eager/lazy split was built to stop.
+  it('clamps a value that would detail the whole trip up front', () => {
+    expect(detailWindowDaysOf({ detailWindowDays: 60 })).toBe(
+      MAX_DETAIL_WINDOW_DAYS,
+    )
+  })
+
+  // Zero days of detail is not a setting, it is a plan with nothing in it.
+  it('never returns less than a day', () => {
+    expect(detailWindowDaysOf({ detailWindowDays: 0 })).toBe(1)
+    expect(detailWindowDaysOf({ detailWindowDays: -5 })).toBe(1)
+  })
+
+  it('rounds a fractional value rather than passing it to a slice', () => {
+    expect(detailWindowDaysOf({ detailWindowDays: 3.6 })).toBe(4)
   })
 })

@@ -235,6 +235,45 @@ test('editing settings on a trip with a ready plan marks it stale', async ({
   await expect(page.getByTestId('plan-status')).toHaveText('stale')
 })
 
+// Added 2026-08-17: "I want the option to decide how many days ahead it
+// should plan as a slider in trip setup."
+test('the "Plan ahead" slider persists, and does not send a finished plan stale', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  // A trip that predates the setting shows the default rather than a blank
+  // or a zero.
+  await expect(page.getByTestId('detail-window-input')).toHaveValue('3')
+  await expect(page.getByTestId('detail-window-hint')).toContainText('whole trip')
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({ 'planMeta.status': 'ready' })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  await setRange(page.getByTestId('detail-window-input'), '7')
+
+  // The point of the exclusion: every other setting marks a ready plan
+  // stale, and this one must not — the days it changes are filled in when
+  // they are opened, so "Re-plan trip" would be asking the traveler to pay
+  // for something they already have.
+  await expect(page.getByTestId('detail-window-input')).toHaveValue('7')
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  await page.waitForTimeout(500)
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('detail-window-input')).toHaveValue('7')
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+})
+
 test('Trip Setup offers both "Generate overview" and "Generate full plan" for an idle trip', async ({
   page,
 }) => {

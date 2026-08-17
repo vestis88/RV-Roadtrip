@@ -436,6 +436,67 @@ describe('replanTrip', () => {
     )
   })
 
+  // Added 2026-08-17 with Trip Setup's "Plan ahead" slider. A replan is the
+  // path the eager/lazy split pays off on most — it re-details whatever is
+  // in the window and nothing beyond — so the window it uses has to be the
+  // traveler's own number, not a constant compiled in next to it.
+  it('details as many days ahead as the trip asks for, on a replan too', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidReplanDetailWindow')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.update({
+      'planMeta.status': 'ready',
+      'settings.detailWindowDays': 6,
+    })
+
+    planTripMock.mockReset().mockResolvedValue({ days: [{ index: 0 }] })
+    resolveSkeletonDaysMock
+      .mockReset()
+      .mockResolvedValue([fixtureGeneratedDay(0, '2026-07-12', 'REPLANNED')])
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.1, lng: 10.5 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-14',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+    })
+
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detailDayIndexes: [0, 1, 2, 3, 4, 5],
+      }),
+    )
+  })
+
+  it('falls back to the default window for a trip that predates the setting', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidReplanDetailWindowDefault')
+    await db
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'planMeta.status': 'ready' })
+
+    planTripMock.mockReset().mockResolvedValue({ days: [{ index: 0 }] })
+    resolveSkeletonDaysMock
+      .mockReset()
+      .mockResolvedValue([fixtureGeneratedDay(0, '2026-07-12', 'REPLANNED')])
+
+    const { runReplan } = await import('./replanTrip.js')
+    await runReplan(tripId, {
+      currentLocation: { lat: 61.1, lng: 10.5 },
+      today: '2026-07-12',
+      completedRefPaths: [],
+      remainingEndDate: '2026-07-14',
+      remainingEndPoint: { name: 'Dombas', lat: 62.07, lng: 9.13 },
+    })
+
+    expect(planTripMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detailDayIndexes: [0, 1, 2] }),
+    )
+  })
+
   it('preserves a corridor stop linked only to a past day, and rematerializes one linked to a regenerated future day', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidCorridorReplan')

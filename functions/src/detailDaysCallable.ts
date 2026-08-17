@@ -6,7 +6,9 @@ import {
 } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import {
+  MAX_DETAIL_WINDOW_DAYS,
   activitySchema,
+  detailWindowDaysOf,
   restaurantSchema,
   type Trip,
   type TripDay,
@@ -17,11 +19,7 @@ import { describeCause } from './describeCause.js'
 import { outlineFromDays } from './dayOutline.js'
 import { commitInChunks, type PendingWrite } from './firestoreBatch.js'
 import { googlePlacesApiKey } from './placesApi.js'
-import {
-  DETAIL_WINDOW_DAYS,
-  dayActivityAnchor,
-  enrichDayDetail,
-} from './dayDetail.js'
+import { dayActivityAnchor, enrichDayDetail } from './dayDetail.js'
 import { claudeApiKey, generateChunkDetail } from './prompts/planTrip.js'
 
 /**
@@ -65,7 +63,12 @@ interface ClaimedDay {
 export async function runDetailDays(
   tripId: string,
   fromDayId: string,
-  count: number,
+  // Omitted by every ordinary caller: how far ahead to work out is the
+  // trip's own setting (Trip Setup's "Plan ahead" slider), and reading it
+  // here rather than at the call site is what keeps the eager window and
+  // this rolling one the same number. Passed explicitly only where a caller
+  // genuinely means a specific count.
+  count?: number,
 ): Promise<{ detailed: number; alreadyReady: number }> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
@@ -91,7 +94,7 @@ export async function runDetailDays(
   // days actually waiting are claimed. A day already detailed is left alone
   // rather than re-detailed, which is what makes opening day 4 after day 3
   // cost one day rather than three.
-  const window = all.slice(startAt, startAt + count)
+  const window = all.slice(startAt, startAt + (count ?? detailWindowDaysOf(trip.settings)))
   const pending = window.filter(
     (entry) => (entry.day.detailStatus ?? 'ready') === 'pending',
   )
@@ -311,19 +314,24 @@ export const detailDays = onCall(
     requireAccess(request.auth)
     const tripId = request.data?.tripId
     const fromDayId = request.data?.fromDayId
-    const count = request.data?.count ?? DETAIL_WINDOW_DAYS
+    // Absent means "whatever this trip's own window is" — resolved inside
+    // runDetailDays, which has the trip. Validated against the hard ceiling
+    // rather than against that setting, because this is the bound that stops
+    // a hand-written request asking for a hundred days of paid work.
+    const count = request.data?.count
     if (typeof tripId !== 'string' || typeof fromDayId !== 'string') {
       throw new HttpsError('invalid-argument', 'tripId and fromDayId are required')
     }
     if (
-      typeof count !== 'number' ||
-      !Number.isInteger(count) ||
-      count < 1 ||
-      count > DETAIL_WINDOW_DAYS
+      count !== undefined &&
+      (typeof count !== 'number' ||
+        !Number.isInteger(count) ||
+        count < 1 ||
+        count > MAX_DETAIL_WINDOW_DAYS)
     ) {
       throw new HttpsError(
         'invalid-argument',
-        `count must be a whole number between 1 and ${DETAIL_WINDOW_DAYS}`,
+        `count must be a whole number between 1 and ${MAX_DETAIL_WINDOW_DAYS}`,
       )
     }
     await requireTripMember(tripId, request.auth.uid)
