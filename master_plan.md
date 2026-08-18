@@ -1277,7 +1277,65 @@ could not be verified from the build environment (egress to
 developers.google.com is blocked), and a number written down from memory is
 worse than a pointer to the Cloud Console billing report grouped by SKU.
 
+Two follow-ups on 2026-08-18.
+
+**Photos load eagerly** ("So just implement full photo loading"). `lazy` was
+the cautious default while the per-request cost was unverified; the cost is
+the owner's call and they made it. `decoding="async"` stays, so fetching the
+images never blocks the list itself from painting. The comment that justified
+the caution was also corrected — it claimed the curation search "already paid
+for" the photo, and it had not: the search returns the photo REFERENCE, and
+the bytes are a separate Place Photo request the browser makes per image.
+
+**"Could not research that right now — please try again."** — the same
+pattern, on the third screen, reported from the Countries tab with Germany's
+four sections unresearched. Fixed the same way, and this time the shared part
+was extracted rather than copied a third time:
+
+- `src/lib/callableError.ts` — `serverAuthoredMessage` (the codes our own
+  callables raise, minus the ones whose "message" is just the code repeated
+  back) and `isDeadlineExceeded`. The explore search now reads from it too.
+- `deadline-exceeded` gets advice that can work. Researching runs one
+  web-search-backed Claude call per section, ALL AT ONCE, against the
+  function's own 180s ceiling — so "Research 4 missing" is four of them racing
+  one clock, and pressing it again asks for the identical race. The message
+  names the lever: one section at a time.
+- Per-section failures now carry their cause out.
+  `researchCountrySectionsForTrip` caught each one, logged it, and returned
+  the bare section id, so "Could not research 4 of 4" was the most that could
+  ever be said. `failureReasons` is returned alongside `failed` (added rather
+  than replacing it, since a PWA can be running an older client), and the
+  screen names one distinct cause or summarises several.
+- `generateCountrySection`'s retry loop logged nothing at all — a failed first
+  attempt was invisible, so even the server logs showed only whichever error
+  came last. It says which attempt hit what now, which matters on the one path
+  whose answers can contain "the search tool was unavailable".
+
+**A verification defect worth recording**, found while checking the above.
+Several "e2e green" claims this week were made by running
+`npm run test:e2e 2>&1 | tail -N` and reading the exit status. A pipeline's
+exit status is the LAST command's — `tail` always succeeds — so that check
+could only ever report success, whatever the suite did. Run the suite
+redirected to a file and read `$?`, or check the reporter's own summary line;
+never pipe it into `tail` and trust the code. (The suite was in fact fine:
+119 passing, plus load-flakiness in `corridor.spec.ts:22` and
+`share-view.spec.ts:32`, both of which pass when run alone.)
+
+Two e2e notes that follow from the same investigation. The sandbox's Chromium
+build does not match what the pinned Playwright expects, so the suite needs
+`PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium` — the config already has
+that hook. And a marker's colour cannot be asserted in e2e at all:
+`<AdvancedMarker>` only mounts inside a live Google map, and
+`VITE_GOOGLE_MAPS_API_KEY` is a CI secret, so such a test passes or fails by
+environment rather than by behaviour. Pin colour is unit-tested
+(`MarkerBadge.test.tsx`); e2e asserts the legend, which renders either way.
+
 Still open, deliberately:
+- Why the web search tool was unavailable for that run is NOT diagnosed. The
+  evidence is model-authored text inside a stored section ("could not be
+  freshly verified via web search this session"), not an app log, and this
+  environment cannot reach the logs. The instrumentation above is what makes
+  the next occurrence answerable rather than another guess.
 - The Maps/Places API key still has no HTTP-referrer restriction. Every photo
   URL on a card carries it, on the day-by-day plan and now on the explore
   list. Owner action, outside this repo.

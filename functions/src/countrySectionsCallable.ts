@@ -1,5 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
+import { describeCause } from './describeCause.js'
 import {
   DEFAULT_COUNTRY_BRIEF_SECTIONS,
   countryGuideSectionDocId,
@@ -62,7 +63,11 @@ export async function researchCountrySectionsForTrip(input: {
   countryCode: string
   countryName: string
   sectionIds: string[]
-}): Promise<{ researched: string[]; failed: string[] }> {
+}): Promise<{
+  researched: string[]
+  failed: string[]
+  failureReasons: Record<string, string>
+}> {
   const db = getFirestore()
   const tripSnap = await db.collection('trips').doc(input.tripId).get()
   const settings = tripSnap.data()?.settings as TripSettings | undefined
@@ -81,6 +86,12 @@ export async function researchCountrySectionsForTrip(input: {
 
   const researched: string[] = []
   const failed: string[] = []
+  // Why each one failed, keyed by section id. Added 2026-08-18: the cause was
+  // logged here and then thrown away, so "Could not research 4 of 4" was the
+  // most the traveler could ever be told, and the section list said only
+  // "Not researched for this country yet" — which describes a country nobody
+  // has asked about, not one that was asked about and could not answer.
+  const failureReasons: Record<string, string> = {}
 
   await Promise.all(
     requested.map(async (section) => {
@@ -114,11 +125,12 @@ export async function researchCountrySectionsForTrip(input: {
       } catch (error) {
         console.error('Country section research failed', section.id, error)
         failed.push(section.id)
+        failureReasons[section.id] = describeCause(error)
       }
     }),
   )
 
-  return { researched, failed }
+  return { researched, failed, failureReasons }
 }
 
 export const researchCountrySections = onCall(

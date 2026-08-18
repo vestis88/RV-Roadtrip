@@ -54,7 +54,11 @@ describe('researchCountrySectionsForTrip', () => {
       sectionIds: ['camping-rules'],
     })
 
-    expect(result).toEqual({ researched: ['camping-rules'], failed: [] })
+    expect(result).toEqual({
+      researched: ['camping-rules'],
+      failed: [],
+      failureReasons: {},
+    })
     // The whole point: one section asked for is one Claude call made, not
     // six. This is what "add one item without re-running the rest" means.
     expect(generateCountrySectionMock).toHaveBeenCalledTimes(1)
@@ -182,6 +186,10 @@ describe('researchCountrySectionsForTrip', () => {
 
     expect(result.researched).toEqual(['camping-rules'])
     expect(result.failed).toEqual(['lpg-info'])
+    // And WHY, which used to be logged here and then dropped — leaving the
+    // screen able to count failures and say nothing else about them.
+    expect(result.failureReasons['lpg-info']).toContain('web search exploded')
+    expect(result.failureReasons).not.toHaveProperty('camping-rules')
     const stored = await db
       .collection('countryGuideSections')
       .where('countryCode', '==', 'DK')

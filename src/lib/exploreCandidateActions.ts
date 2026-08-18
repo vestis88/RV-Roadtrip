@@ -8,6 +8,7 @@ import type {
   Trip,
 } from '@rv/shared'
 import { db, functions } from './firebase'
+import { isDeadlineExceeded, serverAuthoredMessage } from './callableError'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 
@@ -110,15 +111,6 @@ const SEARCH_TIMEOUT_MESSAGE =
   'That search took too long to finish. Try a smaller area, or describe what ' +
   'you are looking for so the search has less ground to cover.'
 
-const SERVER_AUTHORED_CODES = new Set([
-  'functions/failed-precondition',
-  'functions/internal',
-  'functions/invalid-argument',
-  'functions/not-found',
-  'functions/permission-denied',
-  'functions/unauthenticated',
-])
-
 /**
  * Prefers the server's own account of what went wrong (2026-08-12).
  *
@@ -136,27 +128,10 @@ const SERVER_AUTHORED_CODES = new Set([
  * traveler can act on — both fall back to the generic line.
  */
 export function describeExploreHighlightsError(error: unknown): string {
-  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
-  if (code === 'functions/deadline-exceeded') return SEARCH_TIMEOUT_MESSAGE
-  if (typeof code !== 'string' || !SERVER_AUTHORED_CODES.has(code)) {
-    return GENERIC_STOPS_ERROR
-  }
-  // A message that is just the code repeated back says nothing a traveler
-  // can use — and it reached the screen anyway, as the single word
-  // "internal", because this only rejected the exact uppercase spelling.
-  // The Firebase client emits either casing depending on the path, so the
-  // comparison is case-insensitive and covers the code itself, not one
-  // spelling of it.
-  const named = typeof message === 'string' ? message.trim() : ''
-  const codeWord = code.replace(/^functions\//, '')
-  if (
-    named === '' ||
-    named.toLowerCase() === codeWord.toLowerCase() ||
-    named.toLowerCase() === code.toLowerCase()
-  ) {
-    return GENERIC_STOPS_ERROR
-  }
-  return named
+  if (isDeadlineExceeded(error)) return SEARCH_TIMEOUT_MESSAGE
+  // The code/message rules moved to callableError.ts once a third screen
+  // needed them; the fallback line stays here because it is this search's.
+  return serverAuthoredMessage(error) ?? GENERIC_STOPS_ERROR
 }
 
 /**

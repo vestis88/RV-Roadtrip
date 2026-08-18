@@ -136,6 +136,16 @@ export async function generateCountrySection(input: {
       })
       return parseCountrySectionOutput(textFromResponse(response))
     } catch (error) {
+      // Logged, which it was not. A silent retry means the logs show only
+      // whichever error happened LAST, with no sign that the call was made
+      // twice or that the first attempt failed differently — and the country
+      // research path is the one where "the search tool was unavailable"
+      // shows up in the answer text itself, so knowing which attempt hit
+      // what is the whole diagnosis.
+      console.warn(
+        `Country section "${input.section.id}" for ${input.countryCode} failed (attempt ${attempt + 1} of ${MAX_ATTEMPTS})`,
+        error,
+      )
       lastError = error
     }
   }

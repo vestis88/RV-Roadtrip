@@ -8,6 +8,8 @@ import {
   type ResolvedSection,
 } from '../hooks/useCountryGuideSections'
 import {
+  describePartialResearchFailure,
+  describeResearchError,
   researchCountrySections,
   saveCountryBrief,
   sectionIdFromTitle,
@@ -143,13 +145,25 @@ export function CountryDetailScreen() {
         sectionIds,
       )
       if (result.failed.length > 0) {
+        // Names what actually went wrong, not just how many. The server has
+        // always known — it caught each section's error, logged it, and
+        // returned the bare id.
         setError(
-          `Could not research ${result.failed.length} of ${sectionIds.length} — the rest are saved.`,
+          describePartialResearchFailure(
+            result.failed,
+            sectionIds.length,
+            result.failureReasons,
+            (id) =>
+              resolved.find((entry) => entry.section.id === id)?.section.title ??
+              id,
+          ),
         )
       }
     } catch (err) {
       console.error('researchCountrySections failed', err)
-      setError('Could not research that right now — please try again.')
+      // The server's own words when it wrote any, and real advice for the
+      // one failure a traveler can act on — see describeResearchError.
+      setError(describeResearchError(err))
     } finally {
       setBusyIds((prev) => prev.filter((id) => !sectionIds.includes(id)))
     }

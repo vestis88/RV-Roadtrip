@@ -130,21 +130,24 @@ export function ExploreCandidateCard({
         * the row; here it would just be a grey band on every stop Places had
         * no photo for.
         *
-        * `loading="lazy"` is not decoration. The search that curated this
-        * stop returned only the photo's REFERENCE; the bytes come from a
-        * separate Place Photo request that the browser makes when this <img>
-        * is displayed, on the project's own key. A curated corridor is
-        * routinely twenty-five cards long, so only the ones actually
-        * scrolled to should make one. The URL carries the key in its query
-        * string too — see the note on "Photos & details" below, which is why
-        * this card had no image at all until it was asked for. That key
-        * needs its HTTP-referrer restriction set, which is equally true of
-        * the day-by-day plan and has been since PlaceCard existed. */}
+        * Loaded eagerly, decided rather than defaulted (2026-08-18: "So just
+        * implement full photo loading"). The bytes are a separate Place
+        * Photo request the browser makes per image, on the project's own
+        * key, so lazy loading was the cautious default while the cost was
+        * unknown — but it also means a scrolling traveler watches pictures
+        * arrive a beat after the card, which is the moment they are
+        * comparing places. Whole list up front, with `decoding="async"` so
+        * fetching them never blocks the list itself from painting.
+        *
+        * The URL carries the key in its query string — see the note on
+        * "Photos & details" below. That key needs its HTTP-referrer
+        * restriction set, which is equally true of the day-by-day plan and
+        * has been since PlaceCard existed. */}
       {stop.photoUrl && (
         <img
           src={stop.photoUrl}
           alt=""
-          loading="lazy"
+          decoding="async"
           data-testid={`explore-candidate-photo-${stop.id}`}
           className="-mx-3 -mt-3 mb-2 h-28 w-[calc(100%+1.5rem)] max-w-none object-cover"
         />
