@@ -118,6 +118,34 @@ export function ExploreCandidateCard({
             : ''
       }`}
     >
+      {/* Google's own photo of the verified listing (2026-08-17, requested:
+        * "Let's get a picture similar to activities to the overview plan as
+        * well"). Full-bleed at the top of the card, the way PlaceCard draws
+        * one for every activity and restaurant in the day-by-day plan — this
+        * is the screen where the traveler decides whether a place is worth
+        * driving hours for, and it was the one place with nothing to look at.
+        *
+        * No placeholder when there is none. PlaceCard shows a camera glyph
+        * because its cards sit in a grid where a missing image would break
+        * the row; here it would just be a grey band on every stop Places had
+        * no photo for.
+        *
+        * `loading="lazy"` is not decoration: Places photo media is billed per
+        * load, and a curated corridor is routinely twenty-five cards long, so
+        * only the ones actually scrolled to should cost anything. The media
+        * URL also carries the API key — see the note on "Photos & details"
+        * below, which is why this card had no image at all until it was
+        * asked for. That key needs its HTTP-referrer restriction set, which
+        * is true of the day-by-day plan today as well. */}
+      {stop.photoUrl && (
+        <img
+          src={stop.photoUrl}
+          alt=""
+          loading="lazy"
+          data-testid={`explore-candidate-photo-${stop.id}`}
+          className="-mx-3 -mt-3 mb-2 h-28 w-[calc(100%+1.5rem)] max-w-none object-cover"
+        />
+      )}
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="font-semibold text-neutral-900 dark:text-white">
@@ -235,14 +263,14 @@ export function ExploreCandidateCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          {/* Photos, reviews and opening hours, without this app paying to
-            * mirror any of them: Places photo media is billed per load and
-            * puts the API key in a scrapeable <img src>, whereas a link
-            * costs nothing and lands the traveler somewhere strictly richer
-            * than a thumbnail. Which link is best depends on what the
-            * stop carries — see placeDetailsUrl; it used to be the
-            * coordinate unconditionally, which reached none of the photos
-            * or details this link promises. */}
+          {/* Reviews, opening hours and the REST of the photos. The card
+            * now shows one image (above), which was asked for and is worth
+            * the per-load cost; this link is still what reaches everything
+            * a thumbnail cannot — every photo, the reviews, the hours —
+            * without this app mirroring any of it. Which link is best
+            * depends on what the stop carries — see placeDetailsUrl; it
+            * used to be the coordinate unconditionally, which reached none
+            * of the photos or details this link promises. */}
           <a
             href={placeDetailsUrl(stop)}
             target="_blank"

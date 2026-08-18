@@ -398,3 +398,98 @@ describe('lockedRouteOrder', () => {
     expect(lockedRouteOrder([])).toEqual([])
   })
 })
+
+// Requested 2026-08-17: "Let's get a picture similar to activities to the
+// overview plan as well." The photo was never missing from the data — the
+// search that verifies a sight already asks for places.photos, and
+// verifyPlaceLocation was dropping it, the same way it used to drop the name
+// and the listing URL.
+describe('buildExploreCandidateWrites — the verified listing photo', () => {
+  it('writes the photo through to the stop', () => {
+    const tripRef = getFirestore().collection('trips').doc('tripPhoto')
+    const merge = buildExploreCandidateWrites(
+      tripRef,
+      {
+        regions: [
+          {
+            region: 'Småland',
+            country: 'SE',
+            reasoning: 'r',
+            candidateStops: [
+              {
+                sight: 'Järvsö Bergscykelpark',
+                town: 'Järvsö',
+                country: 'SE',
+                why: 'w',
+                priority: 'must-see',
+                lat: 61.7,
+                lng: 16.1,
+                photoUrl: 'https://places.googleapis.com/v1/photo/media?key=k',
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    )
+
+    const sets = merge.writes.filter((w) => w.op === 'set')
+    expect(sets).toHaveLength(1)
+    expect(sets[0].data).toMatchObject({
+      photoUrl: 'https://places.googleapis.com/v1/photo/media?key=k',
+    })
+  })
+
+  // Absent, not empty: a listing with no photo, a hand-dropped pin, and
+  // every stop curated before this existed all have none, and the card draws
+  // nothing rather than a grey band.
+  it('writes no photo field at all when the listing had none', () => {
+    const tripRef = getFirestore().collection('trips').doc('tripNoPhoto')
+    const merge = buildExploreCandidateWrites(
+      tripRef,
+      {
+        regions: [
+          {
+            region: 'Småland',
+            country: 'SE',
+            reasoning: 'r',
+            candidateStops: [
+              {
+                sight: 'A trailhead',
+                town: 'Eksjö',
+                country: 'SE',
+                why: 'w',
+                priority: 'must-see',
+                lat: 57.6,
+                lng: 14.9,
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    )
+
+    const sets = merge.writes.filter((w) => w.op === 'set')
+    expect(sets[0].data).not.toHaveProperty('photoUrl')
+  })
+
+  // Committing explore mode to a real plan rebuilds the highlights from the
+  // stored stops — the photo has to survive that round trip, or a re-run of
+  // curation would look like it had lost every picture.
+  it('keeps the photo through the reverse direction', () => {
+    const regions = buildRegionHighlightsFromCandidates([
+      {
+        name: 'Järvsö Bergscykelpark',
+        lat: 61.7,
+        lng: 16.1,
+        country: 'SE',
+        photoUrl: 'https://places.googleapis.com/v1/photo/media?key=k',
+      },
+    ])
+
+    expect(regions.regions[0].candidateStops[0]).toMatchObject({
+      photoUrl: 'https://places.googleapis.com/v1/photo/media?key=k',
+    })
+  })
+})

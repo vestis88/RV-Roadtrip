@@ -131,6 +131,8 @@ export interface RescanFind {
    * and a name Claude had given it is exactly what could not be trusted.
    */
   googleMapsUrl?: string
+  /** Google's own photo of that listing — see VerifiedPlace.photoUrl. */
+  photoUrl?: string
 }
 
 /**
@@ -323,6 +325,7 @@ export async function generateRescanCandidates(input: {
           lat: verified.lat,
           lng: verified.lng,
           ...(verified.googleMapsUrl ? { googleMapsUrl: verified.googleMapsUrl } : {}),
+          ...(verified.photoUrl ? { photoUrl: verified.photoUrl } : {}),
         }
       } catch (error) {
         lookupErrors.push(error)

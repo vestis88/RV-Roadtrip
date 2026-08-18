@@ -445,6 +445,7 @@ async function locateCandidateSight(
       lat: sight.lat,
       lng: sight.lng,
       ...(sight.googleMapsUrl ? { googleMapsUrl: sight.googleMapsUrl } : {}),
+      ...(sight.photoUrl ? { photoUrl: sight.photoUrl } : {}),
     }
   } catch (error) {
     lookupErrors.push(error)

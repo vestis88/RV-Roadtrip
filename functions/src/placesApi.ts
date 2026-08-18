@@ -931,6 +931,18 @@ export interface VerifiedPlace {
    * to the coordinate link, which is correct if bare.
    */
   googleMapsUrl?: string
+  /**
+   * Google's own photo of the listing, which this search already paid for —
+   * FIELD_MASK asks for places.photos and mapRawPlace builds the media URL,
+   * so every result carried one and this dropped it on the floor. The same
+   * shape of loss as googleMapsUrl above, and the same fix.
+   *
+   * A curated sight is a thing the traveler is deciding whether to drive
+   * hours for, and the day-by-day cards have had a photo on every activity
+   * and restaurant since they existed (PlaceCard). The candidate list — the
+   * screen where the deciding actually happens — had none.
+   */
+  photoUrl?: string
 }
 
 /**
@@ -994,6 +1006,7 @@ export async function verifyPlaceLocation(
         lat: match.lat,
         lng: match.lng,
         ...(match.googleMapsUrl ? { googleMapsUrl: match.googleMapsUrl } : {}),
+        ...(match.photoUrl ? { photoUrl: match.photoUrl } : {}),
       }
     : null
 }

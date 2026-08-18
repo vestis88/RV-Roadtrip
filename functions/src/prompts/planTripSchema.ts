@@ -137,6 +137,10 @@ export const regionHighlightCandidateSchema = z.object({
   // from here onto the corridor stop so the card's link opens the place
   // rather than a bare pin at its coordinates.
   googleMapsUrl: z.string().optional(),
+  // Google's own photo of the verified listing. Stamped on server-side from
+  // the same search that confirmed the place — never produced by the
+  // highlights call, which has no way to know one.
+  photoUrl: z.string().optional(),
   source: z.enum(['curated', 'search']).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),

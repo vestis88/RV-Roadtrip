@@ -28,6 +28,7 @@ async function seedCandidate(
     baseTown: string
     interest: string
     timeNeeded: 'couple-of-hours' | 'half-day' | 'full-day'
+    photoUrl: string
   }> = {},
 ) {
   await adminDb
@@ -51,6 +52,7 @@ async function seedCandidate(
       ...(overrides.baseTown ? { baseTown: overrides.baseTown } : {}),
       ...(overrides.interest ? { interest: overrides.interest } : {}),
       ...(overrides.timeNeeded ? { timeNeeded: overrides.timeNeeded } : {}),
+      ...(overrides.photoUrl ? { photoUrl: overrides.photoUrl } : {}),
     })
 }
 
@@ -319,6 +321,43 @@ test('marking a stop must-see does not put it in the route', async ({
   await expect(card).not.toHaveClass(/border-orange-600/)
   await card.click()
   await expect(card).toHaveClass(/border-orange-600/)
+})
+
+// Requested 2026-08-17: "Let's get a picture similar to activities to the
+// overview plan as well." The photo comes off the verified Places listing at
+// curation time and is stored on the stop, so this checks that a stop
+// carrying one draws it and a stop without one draws nothing rather than a
+// placeholder band.
+test('a candidate with a listing photo shows it, and one without shows no gap', async ({
+  page,
+}) => {
+  const tripId = await getTripId(page)
+  await seedCandidate(tripId, {
+    name: 'Otta',
+    rank: 0,
+    photoUrl: 'https://example.com/otta.jpg',
+  })
+  await seedCandidate(tripId, { name: 'Lillehammer', rank: 1 })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const ottaId = (await stops.where('name', '==', 'Otta').limit(1).get()).docs[0].id
+  const lillehammerId = (
+    await stops.where('name', '==', 'Lillehammer').limit(1).get()
+  ).docs[0].id
+
+  const photo = page.getByTestId(`explore-candidate-photo-${ottaId}`)
+  await expect(photo).toHaveAttribute('src', 'https://example.com/otta.jpg')
+  // Places photo media is billed per load and a corridor is routinely
+  // twenty-five cards long, so only what is scrolled to should cost
+  // anything.
+  await expect(photo).toHaveAttribute('loading', 'lazy')
+
+  await expect(
+    page.getByTestId(`explore-candidate-photo-${lillehammerId}`),
+  ).toHaveCount(0)
 })
 
 // Requested 2026-08-17: "Add color coding to pins of the suggestions...

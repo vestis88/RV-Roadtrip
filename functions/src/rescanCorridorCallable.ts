@@ -144,6 +144,10 @@ export async function runRescanCorridor(
           // Places — what makes "Photos & details" open the place rather
           // than a search for its name. See RescanFind.googleMapsUrl.
           ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
+          // And its photo, from the same verified listing — the card the
+          // traveler decides on shows one for every activity in the plan and
+          // had none here.
+          ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
           status: isExploring ? 'candidate' : 'proposed',
           linkedDayIds: [],
           ...(isExploring

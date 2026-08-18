@@ -590,6 +590,18 @@ export const corridorStopSchema = z.object({
   // reported. Absent for a hand-dropped pin or anything not verified, where
   // the coordinate link is the honest answer rather than a worse one.
   googleMapsUrl: z.string().optional(),
+  // Google's own photo of that listing (2026-08-17). The search that verified
+  // the place already returned it — FIELD_MASK asks for places.photos — and
+  // verifyPlaceLocation was discarding it, the same way it used to discard
+  // the name and the URL.
+  //
+  // Worth carrying because of where these cards sit: every activity and
+  // restaurant in the day-by-day plan has had a photo since PlaceCard
+  // existed, and the explore list — the screen where the traveler actually
+  // decides whether a place is worth driving hours for — had none. Absent
+  // for a hand-dropped pin, for a listing with no photo, and for every stop
+  // curated before this existed.
+  photoUrl: z.string().url().optional(),
 })
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per

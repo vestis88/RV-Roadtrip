@@ -143,6 +143,7 @@ export function buildExploreCandidateWrites(
           ...(candidate.googleMapsUrl
             ? { googleMapsUrl: candidate.googleMapsUrl }
             : {}),
+          ...(candidate.photoUrl ? { photoUrl: candidate.photoUrl } : {}),
         }),
       })
     }
@@ -160,6 +161,7 @@ interface CandidateLike {
   region?: string
   rank?: number
   baseTown?: string
+  photoUrl?: string
   interest?: string
   timeNeeded?: SightTimeNeeded
   status?: CorridorStopStatus
@@ -228,6 +230,7 @@ export function buildRegionHighlightsFromCandidates(
       ...(stop.timeNeeded ? { timeNeeded: stop.timeNeeded } : {}),
       lat: stop.lat,
       lng: stop.lng,
+      ...(stop.photoUrl ? { photoUrl: stop.photoUrl } : {}),
     })
   }
 

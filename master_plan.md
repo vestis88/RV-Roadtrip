@@ -1232,7 +1232,36 @@ in-my-route (blue) still win: a pin that stopped answering taps because it
 was green would be a worse map. A key sits under the map, because colour is
 only information once the reader is told what it means.
 
+Requested the same evening: "Let's get a picture similar to activities to the
+overview plan as well." The photo was never missing from the data. The text
+search that verifies a curated sight already asks for `places.photos`, and
+`mapRawPlace` already builds the media URL — `verifyPlaceLocation` was
+dropping it on the floor, exactly the way it used to drop the verified name
+and the listing URL. So it is carried through `VerifiedPlace` →
+`RegionHighlightCandidate` → `corridorStop.photoUrl` on both curation paths
+(highlights and rescan), and the reverse direction too, so committing to a
+full plan does not strip it back off.
+
+Drawn full-bleed at the top of the card, the way `PlaceCard` has drawn one
+for every activity and restaurant since the day-by-day plan existed — the
+explore list is where the traveler actually decides whether a place is worth
+driving hours for, and it was the one screen with nothing to look at. No
+placeholder where there is no photo: `PlaceCard` shows a camera glyph because
+its cards sit in a grid that a missing image would break, whereas here it
+would be a grey band on every unphotographed stop.
+
+This reverses a deliberate earlier choice, which said so in the card's own
+comment: "Places photo media is billed per load and puts the API key in a
+scrapeable `<img src>`, whereas a link costs nothing". Both halves are still
+true and neither is new — the day-by-day plan has shipped that exposure since
+PlaceCard existed. `loading="lazy"` keeps the per-load cost to cards actually
+scrolled to, which matters on a twenty-five stop corridor. The key's
+HTTP-referrer restriction is the real mitigation and remains outstanding.
+
 Still open, deliberately:
+- The Maps/Places API key still has no HTTP-referrer restriction. Every photo
+  URL on a card carries it, on the day-by-day plan and now on the explore
+  list. Owner action, outside this repo.
 - A failed free-camping rules lookup is planned as "not permitted". Correct
   and conservative, but the night cannot distinguish "illegal here" from "we
   could not check".
