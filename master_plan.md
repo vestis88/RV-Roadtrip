@@ -1311,6 +1311,54 @@ was extracted rather than copied a third time:
   came last. It says which attempt hit what now, which matters on the one path
   whose answers can contain "the search tool was unavailable".
 
+**2026-08-18, and a lesson about how a fix gets paid for.** Reported as "the
+descriptions for activities seems to have become quite generic". They had
+not: those cards were SUBSTITUTES. A proposed activity that fails Places
+verification is not shown as a gap — `enrichActivities` drops it and
+`backfillActivities` fills the slot with the best-rated thing of its kind
+nearby, flagged `substitute` and carrying the template blurb "A well-rated
+local hike." So a run of generic descriptions is what a run of failed
+verifications looks like from the outside.
+
+The extra failures were the previous day's name-matching fix. Tightening
+two-word names to "all of them" is what caught the go-kart track; tightening
+THREE-and-longer names to all-but-one went along with it for symmetry, and no
+reported failure ever asked for that. It cost real suggestions:
+
+| identifying words | before | the overshoot | now |
+|---|---|---|---|
+| 1 | 1 | 1 | 1 |
+| 2 | 1 | **2** | **2** |
+| 3 | 2 | 2 | 2 |
+| 4 | 2 | 3 | 2 |
+| 5 | 3 | 4 | 3 |
+
+Only the two-word row is still tighter than it was — the row the bug came
+through. The category-conflict check, which is what actually distinguishes a
+bike park from a go-kart track, was never the expensive half and is untouched.
+
+Two things came out of it that stand on their own:
+
+- **A substitute describes itself in Google's words** when Google has any.
+  `places.editorialSummary` is now in the field mask and becomes the blurb,
+  with the template only as a fallback. It is Google's line about the very
+  place being shown, so it carries none of the risk that inheriting the
+  proposal's blurb does (that is how a shopping centre came to be described
+  as "Charming lakeside café near the castle") — and it is the difference
+  between a card that reads like a suggestion and one that reads like filler.
+- **Dropped proposals are logged**, one line per day and per meal, naming
+  them. They were invisible: not a gap on the day, not a line in the log, so
+  how much of a plan was judgement and how much was fallback could not be
+  measured at all. That is why this arrived as a hunch about tone rather than
+  a number.
+
+Recorded as a known limitation rather than assumed away: a category
+translated into a compound ("Nature Reserve" against "Naturschutzgebiet") is
+still not matched, and loosening the count would not fix it — the place name
+is one hit out of three. `CATEGORY_GROUPS` handles categories that are their
+own word; compound translations are a bigger job, and getting them wrong
+reopens the hole.
+
 **A verification defect worth recording**, found while checking the above.
 Several "e2e green" claims this week were made by running
 `npm run test:e2e 2>&1 | tail -N` and reading the exit status. A pipeline's

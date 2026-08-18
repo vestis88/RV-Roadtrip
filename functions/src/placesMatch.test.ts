@@ -310,3 +310,49 @@ describe('nameLooksRight — the Nordic genitive -s', () => {
     expect(nameLooksRight('Aas Gaard', 'Aa Gaard')).toBe(false)
   })
 })
+
+// Reported 2026-08-18: "The descriptions for activities seems to have become
+// quite generic." They were substitutes — a proposal that fails verification
+// is not shown as a gap, it is replaced by the best-rated thing of its kind
+// nearby, carrying a template blurb and a "Top-rated nearby" chip. The
+// all-but-one threshold added the day before went with the two-word fix for
+// symmetry rather than because any failure asked for it, and it was pushing
+// legitimate suggestions into that fallback.
+describe('nameLooksRight — strict enough to catch the wrong place, no stricter', () => {
+  // The case the tightening was actually for. Unchanged.
+  it('still refuses a two-word name matched on its place name alone', () => {
+    expect(nameLooksRight('Bruzaholms MTB', 'Bruzaholms Gokart')).toBe(false)
+    expect(nameLooksRight('Åre Bike Park', 'Åre Skidområde')).toBe(false)
+  })
+
+  // Longer names are back to half, which is what they were before
+  // 2026-08-17. Five identifying words needed four yesterday and need three
+  // now, which is the difference between Places' shorter listing name being
+  // accepted and the slot falling through to a substitute.
+  it('accepts a longer name that Places lists more briefly', () => {
+    expect(
+      nameLooksRight('Wadden Sea National Park Visitor Centre', 'Wadden Sea Centre'),
+    ).toBe(true)
+  })
+
+  // A known limitation, asserted so it is recorded rather than assumed away:
+  // a category translated into a COMPOUND ("Nature Reserve" against German
+  // "Naturschutzgebiet") is still not matched. CATEGORY_GROUPS handles the
+  // cases where the category is its own word; teaching it compound
+  // translations is a bigger job than this fix, and getting it wrong reopens
+  // the go-kart hole. Loosening the count would not fix this either — the
+  // place name is one hit out of three.
+  it('does not yet match a category translated into a compound', () => {
+    expect(
+      nameLooksRight('Schellbruch Nature Reserve', 'Naturschutzgebiet Schellbruch'),
+    ).toBe(false)
+  })
+
+  // And the guard that actually caught the go-kart track is untouched, so
+  // loosening the count cannot reopen it.
+  it('keeps rejecting a different kind of place however long the name', () => {
+    expect(
+      nameLooksRight('Lübeck Bike Park Trails', 'Lübeck Golfklubb Anlage'),
+    ).toBe(false)
+  })
+})

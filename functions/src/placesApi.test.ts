@@ -187,6 +187,68 @@ describe('enrichActivities', () => {
     }
   })
 
+  /**
+   * Reported 2026-08-18: "The descriptions for activities seems to have
+   * become quite generic." They were substitutes, and "A well-rated local
+   * hike." is all a substitute could ever say. Google publishes a line about
+   * many of these places, and it is about the very place being shown — so it
+   * carries none of the risk that inheriting the proposal's blurb does, and
+   * it is the difference between a card that reads like a suggestion and one
+   * that reads like a filler.
+   */
+  it('lets a filler describe itself in Google’s words when it has them', async () => {
+    vi.stubGlobal(
+      'fetch',
+      fetchFillingFrom([
+        goodPlace({
+          editorialSummary: {
+            text: 'Coastal reserve with birdwatching hides and boardwalks.',
+          },
+        }),
+      ]),
+    )
+
+    const activities = await enrichActivities(
+      [
+        {
+          name: 'Kunstmuseet i Lillehammer',
+          town: 'Lillehammer',
+          category: 'museum',
+          kidFriendly: true,
+          blurb: 'Norwegian art in a Snøhetta-designed building.',
+        },
+      ],
+      NEAR,
+    )
+
+    const filler = activities[0]
+    expect(filler.substitute).toBe(true)
+    expect(filler.blurb).toBe(
+      'Coastal reserve with birdwatching hides and boardwalks.',
+    )
+    // Still never the proposal's own words.
+    expect(filler.blurb).not.toContain('Snøhetta')
+  })
+
+  it('falls back to the template when Google has nothing to say either', async () => {
+    vi.stubGlobal('fetch', fetchFillingFrom([goodPlace()]))
+
+    const activities = await enrichActivities(
+      [
+        {
+          name: 'Kunstmuseet i Lillehammer',
+          town: 'Lillehammer',
+          category: 'museum',
+          kidFriendly: true,
+          blurb: 'Norwegian art in a Snøhetta-designed building.',
+        },
+      ],
+      NEAR,
+    )
+
+    expect(activities[0].blurb).toMatch(/^A well-rated local /)
+  })
+
   it('throws when the Places API key is not configured', async () => {
     vi.unstubAllEnvs()
     await expect(enrichActivities(proposed, NEAR)).rejects.toThrow(

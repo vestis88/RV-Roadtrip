@@ -92,6 +92,8 @@ interface PlaceCandidate {
   photoUrl?: string
   openingHours?: string[]
   priceLevel?: number
+  /** Google's own one-line description of the place, when it has one. */
+  editorialSummary?: string
 }
 
 interface RawPlace {
@@ -104,6 +106,7 @@ interface RawPlace {
   photos?: { name: string }[]
   regularOpeningHours?: { weekdayDescriptions?: string[] }
   priceLevel?: string
+  editorialSummary?: { text?: string }
 }
 
 interface PlacesSearchResponse {
@@ -132,6 +135,7 @@ function mapRawPlace(raw: RawPlace, apiKey: string): PlaceCandidate {
       : undefined,
     openingHours: raw.regularOpeningHours?.weekdayDescriptions,
     priceLevel: raw.priceLevel ? PRICE_LEVEL_MAP[raw.priceLevel] : undefined,
+    editorialSummary: raw.editorialSummary?.text,
   }
 }
 
@@ -439,12 +443,22 @@ function nameMatchHits(expected: string[], actual: string): number {
  * How much of the requested name has to be found.
  *
  * Everything, for a name of one or two identifying words — because at two
- * words, "half" meant the place name on its own, and that is precisely the
- * hole the go-kart track came through. Longer names keep a word of slack,
- * where losing one still leaves two or more distinctive words agreeing.
+ * words "half" meant the place name on its own, and that is precisely the
+ * hole the go-kart track came through.
+ *
+ * Longer names are back to half (2026-08-18). Tightening those to
+ * all-but-one went with the two-word fix for symmetry rather than because
+ * any failure asked for it, and it cost more than it bought: a proposal that
+ * fails verification is not shown as a gap, it is silently replaced by the
+ * best-rated thing of its kind nearby with a template blurb, and the day
+ * reads blander with nothing to say why. Reported as "the descriptions for
+ * activities seem to have become quite generic". The category-conflict check
+ * above is what actually caught the go-kart track, and it is untouched.
  */
 function requiredNameHits(expectedCount: number): number {
-  return expectedCount <= 2 ? expectedCount : expectedCount - 1
+  return expectedCount <= 2
+    ? expectedCount
+    : Math.max(1, Math.ceil(expectedCount / 2))
 }
 
 function nameLooksRight(expectedName: string | undefined, actual: string): boolean {
@@ -591,8 +605,12 @@ export const __testing = {
   RESTAURANT_QUALITY_LADDER,
 }
 
+// places.editorialSummary added 2026-08-18: it is what a substitute card
+// says about itself instead of "A well-rated local hike." The mask already
+// asks for ratings, photos and opening hours, so this is not the field that
+// decides what tier the request is billed at.
 const FIELD_MASK =
-  'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel'
+  'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel,places.editorialSummary'
 
 async function textSearch(
   query: string,
@@ -1082,7 +1100,14 @@ export async function backfillActivities(
         googleMapsUrl: match.googleMapsUrl,
         photoUrl: match.photoUrl,
         openingHours: match.openingHours,
-        blurb: `A well-rated local ${category}.`,
+        // Google's own description of THIS place when it has one, and the
+        // template only when it does not. Never a proposal's blurb — that is
+        // how a shopping centre came to be described as "Charming lakeside
+        // café near the castle" — but Google's summary is about the very
+        // place being shown, so it carries no such risk, and it is the
+        // difference between a card that reads like a suggestion and one
+        // that reads like a filler.
+        blurb: match.editorialSummary ?? `A well-rated local ${category}.`,
         kidFriendly: false,
         status: 'suggested',
         substitute: true,
@@ -1150,6 +1175,23 @@ export async function enrichActivities(
         placeId: match.id,
       })
     }
+  }
+
+  // What was proposed for this day and could not be confirmed to exist where
+  // it was said to be. Logged because it was invisible: a dropped proposal is
+  // not shown as a gap, it is quietly replaced by the best-rated thing of its
+  // kind nearby, so nothing on the day and nothing in the logs said how much
+  // of it was the planner's judgement and how much was a fallback. Reported
+  // as "the descriptions for activities seem to have become quite generic",
+  // which is exactly what a run of substitutes looks like from outside. One
+  // line per day, naming them, so the rate is a number rather than a hunch.
+  const dropped = proposed
+    .filter((_, i) => !matches[i])
+    .map((item) => `${item.name} (${item.town})`)
+  if (dropped.length > 0) {
+    console.info(
+      `Activities: ${dropped.length} of ${proposed.length} proposed could not be verified and were replaced from top-rated nearby — ${dropped.join('; ')}`,
+    )
   }
 
   resolved.push(
@@ -1227,7 +1269,9 @@ export async function backfillRestaurantsForMeal(
       googleMapsUrl: match.googleMapsUrl,
       photoUrl: match.photoUrl,
       priceLevel: match.priceLevel,
-      blurb: `A well-rated spot for ${meal}.`,
+      // Google's own line about this very place when it has one — see the
+      // matching note in backfillActivities.
+      blurb: match.editorialSummary ?? `A well-rated spot for ${meal}.`,
       status: 'suggested',
       substitute: true,
       ...(reserve ? { reserve: true } : {}),
@@ -1291,6 +1335,16 @@ export async function enrichRestaurantsForMeal(
         placeId: match.id,
       })
     }
+  }
+
+  // Same record as the activities above, per meal.
+  const droppedMeals = proposed
+    .filter((_, i) => !matches[i])
+    .map((item) => `${item.name} (${item.town})`)
+  if (droppedMeals.length > 0) {
+    console.info(
+      `Restaurants (${meal}): ${droppedMeals.length} of ${proposed.length} proposed could not be verified and were replaced from top-rated nearby — ${droppedMeals.join('; ')}`,
+    )
   }
 
   resolved.push(
