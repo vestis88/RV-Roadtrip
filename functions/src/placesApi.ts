@@ -932,10 +932,17 @@ export interface VerifiedPlace {
    */
   googleMapsUrl?: string
   /**
-   * Google's own photo of the listing, which this search already paid for —
-   * FIELD_MASK asks for places.photos and mapRawPlace builds the media URL,
-   * so every result carried one and this dropped it on the floor. The same
-   * shape of loss as googleMapsUrl above, and the same fix.
+   * A URL for Google's own photo of the listing. The same shape of loss as
+   * googleMapsUrl above — FIELD_MASK already asks for places.photos and
+   * mapRawPlace already builds this, so every result carried one and this
+   * dropped it on the floor — and the same fix.
+   *
+   * NOT an image this search already fetched, which an earlier version of
+   * this comment claimed. What the search returns is the photo REFERENCE;
+   * the bytes come from a separate Place Photo request that the browser
+   * makes when an <img> with this URL is displayed, carrying the API key in
+   * the query string. So every render of a card showing one is a request on
+   * the project, and the consumers load it lazily for that reason.
    *
    * A curated sight is a thing the traveler is deciding whether to drive
    * hours for, and the day-by-day cards have had a photo on every activity

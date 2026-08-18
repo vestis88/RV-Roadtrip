@@ -1254,9 +1254,28 @@ This reverses a deliberate earlier choice, which said so in the card's own
 comment: "Places photo media is billed per load and puts the API key in a
 scrapeable `<img src>`, whereas a link costs nothing". Both halves are still
 true and neither is new — the day-by-day plan has shipped that exposure since
-PlaceCard existed. `loading="lazy"` keeps the per-load cost to cards actually
-scrolled to, which matters on a twenty-five stop corridor. The key's
-HTTP-referrer restriction is the real mitigation and remains outstanding.
+PlaceCard existed.
+
+Worth being exact, because the first version of this note was not: the
+curation search returns only the photo's REFERENCE. The bytes come from a
+separate Place Photo request the browser makes when the `<img>` is rendered,
+carrying the API key in the query string. So a photo costs a request the
+first time a card is scrolled to (browser cache absorbs the rest), rather
+than being something the search already paid for.
+
+Two things follow. `loading="lazy"` is load-bearing, not decoration — a
+corridor is routinely twenty-five cards. And the volume genuinely changes:
+before this, the only `<img>` carrying a Places photo URL was in `PlaceCard`,
+reached solely from Day View and the shared-trip view, i.e. only once a full
+plan exists. Explore mode is where the time is actually spent, so anyone
+whose billing showed nothing for photos may simply not have been generating
+plans. The key's HTTP-referrer restriction is the real mitigation for the
+other half and remains outstanding.
+
+Exact SKU and free-allowance figures deliberately not recorded here: they
+could not be verified from the build environment (egress to
+developers.google.com is blocked), and a number written down from memory is
+worse than a pointer to the Cloud Console billing report grouped by SKU.
 
 Still open, deliberately:
 - The Maps/Places API key still has no HTTP-referrer restriction. Every photo

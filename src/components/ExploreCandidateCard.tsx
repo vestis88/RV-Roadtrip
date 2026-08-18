@@ -130,13 +130,16 @@ export function ExploreCandidateCard({
         * the row; here it would just be a grey band on every stop Places had
         * no photo for.
         *
-        * `loading="lazy"` is not decoration: Places photo media is billed per
-        * load, and a curated corridor is routinely twenty-five cards long, so
-        * only the ones actually scrolled to should cost anything. The media
-        * URL also carries the API key — see the note on "Photos & details"
-        * below, which is why this card had no image at all until it was
-        * asked for. That key needs its HTTP-referrer restriction set, which
-        * is true of the day-by-day plan today as well. */}
+        * `loading="lazy"` is not decoration. The search that curated this
+        * stop returned only the photo's REFERENCE; the bytes come from a
+        * separate Place Photo request that the browser makes when this <img>
+        * is displayed, on the project's own key. A curated corridor is
+        * routinely twenty-five cards long, so only the ones actually
+        * scrolled to should make one. The URL carries the key in its query
+        * string too — see the note on "Photos & details" below, which is why
+        * this card had no image at all until it was asked for. That key
+        * needs its HTTP-referrer restriction set, which is equally true of
+        * the day-by-day plan and has been since PlaceCard existed. */}
       {stop.photoUrl && (
         <img
           src={stop.photoUrl}
