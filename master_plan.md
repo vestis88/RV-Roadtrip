@@ -1357,6 +1357,23 @@ What the plan map adds, because a plan is what makes them possible:
 while a plan exists is written `proposed`, so that gate had the same hole
 from the other direction.
 
+And then: "Clicking a list item does not pan the map to the corresponding
+pin." It never had. This screen's `MapPanner` was wired to `selectedPlace` —
+the day's activities — which was invisible for as long as a corridor stop
+could only be selected by tapping its own pin, because then the camera was
+already there. A list gave the selection a second origin the camera knew
+nothing about. `panTargetFor` decides between the two now, and each selection
+clears the other so one camera never has two claims on it.
+
+Extracted as a pure function rather than left as a ternary in the JSX for one
+reason: a pan cannot be asserted without a live Google map, which needs a key
+CI does not have — the same constraint that let the layout regression below
+ship. If the only testable form of a rule is a function, it should be a
+function. The plan map's pins also carry the interest colours now, and the
+list header carries the key: they sit beside the same cards as the explore
+map, and a level that paints a pin on one screen and not the other is what
+makes two screens feel like two apps.
+
 Broken and fixed within the hour: the list starved the map to nothing.
 `flex-1` is `flex: 1 1 0%` — a basis of ZERO — so the moment a tall sibling
 sat below it in the same flex column, the map got no height at all and only

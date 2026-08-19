@@ -658,6 +658,16 @@ test('curated stops survive into the plan, with their curation intact', async ({
   await expect(list).toContainText('Sleep in Lom')
   await expect(list).toContainText('Norway’s highest peaks')
 
+  // Selecting from the list is a real selection, not just a highlight — it
+  // is what the camera follows. The pan itself needs a live Google map (and
+  // so a Maps key CI does not have), so the rule behind it is unit-tested in
+  // src/lib/mapSelection.test.ts; what this checks is that the list can
+  // select at all, and that the selection shows.
+  await page.getByTestId(`explore-candidate-${added.id}`).click()
+  await expect(page.getByTestId(`explore-candidate-${added.id}`)).toHaveClass(
+    /border-orange-600/,
+  )
+
   // The interest level is still a decision, not a label.
   await page
     .getByTestId(`explore-candidate-interest-must-see-${added.id}`)

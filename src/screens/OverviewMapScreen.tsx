@@ -17,17 +17,22 @@ import {
   CORRIDOR_LOCKED_ICON,
   CORRIDOR_PROPOSED_ICON,
   OVERNIGHT_ICON,
+  PRIORITY_PIN_CLASS,
   RESTAURANT_ICON,
 } from '../lib/mapIcons'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { usePlanBusy } from '../lib/planBusy'
+import { panTargetFor } from '../lib/mapSelection'
 import {
   rejectCorridorStop,
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
 import {
+  TIER_LABEL,
+  TIER_ORDER,
+  candidatePriority,
   setCandidatePriority,
   sortCandidatesForList,
 } from '../lib/exploreCandidateActions'
@@ -144,11 +149,37 @@ export function OverviewMapScreen() {
    * a tap on a pin whose card is inside a collapsed section would otherwise
    * do nothing visible at all. Done here rather than in the effect above:
    * expanding is a consequence of the tap, not of the selection changing.
+   *
+   * Clearing `selectedPlace` is what keeps the map's pan target unambiguous:
+   * the two selections drive one camera, so leaving an old one set means the
+   * map stays parked on whatever was tapped first.
    */
   function selectCorridorStop(stopId: string) {
     setConsideredOpen(true)
+    setSelectedPlace(null)
     setSelectedCorridorStopId(stopId)
   }
+
+  /** The stop the list and the map are both currently pointing at. */
+  const selectedCorridorStop =
+    consideredStops.find((stop) => stop.id === selectedCorridorStopId) ?? null
+
+  /**
+   * Where the camera should be.
+   *
+   * Reported 2026-08-19: "Clicking a list item does not pan the map to the
+   * corresponding pin." It never had — this screen's panner was wired to
+   * `selectedPlace`, the day's activities, from back when the map was the
+   * only way to reach a corridor stop and tapping its pin meant the camera
+   * was already there. Adding a list gave the selection a second origin that
+   * the camera knew nothing about.
+   */
+  const panTarget = panTargetFor(
+    selectedCorridorStop
+      ? { lat: selectedCorridorStop.lat, lng: selectedCorridorStop.lng }
+      : null,
+    selectedPlace,
+  )
 
   const [reorderOpen, setReorderOpen] = useState(false)
   // Committed stops in their current order — derived from each stop's
@@ -494,7 +525,7 @@ export function OverviewMapScreen() {
                 capped={searchArea.cappedFrom !== undefined}
               />
             )}
-            <MapPanner target={selectedPlace} />
+            <MapPanner target={panTarget} />
 
             <AdvancedMarker
               position={{
@@ -541,14 +572,15 @@ export function OverviewMapScreen() {
                       position={{ lat: activity.lat, lng: activity.lng }}
                       title={activity.name}
                       data-testid="activity-marker"
-                      onClick={() =>
+                      onClick={() => {
+                        setSelectedCorridorStopId(null)
                         setSelectedPlace({
                           id: placeId,
                           name: activity.name,
                           lat: activity.lat,
                           lng: activity.lng,
                         })
-                      }
+                      }}
                     >
                       <MarkerBadge
                         icon={CATEGORY_ICON[activity.category]}
@@ -572,14 +604,15 @@ export function OverviewMapScreen() {
                       position={{ lat: restaurant.lat, lng: restaurant.lng }}
                       title={restaurant.name}
                       data-testid="restaurant-marker"
-                      onClick={() =>
+                      onClick={() => {
+                        setSelectedCorridorStopId(null)
                         setSelectedPlace({
                           id: placeId,
                           name: restaurant.name,
                           lat: restaurant.lat,
                           lng: restaurant.lng,
                         })
-                      }
+                      }}
                     >
                       <MarkerBadge
                         icon={RESTAURANT_ICON}
@@ -607,6 +640,11 @@ export function OverviewMapScreen() {
                         : CORRIDOR_PROPOSED_ICON
                     }
                     highlighted={selectedCorridorStopId === stop.id}
+                    // Same green/amber/red the explore map uses. These pins
+                    // sit beside the same cards now, so a level that paints
+                    // the pin on one screen and not the other is the kind of
+                    // difference that makes two screens feel like two apps.
+                    priority={candidatePriority(stop)}
                   />
                 </AdvancedMarker>
               ))}
@@ -674,8 +712,24 @@ export function OverviewMapScreen() {
             onClick={() => setConsideredOpen((open) => !open)}
             className="flex w-full items-center justify-between p-3 text-left text-sm font-medium text-neutral-900 dark:text-white"
           >
-            <span>
-              Stops to consider ({consideredStops.length})
+            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span>Stops to consider ({consideredStops.length})</span>
+              {/* The key, for the same reason the explore map carries one:
+                * colour is only information once the reader is told what it
+                * means. */}
+              <span
+                data-testid="considered-stops-legend"
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-neutral-500 dark:text-neutral-400"
+              >
+                {TIER_ORDER.map((tier) => (
+                  <span key={tier} className="flex items-center gap-1">
+                    <span
+                      className={`inline-block h-2.5 w-2.5 rounded-full border-2 ${PRIORITY_PIN_CLASS[tier]}`}
+                    />
+                    {TIER_LABEL[tier]}
+                  </span>
+                ))}
+              </span>
             </span>
             <span aria-hidden className="text-neutral-400">
               {consideredOpen ? '▾' : '▸'}
