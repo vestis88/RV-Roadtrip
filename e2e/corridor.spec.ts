@@ -640,6 +640,13 @@ test('curated stops survive into the plan, with their curation intact', async ({
   const list = page.getByTestId('considered-stops-list')
   await expect(list).toContainText('Jotunheimen National Park')
 
+  // And the map is still there. The first version of this list starved the
+  // map to zero height — `flex-1` is a basis of zero, so a tall sibling took
+  // all of it — and these tests passed anyway because none of them looked at
+  // the map. Reported as "now the map is gone".
+  const canvas = await page.getByTestId('map-canvas').boundingBox()
+  expect(canvas?.height ?? 0).toBeGreaterThan(200)
+
   // Everything the explore card shows, still shown — the curation did not
   // stop existing when planning started.
   await expect(

@@ -438,7 +438,16 @@ export function OverviewMapScreen() {
         </div>
       )}
 
-      <div className="relative flex-1" data-testid="map-canvas">
+      {/* `flex-1` alone is `flex: 1 1 0%` — a basis of ZERO — so the moment a
+        * tall sibling appeared below it (the stops list added 2026-08-19)
+        * this map was starved to no height at all and only its absolutely
+        * positioned children were left, floating over the list. Reported as
+        * "now the map is gone". The floor is what makes the split safe;
+        * flex-1 still lets it take the whole screen when there is no list. */}
+      <div
+        className="relative min-h-[260px] flex-1"
+        data-testid="map-canvas"
+      >
         {apiKey ? (
           <GoogleMap
             defaultCenter={{
@@ -658,7 +667,7 @@ export function OverviewMapScreen() {
         * the traveler starts using them.
         */}
       {consideredStops.length > 0 && (
-        <div className="border-t border-neutral-200 dark:border-neutral-800">
+        <div className="flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800">
           <button
             type="button"
             data-testid="considered-stops-toggle"
@@ -674,7 +683,10 @@ export function OverviewMapScreen() {
           </button>
           {consideredOpen && (
             <div
-              className="space-y-2 p-3 pt-0"
+              // Scrolls inside itself and stops at half the viewport, so a
+              // twenty-four stop corridor cannot push the map off the
+              // screen — the two halves are meant to be usable together.
+              className="max-h-[50vh] min-h-0 space-y-2 overflow-y-auto p-3 pt-0"
               data-testid="considered-stops-list"
             >
               {consideredStops.map((stop) => (

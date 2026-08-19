@@ -1357,6 +1357,16 @@ What the plan map adds, because a plan is what makes them possible:
 while a plan exists is written `proposed`, so that gate had the same hole
 from the other direction.
 
+Broken and fixed within the hour: the list starved the map to nothing.
+`flex-1` is `flex: 1 1 0%` — a basis of ZERO — so the moment a tall sibling
+sat below it in the same flex column, the map got no height at all and only
+its absolutely positioned children survived, floating over the list.
+Reported as "now the map is gone". The map has a `min-h-[260px]` floor now
+and the list scrolls inside itself at `max-h-[50vh]`, which is the split
+ExploreMapScreen already used. The new e2e passed straight through the
+regression because not one of its assertions looked at the map; it measures
+`map-canvas`'s bounding box now.
+
 Also that day: **activity and restaurant blurbs got their length back.** The
 detail prompt asked for "a one-sentence blurb" while the curation prompt
 beside it asked for 2–4 sentences of what is genuinely there — so the
