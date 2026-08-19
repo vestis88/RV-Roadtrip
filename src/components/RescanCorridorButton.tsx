@@ -124,7 +124,8 @@ function elapsedLabel(startedAt: string | undefined, now: number): string {
 /**
  * "Rescan this area" (phase 3): searches near the map's current center and
  * writes any finds as new `proposed` corridorStops, which then render on the
- * map for the traveler to lock in or remove (see CorridorStopCard). No
+ * map for the traveler to lock in or turn down (see ExploreCandidateCard,
+ * which both the explore list and the plan map's own list now use). No
  * result list here — the map itself is the result view, same philosophy as
  * everywhere else this corridor is edited directly on the map rather than in
  * a separate screen.

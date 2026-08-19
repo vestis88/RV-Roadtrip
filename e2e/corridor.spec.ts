@@ -600,3 +600,108 @@ test('"Describe it" mode requires a description, then degrades to an error banne
   // adjust the query and retry.
   await expect(page.getByTestId('add-corridor-stop-form')).toBeVisible()
 })
+
+/**
+ * Reported 2026-08-19: "I'm not happy with how the overview is gone after
+ * the plan is done... as we moved into detailed planning, the previously
+ * researched thing just look boring and can only be removed, so the whole
+ * functionality is gone."
+ *
+ * It was accurate twice over. This screen had no candidate list at all, and
+ * the card a pin opened gated "Lock in" on status `proposed` — which nothing
+ * curated in explore mode ever is, so a curated stop's only offer was to
+ * delete it.
+ */
+test('curated stops survive into the plan, with their curation intact', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const added = await stops.add({
+    name: 'Jotunheimen National Park',
+    lat: 61.5,
+    lng: 8.3,
+    country: 'NO',
+    why: 'Norway’s highest peaks, with marked day hikes from the road.',
+    status: 'candidate',
+    linkedDayIds: [],
+    priority: 'worth-a-detour',
+    region: 'Gudbrandsdalen',
+    rank: 0,
+    baseTown: 'Lom',
+    interest: 'hiking',
+    timeNeeded: 'full-day',
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  // The list is back, and the stop is in it.
+  const list = page.getByTestId('considered-stops-list')
+  await expect(list).toContainText('Jotunheimen National Park')
+
+  // Everything the explore card shows, still shown — the curation did not
+  // stop existing when planning started.
+  await expect(
+    page.getByTestId(`explore-candidate-serves-${added.id}`),
+  ).toContainText('hiking')
+  await expect(
+    page.getByTestId(`explore-candidate-time-${added.id}`),
+  ).toContainText('A full day')
+  await expect(list).toContainText('Sleep in Lom')
+  await expect(list).toContainText('Norway’s highest peaks')
+
+  // The interest level is still a decision, not a label.
+  await page
+    .getByTestId(`explore-candidate-interest-must-see-${added.id}`)
+    .click()
+  await expect
+    .poll(async () => (await stops.doc(added.id).get()).data()?.priority)
+    .toBe('must-see')
+
+  // And "Lock in" is offered on a candidate — the gate that made this stop
+  // removable and nothing else.
+  await page.getByTestId(`explore-candidate-lock-${added.id}`).click()
+  await expect
+    .poll(async () => (await stops.doc(added.id).get()).data()?.status)
+    .toBe('locked')
+
+  // Once locked, the way into the itinerary is a button rather than a
+  // sentence telling the traveler where to find one.
+  await page.getByTestId(`explore-candidate-add-to-route-${added.id}`).click()
+  await expect(page.getByTestId('reorder-corridor-panel')).toBeVisible()
+})
+
+// Turning a stop down has to be remembered, or the next "Find more stops"
+// hands it straight back. Deletion was what the plan map offered instead.
+test('a stop turned down in plan mode is remembered, not deleted', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const added = await stops.add({
+    name: 'Hunderfossen Eventyrpark',
+    lat: 61.24,
+    lng: 10.44,
+    country: 'NO',
+    why: 'A fairytale park.',
+    status: 'candidate',
+    linkedDayIds: [],
+    priority: 'nice-if-convenient',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId(`explore-candidate-reject-${added.id}`).click()
+
+  await expect
+    .poll(async () => (await stops.doc(added.id).get()).data()?.status)
+    .toBe('rejected')
+  // Still there as a tombstone, and gone from the list — which, with
+  // nothing left to decide about, disappears entirely rather than sitting
+  // there empty.
+  await expect((await stops.doc(added.id).get()).exists).toBe(true)
+  await expect(page.getByTestId('considered-stops-toggle')).toHaveCount(0)
+  await expect(page.getByTestId('considered-stops-list')).toHaveCount(0)
+})

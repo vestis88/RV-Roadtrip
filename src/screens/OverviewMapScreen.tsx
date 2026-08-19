@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AdvancedMarker,
@@ -24,11 +24,15 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import {
-  deleteCorridorStop,
+  rejectCorridorStop,
   setCorridorStopStatus,
 } from '../lib/corridorStopActions'
+import {
+  setCandidatePriority,
+  sortCandidatesForList,
+} from '../lib/exploreCandidateActions'
 import { MarkerBadge } from '../components/MarkerBadge'
-import { CorridorStopCard } from '../components/CorridorStopCard'
+import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
@@ -108,9 +112,43 @@ export function OverviewMapScreen() {
   const editableCorridorStops = corridorStops.filter(
     (stop) => stop.status !== 'committed' && stop.status !== 'rejected',
   )
-  const selectedCorridorStop =
-    editableCorridorStops.find((stop) => stop.id === selectedCorridorStopId) ??
-    null
+  // Everything still open to a decision, in the order the trip drives past
+  // it — the same ordering the explore list uses, so a stop's neighbours in
+  // the list are its neighbours on the road. Committed stops are in the day
+  // sequence already and rejected ones are tombstones (see
+  // corridorStopStatusSchema), so neither is something to decide about.
+  const [consideredOpen, setConsideredOpen] = useState(true)
+  const consideredRefs = useRef(new Map<string, HTMLDivElement>())
+  const consideredStops = useMemo(
+    () =>
+      sortCandidatesForList(
+        editableCorridorStops,
+        trip.settings.startPoint,
+        trip.settings.endPoint,
+      ),
+    [editableCorridorStops, trip.settings.startPoint, trip.settings.endPoint],
+  )
+
+  // Tapping a pin has to reach the card, which is below the map and often
+  // below the fold — without this the selection ring lands off-screen and
+  // the tap looks like it did nothing. Same behaviour the explore map has.
+  useEffect(() => {
+    if (!selectedCorridorStopId) return
+    consideredRefs.current
+      .get(selectedCorridorStopId)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedCorridorStopId])
+
+  /**
+   * Selecting a stop opens the list as well as highlighting the card, since
+   * a tap on a pin whose card is inside a collapsed section would otherwise
+   * do nothing visible at all. Done here rather than in the effect above:
+   * expanding is a consequence of the tap, not of the selection changing.
+   */
+  function selectCorridorStop(stopId: string) {
+    setConsideredOpen(true)
+    setSelectedCorridorStopId(stopId)
+  }
 
   const [reorderOpen, setReorderOpen] = useState(false)
   // Committed stops in their current order — derived from each stop's
@@ -136,8 +174,8 @@ export function OverviewMapScreen() {
     .sort((a, b) => a.earliestIndex - b.earliestIndex)
   // Locked stops with no linked day yet (a traveler-placed pin or a locked
   // rescan find) — these are the ones phase 4b's reconciliation can add into
-  // the route; a 'proposed' stop must be locked first (CorridorStopCard's
-  // own gate for every other action on one).
+  // the route; a 'proposed' stop must be locked first (ExploreCandidateCard
+  // only offers "Add to route" once a stop is locked).
   const addableCorridorStops = corridorStops
     .filter((stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0)
     .map((stop) => ({ id: stop.id, name: stop.name }))
@@ -551,7 +589,7 @@ export function OverviewMapScreen() {
                   position={{ lat: stop.lat, lng: stop.lng }}
                   title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
                   data-testid={`corridor-stop-marker-${stop.id}`}
-                  onClick={() => setSelectedCorridorStopId(stop.id)}
+                  onClick={() => selectCorridorStop(stop.id)}
                 >
                   <MarkerBadge
                     icon={
@@ -598,21 +636,83 @@ export function OverviewMapScreen() {
           />
         </div>
 
-        {selectedCorridorStop && (
-          <CorridorStopCard
-            stop={selectedCorridorStop}
-            onLock={() => setCorridorStopStatus(tripId, selectedCorridorStop.id, 'locked')}
-            onUnlock={() =>
-              setCorridorStopStatus(tripId, selectedCorridorStop.id, 'proposed')
-            }
-            onRemove={() => {
-              deleteCorridorStop(tripId, selectedCorridorStop.id)
-              setSelectedCorridorStopId(null)
-            }}
-            onClose={() => setSelectedCorridorStopId(null)}
-          />
-        )}
       </div>
+
+      {/* The overview, kept alive after the plan exists (2026-08-19).
+        *
+        * Reported as: "I'm not happy with how the overview is gone after the
+        * plan is done... as we moved into detailed planning, the previously
+        * researched thing just look boring and can only be removed, so the
+        * whole functionality is gone." It was accurate. This screen had no
+        * list at all — every curated stop existed only as a map pin whose
+        * tap opened a card showing its name, its "why" and a Remove button,
+        * because the card it opened gated "Lock in" on `proposed`, and
+        * nothing curated in explore mode is `proposed`.
+        *
+        * So the same card the explore list uses is used here, and the two
+        * screens now differ only in what a plan makes possible: an "Add to
+        * route" button, and an "On route" badge for stops already reconciled
+        * into a day. Interest levels, the photo, the sight's own
+        * description, the base town, the time it needs and the Maps link all
+        * survive into planning rather than being thrown away at the moment
+        * the traveler starts using them.
+        */}
+      {consideredStops.length > 0 && (
+        <div className="border-t border-neutral-200 dark:border-neutral-800">
+          <button
+            type="button"
+            data-testid="considered-stops-toggle"
+            onClick={() => setConsideredOpen((open) => !open)}
+            className="flex w-full items-center justify-between p-3 text-left text-sm font-medium text-neutral-900 dark:text-white"
+          >
+            <span>
+              Stops to consider ({consideredStops.length})
+            </span>
+            <span aria-hidden className="text-neutral-400">
+              {consideredOpen ? '▾' : '▸'}
+            </span>
+          </button>
+          {consideredOpen && (
+            <div
+              className="space-y-2 p-3 pt-0"
+              data-testid="considered-stops-list"
+            >
+              {consideredStops.map((stop) => (
+                <ExploreCandidateCard
+                  key={stop.id}
+                  stop={stop}
+                  // Straight-line detour needs a corridor to measure
+                  // against; on a planned trip the real answer is the day a
+                  // stop lands on, which "On route" already says.
+                  detourKm={null}
+                  onRoute={stop.linkedDayIds.length > 0}
+                  highlighted={selectedCorridorStopId === stop.id}
+                  innerRef={(element) => {
+                    if (element) consideredRefs.current.set(stop.id, element)
+                    else consideredRefs.current.delete(stop.id)
+                  }}
+                  onSelect={() => selectCorridorStop(stop.id)}
+                  onSetPriority={(priority) =>
+                    setCandidatePriority(tripId, stop.id, priority)
+                  }
+                  onLock={() => setCorridorStopStatus(tripId, stop.id, 'locked')}
+                  onUnlock={() =>
+                    setCorridorStopStatus(tripId, stop.id, 'candidate')
+                  }
+                  onReject={() => {
+                    void rejectCorridorStop(tripId, stop.id)
+                    setSelectedCorridorStopId(null)
+                  }}
+                  // Opens the panel that actually reconciles a stop into the
+                  // day sequence — the same one "Edit route" opens, which
+                  // already takes exactly this set as `addableStops`.
+                  onAddToRoute={() => setReorderOpen(true)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

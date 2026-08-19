@@ -1311,6 +1311,61 @@ was extracted rather than copied a third time:
   came last. It says which attempt hit what now, which matters on the one path
   whose answers can contain "the search tool was unavailable".
 
+### 2026-08-19 — the overview stopped disappearing when planning started
+
+Reported: "I'm not happy with how the overview is gone after the plan is
+done. We discussed maintaining that portion into the full plan. It needed to
+merge more. As we moved into detailed planning, the previously researched
+thing just look boring and can only be removed, so the whole functionality is
+gone."
+
+Accurate, and worse than it sounded, because two separate things had gone:
+
+1. **The plan map had no candidate list at all.** Every curated stop existed
+   only as a map pin. Tapping one opened `CorridorStopCard`, which showed a
+   name, the `why`, the literal word "Status: proposed", and buttons.
+2. **Those buttons were nothing.** The card gated "Lock in" on status
+   `proposed` and "Unlock" on `locked` — and everything curated in explore
+   mode is `candidate`. So the commonest stop on the screen matched neither
+   branch and was left with exactly one offer: **Remove**, which deletes.
+   "Can only be removed" was not an impression, it was the code.
+
+The fix is the merge that was asked for: the plan map renders
+`ExploreCandidateCard` — the same card the explore list uses — in a
+collapsible "Stops to consider" list under the map, in route order, with a
+pin tap expanding the list and scrolling to the card. `CorridorStopCard` is
+deleted; there is one card for a corridor stop now, not two that drifted.
+
+What survives into planning that did not before: the photo, the sight's own
+2–4 sentence description, the base town, the interest it serves, how long it
+takes, the Maps link, and the three-way interest level as a live control
+rather than a value shown once and then frozen.
+
+What the plan map adds, because a plan is what makes them possible:
+
+- **"Add to route"** on a locked stop, opening the panel that reconciles it
+  into the day sequence. It was the sentence 'Use "Edit route" to add this
+  stop to your itinerary.' — an instruction standing where the one action
+  that matters should have been.
+- **"On route"** for a stop already reconciled into a day, the same badge the
+  explore list uses for a kept stop.
+- **"Not interested"** replaces **Remove**. Rejection is remembered
+  (`corridorStopStatusSchema`), so the next "Find more stops" does not hand
+  the place straight back; deletion is a tombstone thrown away.
+
+"Lock in" now covers `proposed` as well as `candidate` — a rescan find made
+while a plan exists is written `proposed`, so that gate had the same hole
+from the other direction.
+
+Also that day: **activity and restaurant blurbs got their length back.** The
+detail prompt asked for "a one-sentence blurb" while the curation prompt
+beside it asked for 2–4 sentences of what is genuinely there — so the
+day-by-day cards were thin by instruction, not by accident. It now asks for
+2–3 real sentences (what is there, then who it suits) and names the template
+this app writes itself, "A well-rated local hike.", as the shape a blurb must
+not have — since a blurb of that shape is indistinguishable from a
+verification failure.
+
 **2026-08-18, and a lesson about how a fix gets paid for.** Reported as "the
 descriptions for activities seems to have become quite generic". They had
 not: those cards were SUBSTITUTES. A proposed activity that fails Places

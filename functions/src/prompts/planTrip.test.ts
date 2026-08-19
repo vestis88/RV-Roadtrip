@@ -1171,3 +1171,39 @@ describe('buildRegionHighlightsPrompt — countries are a floor, not a ceiling',
     expect(system).toMatch(/does not cover a trip that crosses countries/i)
   })
 })
+
+/**
+ * Reported 2026-08-19: "Just get some more description in for each place."
+ * The detail prompt asked for "a one-sentence blurb" while the curation
+ * prompt beside it asked for 2-4 sentences of what is genuinely there — so
+ * the day-by-day cards were thin by instruction, not by accident.
+ */
+describe('buildChunkDetailPrompt — how much a blurb has to say', () => {
+  async function detailSystem() {
+    const { buildChunkDetailPrompt } = await import('./planTripPrompt.js')
+    return buildChunkDetailPrompt({
+      settings: {} as never,
+      notesFreeText: '',
+      outline: { days: [] },
+      chunkDays: [],
+    }).system
+  }
+
+  it('no longer asks for one sentence', async () => {
+    expect(await detailSystem()).not.toMatch(/one-sentence blurb/i)
+  })
+
+  it('asks for what is actually there, and who it suits', async () => {
+    const system = await detailSystem()
+    expect(system).toMatch(/2-3 real sentences/i)
+    expect(system).toMatch(/what is genuinely THERE/i)
+    expect(system).toMatch(/ages of any children/i)
+  })
+
+  // The app writes "A well-rated local hike." itself when it could not find
+  // the place Claude named — so a blurb of that shape is indistinguishable
+  // from a failure.
+  it('names the generic shape it must not produce', async () => {
+    expect(await detailSystem()).toMatch(/A well-rated local hike/)
+  })
+})

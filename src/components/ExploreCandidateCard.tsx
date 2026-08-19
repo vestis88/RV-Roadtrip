@@ -24,6 +24,12 @@ interface ExploreCandidateCardProps {
   /** Back to an ordinary candidate — see the Unlock button below. */
   onUnlock: () => void
   onReject: () => void
+  /**
+   * Offered only where a route already exists to add the stop TO — the plan
+   * map. Absent in explore mode, where there is no itinerary yet and locking
+   * in is the whole commitment.
+   */
+  onAddToRoute?: () => void
 }
 
 /**
@@ -81,6 +87,7 @@ export function ExploreCandidateCard({
   onLock,
   onUnlock,
   onReject,
+  onAddToRoute,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
   // A sight whose base town is its own name is a place that IS the stop (a
@@ -287,7 +294,14 @@ export function ExploreCandidateCard({
           >
             Photos &amp; details
           </a>
-          {stop.status === 'candidate' && (
+          {/* Both of the uncommitted statuses. A find from "Rescan this
+            * area" is written `proposed` when a plan already exists and
+            * `candidate` when it does not (see rescanCorridorCallable), and
+            * gating on `candidate` alone left every stop curated in explore
+            * mode with no action but "Not interested" the moment the plan
+            * was generated — reported as "the previously researched thing
+            * just look boring and can only be removed". */}
+          {(stop.status === 'candidate' || stop.status === 'proposed') && (
             <button
               type="button"
               data-testid={`explore-candidate-lock-${stop.id}`}
@@ -311,6 +325,23 @@ export function ExploreCandidateCard({
               className="btn btn-sm btn-secondary"
             >
               Unlock
+            </button>
+          )}
+          {/* The step that turns curation into an actual change to the
+            * itinerary. It used to be the sentence 'Use "Edit route" to add
+            * this stop to your itinerary.' — an instruction where the one
+            * action that matters should have been. */}
+          {onAddToRoute && stop.status === 'locked' && (
+            <button
+              type="button"
+              data-testid={`explore-candidate-add-to-route-${stop.id}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onAddToRoute()
+              }}
+              className="btn btn-sm btn-primary"
+            >
+              Add to route
             </button>
           )}
           {/* Offered whether or not the stop is locked. Undoing a commitment
