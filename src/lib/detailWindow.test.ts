@@ -102,8 +102,21 @@ describe('updateTripSettings — what actually invalidates a plan', () => {
     expect(DETAIL_WINDOW_LABEL).toMatch(/activities/i)
   })
 
-  it('lists the detail window as the non-invalidating setting', () => {
+  it('lists the settings that do not invalidate a plan', () => {
     expect(NON_INVALIDATING_SETTINGS.has('detailWindowDays')).toBe(true)
+    expect(NON_INVALIDATING_SETTINGS.has('interests')).toBe(true)
     expect(NON_INVALIDATING_SETTINGS.has('endPoint')).toBe(false)
+  })
+
+  // Requested 2026-08-19: "I'd also like for adding an interest to not flag
+  // the plan as stale." An interest steers what the next search looks for;
+  // it is not something the existing days were built against.
+  it('leaves a ready plan alone when an interest is added', async () => {
+    updateDocMock.mockClear()
+    await updateTripSettings('trip1', { interests: ['hiking', 'hot springs'] }, 'ready')
+
+    const [, written] = updateDocMock.mock.calls[0]
+    expect(written).toEqual({ 'settings.interests': ['hiking', 'hot springs'] })
+    expect(written).not.toHaveProperty('planMeta.status')
   })
 })

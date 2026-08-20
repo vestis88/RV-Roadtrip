@@ -1,7 +1,10 @@
 import { useState } from 'react'
 
+import { describePlanDrift, type PlanDrift } from '../lib/planDrift'
+
 interface ExecutionModePromptProps {
-  behindKm: number | null
+  /** Non-null only when the gap is worth interrupting for — see planDrift. */
+  drift: PlanDrift | null
   permissionDenied: boolean
   onReplan: () => void
   onSnooze: () => void
@@ -9,7 +12,7 @@ interface ExecutionModePromptProps {
 }
 
 export function ExecutionModePrompt({
-  behindKm,
+  drift,
   permissionDenied,
   onReplan,
   onSnooze,
@@ -18,15 +21,16 @@ export function ExecutionModePrompt({
   const [lat, setLat] = useState('')
   const [lng, setLng] = useState('')
 
-  if (behindKm != null) {
+  if (drift) {
     return (
       <div
         data-testid="replan-prompt"
         className="mx-4 mt-3 flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 shadow-sm sm:mx-auto dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
       >
         <span>
-          You're {behindKm.toFixed(0)} km behind plan. Re-plan the rest of the
-          trip?
+          {/* Days first, because that is the unit the decision is made in —
+            * "180 km behind plan" is a number nobody paces a trip by. */}
+          {describePlanDrift(drift)} Re-plan the rest of the trip?
         </span>
         <div className="flex shrink-0 gap-2">
           <button

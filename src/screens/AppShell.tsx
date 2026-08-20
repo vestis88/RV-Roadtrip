@@ -17,7 +17,7 @@ import { deleteTrip as deleteTripCallable } from '../lib/deleteTrip'
 function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
   const { days } = useTripDays(tripId)
   const {
-    behindKm,
+    drift,
     permissionDenied,
     replan,
     snoozeToday,
@@ -26,7 +26,7 @@ function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
 
   return (
     <ExecutionModePrompt
-      behindKm={behindKm}
+      drift={drift}
       permissionDenied={permissionDenied}
       onReplan={() => replan().catch(console.error)}
       onSnooze={snoozeToday}

@@ -1,23 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  haversineDistanceKm,
-  isTripActiveToday,
-  shouldPromptReplan,
-} from './executionMode'
-
-describe('shouldPromptReplan', () => {
-  it('does not prompt at 49 km behind', () => {
-    expect(shouldPromptReplan(49)).toBe(false)
-  })
-
-  it('prompts at 51 km behind', () => {
-    expect(shouldPromptReplan(51)).toBe(true)
-  })
-
-  it('does not prompt exactly at the 50 km threshold', () => {
-    expect(shouldPromptReplan(50)).toBe(false)
-  })
-})
+import { haversineDistanceKm, isTripActiveToday } from './executionMode'
 
 describe('haversineDistanceKm', () => {
   it('is ~0 for the same point', () => {

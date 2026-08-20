@@ -63,6 +63,22 @@ export function describeDetailWindow(days: number): string {
  * put "Re-plan trip" in front of a traveler who moved a slider, asking them
  * to pay for a full regeneration to get something they already have.
  */
-export const NON_INVALIDATING_SETTINGS = new Set<string>(['detailWindowDays'])
+export const NON_INVALIDATING_SETTINGS = new Set<string>([
+  'detailWindowDays',
+  // Interests, added 2026-08-19 at the traveler's request, and for a
+  // different reason from the window above.
+  //
+  // An interest is not a constraint the existing days were built against —
+  // it is a preference for what to LOOK FOR next. Adding "hot springs"
+  // does not make yesterday's route wrong; it makes the next rescan, the
+  // next "Find more stops", and any re-plan the traveler chooses to run
+  // search for hot springs. Flagging the whole plan stale for it puts
+  // "Re-plan trip" in front of someone who ticked a box, and asks them to
+  // pay for a full regeneration to express an interest. Notes already
+  // behave this way — NotesScreen writes them without going through here at
+  // all — so this also makes the two halves of "what should we look for"
+  // agree with each other.
+  'interests',
+])
 
 export { DEFAULT_DETAIL_WINDOW_DAYS }

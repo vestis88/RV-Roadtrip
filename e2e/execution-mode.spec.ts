@@ -54,8 +54,13 @@ test('shows a replan prompt when >50km behind, and Snooze suppresses it for the 
   await expect(page.getByTestId('replan-prompt')).toBeVisible({
     timeout: 10_000,
   })
+  // This fixture seeds only today, so today IS the last night and there is
+  // no remaining pace to express the gap in days against — planDrift's
+  // documented fallback to the absolute distance. The days path is covered
+  // in src/lib/planDrift.test.ts, which can build a multi-night plan without
+  // a Places key.
   await expect(page.getByTestId('replan-prompt')).toContainText(
-    'behind plan',
+    /short of tonight's stop/,
   )
 
   await page.getByTestId('replan-prompt-snooze').click()

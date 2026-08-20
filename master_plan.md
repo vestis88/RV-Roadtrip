@@ -1311,6 +1311,56 @@ was extracted rather than copied a third time:
   came last. It says which attempt hit what now, which matters on the one path
   whose answers can contain "the search tool was unavailable".
 
+### 2026-08-19 — drift measured in days, and interests stopped invalidating
+
+Two asked for together: "I'd also like for adding an interest to not flag the
+plan as stale" and "check for an option to dynamically replan based on gps
+position. How is a drift in the plan handled. If you for instance are one day
+behind, how is this taken care of?"
+
+**Interests joined `NON_INVALIDATING_SETTINGS`**, for a different reason from
+the detail window already there. An interest is not a constraint the existing
+days were built against — it is a preference for what to LOOK FOR next.
+Adding "hot springs" does not make yesterday's route wrong; it makes the next
+rescan, the next "Find more stops" and any re-plan search for hot springs.
+Notes already behaved this way (NotesScreen writes them without going through
+`updateTripSettings` at all), so this also makes the two halves of "what
+should we look for" agree with each other.
+
+**The drift check was answering a different question from the one asked.** It
+existed and worked — `useExecutionMode` polls geolocation on mount and every
+30 minutes while today is inside the trip's dates, and `replanTrip` already
+had the good part: a replan triggered by falling behind is told to make the
+FIRST day easy and spread the catch-up across the remainder, never to stretch
+today. But what it measured was straight-line distance from here to TONIGHT'S
+overnight town, over a flat 50 km. Three faults:
+
+- **No sign.** Parking 60 km PAST tonight's town — comfortably ahead —
+  measured exactly like stopping 60 km short of it, so a good day was as
+  likely to raise the banner as a bad one.
+- **No units anyone plans in.** "One day behind" was unanswerable: 60 km on a
+  slow, sight-heavy stretch IS a day, while 180 km on a transit day is an
+  afternoon.
+- **Blind to the trip.** One threshold for a 200 km week and a 4,000 km
+  month.
+
+`src/lib/planDrift.ts` measures progress ALONG the planned route instead —
+projecting the current position onto the polyline of overnight points, so
+halfway between two nights reads as halfway rather than as "at the nearer
+town" — compares it to where the plan says tonight ends, and converts the gap
+into days using the pace of the days that are LEFT (which is where catching
+up actually happens). The banner leads with days and keeps the kilometres as
+evidence. Prompting needs both gates: far enough absolutely AND relative to
+the trip's own pace. Being ahead never prompts, and a negative gap is never
+sent to the replan as `behindScheduleKm`.
+
+Straight-line × `ROAD_DISTANCE_FACTOR` throughout, deliberately: this decides
+whether to ASK a question, not what to do about it. The replan measures
+properly.
+
+Known and deliberate: on the final night there is no remaining pace, so the
+gap cannot be expressed in days and it falls back to the absolute distance.
+
 ### 2026-08-19 — the overview stopped disappearing when planning started
 
 Reported: "I'm not happy with how the overview is gone after the plan is
