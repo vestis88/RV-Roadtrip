@@ -133,6 +133,8 @@ export function buildExploreCandidateWrites(
           country: candidate.country,
           why: candidate.why,
           status: 'candidate',
+          // Research: a Claude call paid for it. See corridorStopSchema.origin.
+          origin: 'traveler',
           linkedDayIds: [],
           priority: candidate.priority,
           region: region.region,

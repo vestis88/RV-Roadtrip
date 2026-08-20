@@ -93,6 +93,11 @@ export function AddCorridorStopForm({
         lng: location.lng,
         ...(why.trim() ? { why: why.trim() } : {}),
         status: 'locked',
+        // A pin the traveler dropped by hand is research too — and it writes
+        // exactly the fields generation's own overnight-town stops write, so
+        // without this the two are indistinguishable. See
+        // corridorStopSchema.origin.
+        origin: 'traveler',
         linkedDayIds: [],
       })
       await addDoc(collection(db, 'trips', tripId, 'corridorStops'), stop)

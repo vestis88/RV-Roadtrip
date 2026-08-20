@@ -602,6 +602,28 @@ export const corridorStopSchema = z.object({
   // for a hand-dropped pin, for a listing with no photo, and for every stop
   // curated before this existed.
   photoUrl: z.string().url().optional(),
+  /**
+   * Who put this stop on the trip (2026-08-19).
+   *
+   * 'traveler' — curated in explore mode, found by a rescan, or pinned by
+   * hand. This is research: it cost a Claude call or a deliberate decision,
+   * and a regeneration must not throw it away.
+   * 'plan' — minted by generation itself, one per distinct overnight town
+   * (see buildCorridorStopWrites). It describes the plan that exists, so a
+   * regeneration replacing that plan should replace it too.
+   *
+   * Needed because the two are otherwise indistinguishable. A hand-dropped
+   * pin writes exactly the fields a generated overnight town does — name,
+   * coordinates, country, why — so no amount of field-sniffing separates
+   * them, and the `committed` status they both end up in says only "this is
+   * in the itinerary", not where it came from.
+   *
+   * ABSENT MEANS 'plan' wherever that distinction decides a deletion. Every
+   * stop written before this field existed carries nothing, and the
+   * conservative reading keeps those trips behaving exactly as they did
+   * rather than resurrecting stops nobody asked to keep.
+   */
+  origin: z.enum(['traveler', 'plan']).optional(),
 })
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per

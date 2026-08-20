@@ -41,9 +41,21 @@ interface SettingsScreenProps {
   trip: Trip
 }
 
+/**
+ * "Re-plan trip" became "Rebuild plan" on 2026-08-19, because it was not the
+ * same operation as the other two things called re-plan and it destroyed
+ * more than they do.
+ *
+ * This button submits kind 'full': every day deleted and written again from
+ * scratch, taking with it which activity you chose, which restaurant, which
+ * overnight option, and what you dismissed. The GPS banner's "Re-plan" and
+ * "Request changes" submit kind 'replan', which replaces only days from
+ * today forward and leaves the past alone. Three buttons, two behaviours,
+ * and the names said nothing about which was which.
+ */
 const GENERATE_LABEL: Record<'idle' | 'stale' | 'error', string> = {
   idle: 'Generate full plan',
-  stale: 'Re-plan trip',
+  stale: 'Rebuild plan',
   error: 'Retry',
 }
 
@@ -648,7 +660,7 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
           description={
             trip.planMeta.status === 'idle'
               ? "This fills in every day's route, activities, and restaurants — the expensive step. If you'd rather find the stops worth building around first without paying for full detail, use \"Generate overview\" instead."
-              : 'This replaces every day from scratch — a full regeneration, not an incremental update to just what changed.'
+              : 'This deletes every day and writes the trip again from scratch — including which activities, restaurants and overnight stops you had chosen. Your researched stops are kept, and the ones you locked in are handed to the new plan. To change the days you have without losing that work, use "Request changes" on the Map tab instead.'
           }
           confirmLabel={GENERATE_LABEL[trip.planMeta.status as 'idle' | 'stale' | 'error']}
           submitting={submitting}

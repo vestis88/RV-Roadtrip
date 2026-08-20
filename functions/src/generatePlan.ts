@@ -6,6 +6,7 @@ import {
 import { onDocumentCreated } from 'firebase-functions/firestore'
 import {
   activitySchema,
+  corridorStopSchema,
   detailWindowDaysOf,
   haversineDistanceKm,
   restaurantSchema,
@@ -28,7 +29,7 @@ import {
   planRunEndedFields,
   wasSubmittedBeforeRunEnded,
 } from './planLock.js'
-import { buildCorridorStopWrites } from './corridorStops.js'
+import { buildCorridorStopWrites, isTravelerResearch } from './corridorStops.js'
 import { runReconcileCorridor } from './corridorReconciliation.js'
 import { runInsertRestDay } from './insertRestDay.js'
 import { runReplan, type ReplanContext } from './replanTrip.js'
@@ -303,12 +304,43 @@ export async function writeGeneratedDays(
   // It also made generation the odd one out: replanTrip deletes only stops
   // linked to days it is actually replacing (see its own staleCorridorStops),
   // and a stop with no linked days survives a replan untouched.
+  //
+  // Refined 2026-08-19: 'committed' says "this is in the itinerary", not
+  // where it came from, and the traveler's own stops end up there too — Lock
+  // in, then Add to route (corridorReconciliation), and a curated sight is
+  // suddenly `committed`. Deleting on status alone therefore punished
+  // exactly the stops the traveler had committed to most: a sight left
+  // sitting in the list survived a rebuild, and the same sight put into the
+  // route did not. Those are returned to `locked` with their day links
+  // cleared instead of deleted — still the traveler's, still curation, and
+  // ready for the plan that is about to be written. Only generation's own
+  // overnight-town stops (origin 'plan', and anything older with no origin
+  // at all) are removed.
+  const isCommitted = (stop: CorridorStop) => stop.status === 'committed'
+  const rescued = existingCorridorSnap.docs.filter((doc) => {
+    const stop = doc.data() as CorridorStop
+    return isCommitted(stop) && isTravelerResearch(stop)
+  })
   const preservedStops = existingCorridorSnap.docs.filter(
-    (stop) => (stop.data() as CorridorStop).status !== 'committed',
+    (stop) => !isCommitted(stop.data() as CorridorStop),
   )
   existingCorridorSnap.docs
-    .filter((stop) => (stop.data() as CorridorStop).status === 'committed')
+    .filter((doc) => {
+      const stop = doc.data() as CorridorStop
+      return isCommitted(stop) && !isTravelerResearch(stop)
+    })
     .forEach((stop) => writes.push({ op: 'delete', ref: stop.ref }))
+  for (const doc of rescued) {
+    writes.push({
+      op: 'set',
+      ref: doc.ref,
+      data: corridorStopSchema.parse({
+        ...(doc.data() as CorridorStop),
+        status: 'locked',
+        linkedDayIds: [],
+      }),
+    })
+  }
 
   const writtenDays: { ref: DocumentReference; day: TripDay }[] = []
   for (const { day, activities, restaurants } of days) {
@@ -411,13 +443,21 @@ export async function runFullGeneration(
   // 'full' researches the trip from nothing, which is exactly right for a
   // trip nobody has explored yet, while an explore commit with an empty
   // corridor is a mistake worth reporting.
+  // 'committed' is in the query as of 2026-08-19, filtered below. A stop the
+  // traveler locked in and then added to the route is `committed`, and
+  // leaving it out meant committing to a sight made it LESS likely to appear
+  // in the next plan than leaving it in the list would have — the opposite
+  // of what the traveler was saying by committing to it. Generation's own
+  // overnight-town stops are `committed` too, and those must NOT seed the
+  // next plan: they describe the route being replaced, and feeding them back
+  // would quietly pin the rebuild to the old one.
   const candidatesSnap = await tripRef
     .collection('corridorStops')
-    .where('status', 'in', ['candidate', 'locked'])
+    .where('status', 'in', ['candidate', 'locked', 'committed'])
     .get()
-  const curatedStops = candidatesSnap.docs.map(
-    (doc) => doc.data() as CorridorStop,
-  )
+  const curatedStops = candidatesSnap.docs
+    .map((doc) => doc.data() as CorridorStop)
+    .filter((stop) => stop.status !== 'committed' || isTravelerResearch(stop))
   const curated = buildRegionHighlightsFromCandidates(curatedStops)
   // The order the traveler actually committed to on the map, worked out by
   // Google against real roads. The route phase cannot derive it — a straight

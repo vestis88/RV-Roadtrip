@@ -266,7 +266,7 @@ test('the detail-window slider persists, and does not send a finished plan stale
 
   // The point of the exclusion: every other setting marks a ready plan
   // stale, and this one must not — the days it changes are filled in when
-  // they are opened, so "Re-plan trip" would be asking the traveler to pay
+  // they are opened, so "Rebuild plan" would be asking the traveler to pay
   // for something they already have.
   await expect(page.getByTestId('detail-window-input')).toHaveValue('7')
   await expect(page.getByTestId('plan-status')).toHaveText('ready')

@@ -52,7 +52,25 @@ export function buildCorridorStopWrites(
       country: day.overnight.country,
       why: day.highlightReason,
       status: 'committed',
+      // This stop IS the plan, not research about it — see
+      // corridorStopSchema.origin. A regeneration that replaces the plan
+      // replaces these too.
+      origin: 'plan',
       linkedDayIds: dayIds,
     }),
   }))
+}
+
+/**
+ * Whether a stop is the traveler's own research rather than a description of
+ * the plan being replaced.
+ *
+ * ABSENT origin reads as 'plan' deliberately. Every stop written before that
+ * field existed carries nothing, and this predicate gates a deletion — so the
+ * conservative reading keeps existing trips behaving exactly as they did,
+ * rather than resurrecting stops nobody asked to keep. New curation is
+ * stamped at every write site, so the protection applies from here on.
+ */
+export function isTravelerResearch(stop: { origin?: 'traveler' | 'plan' }): boolean {
+  return stop.origin === 'traveler'
 }

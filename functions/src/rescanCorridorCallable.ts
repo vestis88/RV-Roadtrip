@@ -149,6 +149,8 @@ export async function runRescanCorridor(
           // had none here.
           ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
           status: isExploring ? 'candidate' : 'proposed',
+          // A search the traveler asked for and paid for.
+          origin: 'traveler',
           linkedDayIds: [],
           ...(isExploring
             ? { priority: 'worth-a-detour' as const, rank: nextRank + i }

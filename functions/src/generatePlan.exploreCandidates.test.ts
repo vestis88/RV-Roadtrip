@@ -257,3 +257,141 @@ describe('generateRealPlan: highlights param', () => {
     expect(planTripMock).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * Reported 2026-08-19: "I'm trying to find ways to not accidentally lose
+ * already researched data."
+ *
+ * The hole: `committed` says "this is in the itinerary", not where the stop
+ * came from, and the traveler's own stops end up there too — Lock in, then
+ * Add to route. A full regeneration deleted every committed stop and seeded
+ * only from candidate/locked, so COMMITTING to a sight made it less likely
+ * to appear in the next plan than leaving it in the list would have.
+ */
+describe('a rebuild and the traveler’s own committed stops', () => {
+  // The seed side of the same hole. Preserving the stop is only half a fix:
+  // if it is not offered to the plan being written, it survives as a pin
+  // nobody proposed and the rebuild simply routes around it.
+  it('offers a committed curated stop to the plan replacing it', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidRebuildSeedsCurated')
+    const tripRef = db.collection('trips').doc(tripId)
+    await tripRef.collection('corridorStops').add({
+      name: 'Jotunheimen National Park',
+      lat: 61.5,
+      lng: 8.3,
+      country: 'NO',
+      why: 'Marked day hikes from the road.',
+      status: 'committed',
+      origin: 'traveler',
+      linkedDayIds: ['someOldDay'],
+      priority: 'must-see',
+      region: 'Gudbrandsdalen',
+      rank: 0,
+    })
+    // And one of generation's own, which must NOT seed the rebuild: it
+    // describes the route being replaced, and feeding it back would pin the
+    // new plan to the old one.
+    await tripRef.collection('corridorStops').add({
+      name: 'Otta',
+      lat: 61.77,
+      lng: 9.54,
+      country: 'NO',
+      status: 'committed',
+      origin: 'plan',
+      linkedDayIds: ['someOldDay'],
+    })
+
+    planTripMock.mockReset()
+    generateSkeletonFromHighlightsMock
+      .mockReset()
+      .mockResolvedValue(fixtureSkeleton([0]))
+    resolveSkeletonDaysMock.mockReset().mockResolvedValue([])
+
+    const { runFullGeneration } = await import('./generatePlan.js')
+    await runFullGeneration(tripId, 'full', Date.now() + 60_000)
+
+    expect(generateSkeletonFromHighlightsMock).toHaveBeenCalledTimes(1)
+    const seeded = generateSkeletonFromHighlightsMock.mock.calls[0][0] as {
+      highlights: { regions: { candidateStops: { sight: string }[] }[] }
+    }
+    const names = seeded.highlights.regions.flatMap((region) =>
+      region.candidateStops.map((stop) => stop.sight),
+    )
+    expect(names).toContain('Jotunheimen National Park')
+    expect(names).not.toContain('Otta')
+  })
+
+  it('keeps a curated stop that had been added to the route, as locked', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidRebuildKeepsCurated')
+    const tripRef = db.collection('trips').doc(tripId)
+    const stops = tripRef.collection('corridorStops')
+    const curated = await stops.add({
+      name: 'Jotunheimen National Park',
+      lat: 61.5,
+      lng: 8.3,
+      country: 'NO',
+      why: 'Marked day hikes from the road.',
+      status: 'committed',
+      origin: 'traveler',
+      linkedDayIds: ['someOldDay'],
+      priority: 'must-see',
+      region: 'Gudbrandsdalen',
+      rank: 0,
+    })
+
+    const { writeGeneratedDays } = await import('./generatePlan.js')
+    await writeGeneratedDays(tripRef, [])
+
+    const after = await curated.get()
+    expect(after.exists).toBe(true)
+    expect(after.data()?.status).toBe('locked')
+    // Its old day links describe a plan that no longer exists.
+    expect(after.data()?.linkedDayIds).toEqual([])
+    expect(after.data()?.priority).toBe('must-see')
+  })
+
+  it('still removes the overnight-town stops generation minted itself', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidRebuildDropsPlanStops')
+    const tripRef = db.collection('trips').doc(tripId)
+    const minted = await tripRef.collection('corridorStops').add({
+      name: 'Otta',
+      lat: 61.77,
+      lng: 9.54,
+      country: 'NO',
+      why: 'Gateway to the park.',
+      status: 'committed',
+      origin: 'plan',
+      linkedDayIds: ['someOldDay'],
+    })
+
+    const { writeGeneratedDays } = await import('./generatePlan.js')
+    await writeGeneratedDays(tripRef, [])
+
+    expect((await minted.get()).exists).toBe(false)
+  })
+
+  // Everything written before `origin` existed carries none, and this gates a
+  // deletion — so the conservative reading keeps old trips behaving exactly
+  // as they did rather than resurrecting stops nobody asked to keep.
+  it('treats a stop with no recorded origin the way it always did', async () => {
+    const db = getFirestore()
+    const { tripId } = await createTripForUser('uidRebuildLegacyStop')
+    const tripRef = db.collection('trips').doc(tripId)
+    const legacy = await tripRef.collection('corridorStops').add({
+      name: 'Lillehammer',
+      lat: 61.11,
+      lng: 10.46,
+      country: 'NO',
+      status: 'committed',
+      linkedDayIds: ['someOldDay'],
+    })
+
+    const { writeGeneratedDays } = await import('./generatePlan.js')
+    await writeGeneratedDays(tripRef, [])
+
+    expect((await legacy.get()).exists).toBe(false)
+  })
+})

@@ -1311,6 +1311,61 @@ was extracted rather than copied a third time:
   came last. It says which attempt hit what now, which matters on the one path
   whose answers can contain "the search tool was unavailable".
 
+### 2026-08-19 — committing to a stop stopped being the way to lose it
+
+Asked: "Will changing trip dates/departure town try to keep the already
+derived plan somehow? I'm trying to find ways to not accidentally lose
+already researched data."
+
+Changing a setting deletes nothing — it marks a ready plan `stale`. The loss,
+if any, happens at the button afterwards, and there are two very different
+ones both called some form of "re-plan":
+
+| | Trip Setup's stale button | GPS banner "Re-plan" / "Request changes" |
+|---|---|---|
+| kind | `'full'` | `'replan'` |
+| Days | **all** deleted and rebuilt | only days from today forward |
+| Corridor stops | deletes `committed` | deletes only stops linked to replaced days |
+
+Diary (`trips/{id}/log`, a sibling of `days`), notes, and country research
+(a top-level collection, deliberately outside the trip) survive both.
+
+**The hole.** `committed` says "this is in the itinerary", not where the stop
+came from — and the traveler's own stops end up there too, via Lock in → Add
+to route (`corridorReconciliation`). A full regeneration deleted every
+committed stop and seeded only from `candidate`/`locked`, so **committing to
+a sight made it less likely to appear in the next plan than leaving it in the
+list would have.** Precisely backwards.
+
+The literal fix I first proposed — put `committed` in the seed query — turned
+out to be wrong, and checking before changing is what caught it: most
+committed stops are the **overnight towns generation mints itself**
+(`buildCorridorStopWrites`), and seeding those would quietly pin every
+rebuild to the route it was replacing. Worse, a hand-dropped pin writes
+exactly the fields one of those towns does — name, coordinates, country,
+why — so no field-sniffing can separate them.
+
+So `corridorStop.origin` records it explicitly: `'traveler'` for curation,
+rescan finds and hand-dropped pins; `'plan'` for generation's own overnight
+towns. Then:
+
+- A committed stop with `origin: 'traveler'` is **returned to `locked`** with
+  its day links cleared, rather than deleted — still curation, ready for the
+  plan about to be written.
+- It is also **seeded** into that plan, so it is proposed again rather than
+  surviving as a pin nobody offered.
+- Generation's own stops are still deleted, and still excluded from the seed.
+- **Absent origin reads as `'plan'`.** Every stop written before the field
+  existed carries none, and this gates a deletion — the conservative reading
+  keeps existing trips behaving exactly as they did rather than resurrecting
+  stops nobody asked to keep.
+
+And the naming, which was its own trap: the stale-plan button is **"Rebuild
+plan"** now, not "Re-plan trip", and its dialog says what actually goes (the
+activities, restaurants and overnight stops you chose), what stays (your
+researched stops, with locked ones handed to the new plan), and points at
+"Request changes" as the non-destructive route.
+
 ### 2026-08-19 — drift measured in days, and interests stopped invalidating
 
 Two asked for together: "I'd also like for adding an interest to not flag the
