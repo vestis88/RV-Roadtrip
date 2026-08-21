@@ -9,6 +9,9 @@ const updateDocMock = vi.fn().mockResolvedValue(undefined)
 vi.mock('firebase/firestore', () => ({
   doc: (_db: unknown, ..._path: string[]) => ({ id: _path[_path.length - 1] }),
   updateDoc: (ref: { id: string }, data: unknown) => updateDocMock(ref.id, data),
+  // Stands in for the real sentinel so the assertions below can see which
+  // settings were recorded, not just that something was.
+  arrayUnion: (...values: string[]) => ({ arrayUnion: values }),
 }))
 vi.mock('./firebase', () => ({ db: {} }))
 
@@ -73,6 +76,11 @@ describe('updateTripSettings — what actually invalidates a plan', () => {
 
     const [, written] = updateDocMock.mock.calls[0]
     expect(written).toMatchObject({ 'planMeta.status': 'stale' })
+    // Recorded by name: a date-only staleness can be answered by re-dating
+    // the days, and nothing else can, so the reason has to survive the write.
+    expect(written).toMatchObject({
+      'planMeta.staleSettings': { arrayUnion: ['maxDriveHoursPerDay'] },
+    })
   })
 
   // A single edit carrying both is an edit that invalidates.
@@ -86,6 +94,11 @@ describe('updateTripSettings — what actually invalidates a plan', () => {
 
     const [, written] = updateDocMock.mock.calls[0]
     expect(written).toMatchObject({ 'planMeta.status': 'stale' })
+    // Only the invalidating half is recorded — the window rode along and is
+    // not a reason for anything.
+    expect(written).toMatchObject({
+      'planMeta.staleSettings': { arrayUnion: ['maxDriveHoursPerDay'] },
+    })
   })
 
   // The existing rule, unchanged: only a ready plan has anything to lose.

@@ -32,6 +32,12 @@ import { usePlanBusy } from '../lib/planBusy'
 import { updateTripSettings } from '../lib/updateTripSettings'
 import { hasRoute } from '../lib/validateRoute'
 import {
+  describeDateShift,
+  detectDateShift,
+  shiftPlanDates,
+} from '../lib/dateShift'
+import { useTripDays } from '../hooks/useTripDays'
+import {
   DETAIL_WINDOW_LABEL,
   describeDetailWindow,
 } from '../lib/detailWindow'
@@ -61,6 +67,9 @@ const GENERATE_LABEL: Record<'idle' | 'stale' | 'error', string> = {
 
 export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   const navigate = useNavigate()
+  // Read here only so a pure date change can be answered by re-dating the
+  // days rather than by regenerating them.
+  const { days } = useTripDays(tripId)
   const [settings, setSettings] = useState<TripSettings>(trip.settings)
   const [submitting, setSubmitting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -249,6 +258,34 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
   // confirmation the way the expensive full generation does. Navigates to
   // the Map tab once it lands so the traveler immediately sees the result,
   // rather than triggering it and leaving them wondering where it went.
+  /**
+   * Re-dates the plan instead of rebuilding it. No Claude call and no Places
+   * call: nothing about the days is re-decided, only when they happen.
+   */
+  const [shifting, setShifting] = useState(false)
+  const dateShift = detectDateShift({
+    settings,
+    planMeta: trip.planMeta,
+    dayDates: days.map((day) => day.date),
+  })
+
+  async function shiftDates(offsetDays: number) {
+    setSaveError(null)
+    setShifting(true)
+    try {
+      await shiftPlanDates(
+        tripId,
+        days.map((day) => ({ id: day.id, date: day.date })),
+        offsetDays,
+      )
+    } catch (error) {
+      console.error('Failed to shift the plan dates', error)
+      setSaveError('Could not move the plan — check your connection.')
+    } finally {
+      setShifting(false)
+    }
+  }
+
   async function generateOverview() {
     setOverviewError(null)
     setOverviewDisconnected(null)
@@ -542,6 +579,22 @@ export function SettingsScreen({ tripId, trip }: SettingsScreenProps) {
               className="btn btn-secondary"
             >
               {exploring ? 'Finding great stops…' : 'Generate overview'}
+            </button>
+          )}
+          {/* The cheap answer to "we're leaving a week later", offered BEFORE
+            * the expensive one. Moving a trip without changing its length
+            * changes nothing about the plan except every day's date — see
+            * detectDateShift, which is also why this only appears when the
+            * dates are the whole reason the plan went stale. */}
+          {dateShift && (
+            <button
+              type="button"
+              data-testid="shift-dates-button"
+              onClick={() => void shiftDates(dateShift.offsetDays)}
+              disabled={shifting || planBusy}
+              className="btn btn-primary disabled:opacity-40"
+            >
+              {shifting ? 'Moving…' : describeDateShift(dateShift)}
             </button>
           )}
           {(trip.planMeta.status === 'idle' ||

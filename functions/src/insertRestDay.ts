@@ -1,4 +1,4 @@
-import { getFirestore, type DocumentData } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore, type DocumentData } from 'firebase-admin/firestore'
 import {
   activitySchema,
   corridorStopSchema,
@@ -181,6 +181,9 @@ export async function runInsertRestDay(
     // The trip really is one calendar day longer now.
     'settings.endDate': addOneDay(trip.settings.endDate),
     'planMeta.status': 'ready',
+    // Whatever made it stale has now been planned for — see
+    // planMeta.staleSettings.
+    'planMeta.staleSettings': FieldValue.delete(),
     'planMeta.totalKm': totalKm,
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
   })

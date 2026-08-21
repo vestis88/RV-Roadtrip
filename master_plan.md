@@ -1581,6 +1581,51 @@ Still open, deliberately:
   continuation chaining) is now rarely needed but still correct — see the
   "route eagerly, detail lazily" entry above.
 
+### 2026-08-19 — moving a trip stopped costing the whole plan
+
+Asked, after the entry above: "how to just change dates of the trip then?"
+and "so I can change dates during planning?" The honest answer was that you
+could edit them, and then the only button on offer was **Rebuild plan** —
+every day deleted, every per-day choice with it. Leaving a week later cost
+the same as changing the route.
+
+Moving a trip without changing its length changes nothing except every day's
+date. Same towns, same order, same activities. So `src/lib/dateShift.ts`
+offers exactly that, as a second button on Trip Setup above the rebuild:
+**"Move the plan 7 days later"** — one `writeBatch` rewriting each day's
+`date`, plan back to `ready`, no Claude call and no Places call.
+
+The condition it is offered under is the whole design:
+
+- **Only when dates are the entire reason the plan is stale.** That needed a
+  new field — `planMeta.staleSettings`, written by `updateTripSettings` with
+  `arrayUnion` as the invalidating keys that were actually edited, and
+  deleted (`FieldValue.delete()`) at every point generation marks a plan
+  `ready`. Staleness on its own could not carry this: a trip whose
+  drive-hours ceiling also changed has a problem re-dating does not answer,
+  and quietly marking it ready again would bury that.
+- **A missing reason is not "only the dates".** Plans that went stale before
+  the field existed carry nothing, and the shortcut is not offered for them.
+  No worse off than before, and nothing is guessed.
+- **Never when the trip's LENGTH changed.** Checked against the plan's own
+  span (first day to last) rather than trusting the settings: same span plus
+  a moved start is a shift; anything else is a real planning problem — where
+  the extra night goes, what gets cut — and stays with Rebuild plan.
+- **One batch.** A half-shifted plan, days carrying two different offsets,
+  would be worse than the state being fixed.
+
+So the answer to "can I change dates during planning?" is now yes for a
+move, and still a rebuild for a longer or shorter trip — which is the
+distinction that was always true and never surfaced.
+
+A verification note, since the last entry made one: the length-change e2e
+test failed on first run and the bug was in the test, not the app. It edited
+a date immediately after `page.reload()`, before the seeded `ready` status
+had reached the client — and `updateTripSettings` deliberately only marks a
+plan stale when it can see it was ready, so nothing happened. It now waits
+for `plan-status` to read `ready` first. Worth recording because the failure
+looked exactly like a missing invalidation rule.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

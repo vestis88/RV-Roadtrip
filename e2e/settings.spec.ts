@@ -419,3 +419,106 @@ test('a generation already running server-side shows as in-progress on both Trip
     'Finding great stops…',
   )
 })
+
+/**
+ * Requested 2026-08-19: "how to just change dates of the trip then?" — and
+ * the honest answer was that you could not, cheaply. A date edit marked the
+ * plan stale and the only way out was a full rebuild, which deletes every day
+ * and the traveler's per-day choices with it. Moving a trip without changing
+ * its length changes nothing but every day's date.
+ */
+test('moving the trip a week later re-dates the plan instead of rebuilding it', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const tripRef = adminDb.collection('trips').doc(tripId)
+  const days = tripRef.collection('days')
+  const dayA = days.doc()
+  const dayB = days.doc()
+  await dayA.set({
+    index: 0,
+    date: '2026-07-10',
+    type: 'drive',
+    overnight: { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' },
+    summary: 'First day.',
+  })
+  await dayB.set({
+    index: 1,
+    date: '2026-07-11',
+    type: 'drive',
+    overnight: { name: 'Lom', lat: 61.84, lng: 8.57, country: 'NO' },
+    summary: 'Second day.',
+  })
+  await tripRef.update({
+    'settings.startDate': '2026-07-10',
+    'settings.endDate': '2026-07-11',
+    'planMeta.status': 'ready',
+  })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  // Move both ends a week out — the same trip, later.
+  await page.getByTestId('start-date-input').fill('2026-07-17')
+  await page.getByTestId('end-date-input').fill('2026-07-18')
+  await expect(page.getByTestId('plan-status')).toHaveText('stale')
+
+  // The cheap option is offered, and says which way it moves things.
+  const shift = page.getByTestId('shift-dates-button')
+  await expect(shift).toHaveText('Move the plan 7 days later')
+  await shift.click()
+
+  // Every day re-dated, plan usable again, and no regeneration ran.
+  await expect
+    .poll(async () => (await dayA.get()).data()?.date)
+    .toBe('2026-07-17')
+  await expect
+    .poll(async () => (await dayB.get()).data()?.date)
+    .toBe('2026-07-18')
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+  await expect(page.getByTestId('shift-dates-button')).toHaveCount(0)
+  // The summaries are the giveaway: a rebuild would have replaced them.
+  expect((await dayA.get()).data()?.summary).toBe('First day.')
+})
+
+// Adding or removing days is a real planning problem — where the extra night
+// goes, what gets cut — and re-dating cannot answer it.
+test('changing the trip’s length offers no shortcut', async ({ page }) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const tripRef = adminDb.collection('trips').doc(tripId)
+  await tripRef.collection('days').doc().set({
+    index: 0,
+    date: '2026-07-10',
+    type: 'drive',
+    overnight: { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' },
+    summary: 'First day.',
+  })
+  await tripRef.update({
+    'settings.startDate': '2026-07-10',
+    'settings.endDate': '2026-07-10',
+    'planMeta.status': 'ready',
+  })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  // Wait for the seeded status to reach the client: updateTripSettings only
+  // marks a plan stale when it can see it was ready, so editing a date before
+  // the snapshot arrives is a no-op and the assertion below would be testing
+  // the race, not the rule.
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  // Same start, later finish — the trip got longer.
+  await page.getByTestId('end-date-input').fill('2026-07-14')
+  await expect(page.getByTestId('plan-status')).toHaveText('stale')
+  await expect(page.getByTestId('shift-dates-button')).toHaveCount(0)
+  await expect(page.getByTestId('generate-plan-button')).toHaveText(
+    'Rebuild plan',
+  )
+})

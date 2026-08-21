@@ -295,6 +295,9 @@ export async function runReplan(
   const now = new Date().toISOString()
   await tripRef.update({
     'planMeta.status': 'ready',
+    // Whatever made it stale has now been planned for — see
+    // planMeta.staleSettings.
+    'planMeta.staleSettings': FieldValue.delete(),
     'planMeta.totalKm': totalKm,
     'planMeta.avgDriveMinutesPerDay': avgDriveMinutesPerDay,
     'planMeta.generatedAt': now,

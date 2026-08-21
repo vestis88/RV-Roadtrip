@@ -464,6 +464,9 @@ export async function runReconcileCorridor(
   await tripRef.update({
     ...(result.endDateChange ? { 'settings.endDate': result.endDateChange.to } : {}),
     'planMeta.status': 'ready',
+    // Whatever made it stale has now been planned for — see
+    // planMeta.staleSettings.
+    'planMeta.staleSettings': FieldValue.delete(),
     'planMeta.totalKm': result.totalKm,
     'planMeta.avgDriveMinutesPerDay': result.avgDriveMinutesPerDay,
     'planMeta.pacingWarnings':

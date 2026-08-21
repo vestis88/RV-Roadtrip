@@ -215,6 +215,17 @@ export const planMetaSchema = z.object({
   // mounts fresh with no memory of the search that just ran — the exact
   // primary entry point this distinction exists for.
   exploreLastRunAt: isoDateTime.optional(),
+  // Which settings have changed since this plan was generated — the reason
+  // it is `stale`, recorded rather than inferred (2026-08-19).
+  //
+  // Staleness on its own says "something no longer matches" and nothing
+  // about what, which is enough to offer a rebuild and not enough to offer
+  // anything cheaper. Shifting a plan's dates, for instance, fully answers a
+  // date change and answers nothing about a changed drive-hours ceiling, so
+  // whether that shortcut is honest depends entirely on what actually
+  // changed. Written with arrayUnion, so two edits before one regeneration
+  // both land; cleared wherever a plan reaches 'ready'.
+  staleSettings: z.array(z.string()).optional(),
   // The chosen countries that last came back with nothing, and which kind of
   // nothing it was — see functions/src/countryCoverage.ts.
   //
