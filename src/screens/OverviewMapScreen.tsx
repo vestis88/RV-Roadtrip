@@ -41,10 +41,7 @@ import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
-import {
-  RESCAN_RADIUS_KM,
-  visibleRadiusKm,
-} from '../lib/rescanCorridorAction'
+import { RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ReorderCorridorPanel } from '../components/ReorderCorridorPanel'
 import { DirectionsRoute } from '../components/DirectionsRoute'
 import { MapPanner } from '../components/MapPanner'
@@ -100,7 +97,9 @@ export function OverviewMapScreen() {
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
   const [routeError, setRouteError] = useState<string | null>(null)
   const [submittingChangeRequest, setSubmittingChangeRequest] = useState(false)
-  const [changeRequestError, setChangeRequestError] = useState<string | null>(null)
+  const [changeRequestError, setChangeRequestError] = useState<string | null>(
+    null,
+  )
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [selectedCorridorStopId, setSelectedCorridorStopId] = useState<
     string | null
@@ -208,7 +207,9 @@ export function OverviewMapScreen() {
   // the route; a 'proposed' stop must be locked first (ExploreCandidateCard
   // only offers "Add to route" once a stop is locked).
   const addableCorridorStops = corridorStops
-    .filter((stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0)
+    .filter(
+      (stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0,
+    )
     .map((stop) => ({ id: stop.id, name: stop.name }))
 
   const planStatus = trip.planMeta.status
@@ -366,7 +367,8 @@ export function OverviewMapScreen() {
         >
           {trip.planMeta.progressTotal
             ? `${trip.planMeta.progressCurrent ?? 0}/${trip.planMeta.progressTotal} days (${Math.round(
-                ((trip.planMeta.progressCurrent ?? 0) / trip.planMeta.progressTotal) *
+                ((trip.planMeta.progressCurrent ?? 0) /
+                  trip.planMeta.progressTotal) *
                   100,
               )}%)`
             : (trip.planMeta.progressLabel ?? 'Planning your route…')}
@@ -470,200 +472,208 @@ export function OverviewMapScreen() {
       )}
 
       {/* `flex-1` alone is `flex: 1 1 0%` — a basis of ZERO — so the moment a
-        * tall sibling appeared below it (the stops list added 2026-08-19)
-        * this map was starved to no height at all and only its absolutely
-        * positioned children were left, floating over the list. Reported as
-        * "now the map is gone". The floor is what makes the split safe;
-        * flex-1 still lets it take the whole screen when there is no list. */}
-      <div
-        className="relative min-h-[260px] flex-1"
-        data-testid="map-canvas"
-      >
-        {apiKey ? (
-          <GoogleMap
-            defaultCenter={{
-              lat: trip.settings.startPoint.lat,
-              lng: trip.settings.startPoint.lng,
-            }}
-            defaultZoom={zoom}
-            mapId="rv-trip-overview"
-            gestureHandling="greedy"
-            onCameraChanged={(event: MapCameraChangedEvent) => {
-              setZoom(event.detail.zoom)
-              // What "this area" means — see visibleRadiusKm. Stored as the
-              // four numbers rather than the object, which arrives fresh
-              // every frame of a drag.
-              setBounds((prev) =>
-                prev &&
-                prev.north === event.detail.bounds.north &&
-                prev.south === event.detail.bounds.south &&
-                prev.east === event.detail.bounds.east &&
-                prev.west === event.detail.bounds.west
-                  ? prev
-                  : event.detail.bounds,
-              )
-              // Fires every frame of a drag, and the centre arrives as a
-              // fresh object each time — storing it unconditionally
-              // re-rendered this whole screen (map + candidate list) per
-              // frame. Only the value matters here (it anchors "Rescan this
-              // area"/"Add stop"), so ignore no-op updates.
-              setCenter((prev) =>
-                prev.lat === event.detail.center.lat &&
-                prev.lng === event.detail.center.lng
-                  ? prev
-                  : event.detail.center,
-              )
-            }}
-          >
-            <DirectionsRoute points={routePoints} onError={setRouteError} />
-            {/* Only while aiming. Drawn on every map all the time, it
-                buried the pins under a boundary nobody had asked to see. */}
-            {aimingSearch && (
-              <SearchAreaCircle
-                center={center}
-                radiusKm={searchArea.radiusKm}
-                capped={searchArea.cappedFrom !== undefined}
-              />
-            )}
-            <MapPanner target={panTarget} />
-
-            <AdvancedMarker
-              position={{
+       * tall sibling appeared below it (the stops list added 2026-08-19)
+       * this map was starved to no height at all and only its absolutely
+       * positioned children were left, floating over the list. Reported as
+       * "now the map is gone". The floor is what makes the split safe;
+       * flex-1 still lets it take the whole screen when there is no list. */}
+      {/* Side by side once there is room, stacked otherwise — the same split
+       * ExploreMapScreen uses, and the one DayViewScreen has had since the
+       * beginning. `lg:landscape:` rather than `lg:`, because the 12.9"
+       * iPad is 1024px wide in PORTRAIT too: wide enough for the
+       * breakpoint, wrong shape for a split. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:landscape:flex-row">
+        <div className="relative min-h-[260px] flex-1" data-testid="map-canvas">
+          {apiKey ? (
+            <GoogleMap
+              defaultCenter={{
                 lat: trip.settings.startPoint.lat,
                 lng: trip.settings.startPoint.lng,
               }}
-              title="Start"
-            />
-            <AdvancedMarker
-              position={{
-                lat: trip.settings.endPoint.lat,
-                lng: trip.settings.endPoint.lng,
+              defaultZoom={zoom}
+              mapId="rv-trip-overview"
+              gestureHandling="greedy"
+              onCameraChanged={(event: MapCameraChangedEvent) => {
+                setZoom(event.detail.zoom)
+                // What "this area" means — see visibleRadiusKm. Stored as the
+                // four numbers rather than the object, which arrives fresh
+                // every frame of a drag.
+                setBounds((prev) =>
+                  prev &&
+                  prev.north === event.detail.bounds.north &&
+                  prev.south === event.detail.bounds.south &&
+                  prev.east === event.detail.bounds.east &&
+                  prev.west === event.detail.bounds.west
+                    ? prev
+                    : event.detail.bounds,
+                )
+                // Fires every frame of a drag, and the centre arrives as a
+                // fresh object each time — storing it unconditionally
+                // re-rendered this whole screen (map + candidate list) per
+                // frame. Only the value matters here (it anchors "Rescan this
+                // area"/"Add stop"), so ignore no-op updates.
+                setCenter((prev) =>
+                  prev.lat === event.detail.center.lat &&
+                  prev.lng === event.detail.center.lng
+                    ? prev
+                    : event.detail.center,
+                )
               }}
-              title="Finish"
-            />
+            >
+              <DirectionsRoute points={routePoints} onError={setRouteError} />
+              {/* Only while aiming. Drawn on every map all the time, it
+                buried the pins under a boundary nobody had asked to see. */}
+              {aimingSearch && (
+                <SearchAreaCircle
+                  center={center}
+                  radiusKm={searchArea.radiusKm}
+                  capped={searchArea.cappedFrom !== undefined}
+                />
+              )}
+              <MapPanner target={panTarget} />
 
-            {tiers.showOvernightStops &&
-              days.map((day) => (
-                <AdvancedMarker
-                  key={day.id}
-                  position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
-                  title={`Day ${day.index + 1}: ${day.overnight.name} ${isoCountryFlag(day.overnight.country)}`}
-                  data-testid={`day-badge-${day.id}`}
-                  onClick={() => navigate(`/map/day/${day.id}`)}
-                >
-                  <div className="flex h-8 items-center justify-center gap-0.5 rounded-full border-2 border-white bg-emerald-700 px-2 text-xs font-semibold text-white shadow-md dark:border-neutral-900">
-                    {OVERNIGHT_ICON} {day.index + 1}
-                  </div>
-                </AdvancedMarker>
-              ))}
+              <AdvancedMarker
+                position={{
+                  lat: trip.settings.startPoint.lat,
+                  lng: trip.settings.startPoint.lng,
+                }}
+                title="Start"
+              />
+              <AdvancedMarker
+                position={{
+                  lat: trip.settings.endPoint.lat,
+                  lng: trip.settings.endPoint.lng,
+                }}
+                title="Finish"
+              />
 
-            {(tiers.showSelectedActivities || tiers.showAllPlaces) &&
-              days.flatMap((day) => {
-                const dayPlaces = places[day.id]
-                if (!dayPlaces) return []
-                const activities: Activity[] = tiers.showAllPlaces
-                  ? dayPlaces.activities
-                  : dayPlaces.activities.filter((a) => a.status === 'selected')
-                return activities.map((activity, i) => {
-                  const placeId = `${day.id}-activity-${i}`
-                  return (
-                    <AdvancedMarker
-                      key={placeId}
-                      position={{ lat: activity.lat, lng: activity.lng }}
-                      title={activity.name}
-                      data-testid="activity-marker"
-                      onClick={() => {
-                        setSelectedCorridorStopId(null)
-                        setSelectedPlace({
-                          id: placeId,
-                          name: activity.name,
-                          lat: activity.lat,
-                          lng: activity.lng,
-                        })
-                      }}
-                    >
-                      <MarkerBadge
-                        icon={CATEGORY_ICON[activity.category]}
-                        selected={activity.status === 'selected'}
-                        highlighted={selectedPlace?.id === placeId}
-                      />
-                    </AdvancedMarker>
-                  )
-                })
-              })}
+              {tiers.showOvernightStops &&
+                days.map((day) => (
+                  <AdvancedMarker
+                    key={day.id}
+                    position={{
+                      lat: day.overnight.lat,
+                      lng: day.overnight.lng,
+                    }}
+                    title={`Day ${day.index + 1}: ${day.overnight.name} ${isoCountryFlag(day.overnight.country)}`}
+                    data-testid={`day-badge-${day.id}`}
+                    onClick={() => navigate(`/map/day/${day.id}`)}
+                  >
+                    <div className="flex h-8 items-center justify-center gap-0.5 rounded-full border-2 border-white bg-emerald-700 px-2 text-xs font-semibold text-white shadow-md dark:border-neutral-900">
+                      {OVERNIGHT_ICON} {day.index + 1}
+                    </div>
+                  </AdvancedMarker>
+                ))}
 
-            {tiers.showAllPlaces &&
-              days.flatMap((day) => {
-                const dayPlaces = places[day.id]
-                if (!dayPlaces) return []
-                return dayPlaces.restaurants.map((restaurant, i) => {
-                  const placeId = `${day.id}-restaurant-${i}`
-                  return (
-                    <AdvancedMarker
-                      key={placeId}
-                      position={{ lat: restaurant.lat, lng: restaurant.lng }}
-                      title={restaurant.name}
-                      data-testid="restaurant-marker"
-                      onClick={() => {
-                        setSelectedCorridorStopId(null)
-                        setSelectedPlace({
-                          id: placeId,
-                          name: restaurant.name,
-                          lat: restaurant.lat,
-                          lng: restaurant.lng,
-                        })
-                      }}
-                    >
-                      <MarkerBadge
-                        icon={RESTAURANT_ICON}
-                        selected={restaurant.status === 'selected'}
-                        highlighted={selectedPlace?.id === placeId}
-                      />
-                    </AdvancedMarker>
-                  )
-                })
-              })}
+              {(tiers.showSelectedActivities || tiers.showAllPlaces) &&
+                days.flatMap((day) => {
+                  const dayPlaces = places[day.id]
+                  if (!dayPlaces) return []
+                  const activities: Activity[] = tiers.showAllPlaces
+                    ? dayPlaces.activities
+                    : dayPlaces.activities.filter(
+                        (a) => a.status === 'selected',
+                      )
+                  return activities.map((activity, i) => {
+                    const placeId = `${day.id}-activity-${i}`
+                    return (
+                      <AdvancedMarker
+                        key={placeId}
+                        position={{ lat: activity.lat, lng: activity.lng }}
+                        title={activity.name}
+                        data-testid="activity-marker"
+                        onClick={() => {
+                          setSelectedCorridorStopId(null)
+                          setSelectedPlace({
+                            id: placeId,
+                            name: activity.name,
+                            lat: activity.lat,
+                            lng: activity.lng,
+                          })
+                        }}
+                      >
+                        <MarkerBadge
+                          icon={CATEGORY_ICON[activity.category]}
+                          selected={activity.status === 'selected'}
+                          highlighted={selectedPlace?.id === placeId}
+                        />
+                      </AdvancedMarker>
+                    )
+                  })
+                })}
 
-            {tiers.showCorridorStops &&
-              editableCorridorStops.map((stop) => (
-                <AdvancedMarker
-                  key={stop.id}
-                  position={{ lat: stop.lat, lng: stop.lng }}
-                  title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
-                  data-testid={`corridor-stop-marker-${stop.id}`}
-                  onClick={() => selectCorridorStop(stop.id)}
-                >
-                  <MarkerBadge
-                    icon={
-                      stop.status === 'locked'
-                        ? CORRIDOR_LOCKED_ICON
-                        : CORRIDOR_PROPOSED_ICON
-                    }
-                    highlighted={selectedCorridorStopId === stop.id}
-                    // Same green/amber/red the explore map uses. These pins
-                    // sit beside the same cards now, so a level that paints
-                    // the pin on one screen and not the other is the kind of
-                    // difference that makes two screens feel like two apps.
-                    priority={candidatePriority(stop)}
-                  />
-                </AdvancedMarker>
-              ))}
-          </GoogleMap>
-        ) : (
-          <p className="p-4 text-neutral-500">
-            Set VITE_GOOGLE_MAPS_API_KEY to display the map.
-          </p>
-        )}
-        {selectedPlace && (
-          <p
-            data-testid="map-selected-caption"
-            className="absolute bottom-3 left-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-neutral-900 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-white"
-          >
-            Showing: {selectedPlace.name}
-          </p>
-        )}
+              {tiers.showAllPlaces &&
+                days.flatMap((day) => {
+                  const dayPlaces = places[day.id]
+                  if (!dayPlaces) return []
+                  return dayPlaces.restaurants.map((restaurant, i) => {
+                    const placeId = `${day.id}-restaurant-${i}`
+                    return (
+                      <AdvancedMarker
+                        key={placeId}
+                        position={{ lat: restaurant.lat, lng: restaurant.lng }}
+                        title={restaurant.name}
+                        data-testid="restaurant-marker"
+                        onClick={() => {
+                          setSelectedCorridorStopId(null)
+                          setSelectedPlace({
+                            id: placeId,
+                            name: restaurant.name,
+                            lat: restaurant.lat,
+                            lng: restaurant.lng,
+                          })
+                        }}
+                      >
+                        <MarkerBadge
+                          icon={RESTAURANT_ICON}
+                          selected={restaurant.status === 'selected'}
+                          highlighted={selectedPlace?.id === placeId}
+                        />
+                      </AdvancedMarker>
+                    )
+                  })
+                })}
 
-        {/* Plain forms/buttons, not GoogleMap children — they only need
+              {tiers.showCorridorStops &&
+                editableCorridorStops.map((stop) => (
+                  <AdvancedMarker
+                    key={stop.id}
+                    position={{ lat: stop.lat, lng: stop.lng }}
+                    title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
+                    data-testid={`corridor-stop-marker-${stop.id}`}
+                    onClick={() => selectCorridorStop(stop.id)}
+                  >
+                    <MarkerBadge
+                      icon={
+                        stop.status === 'locked'
+                          ? CORRIDOR_LOCKED_ICON
+                          : CORRIDOR_PROPOSED_ICON
+                      }
+                      highlighted={selectedCorridorStopId === stop.id}
+                      // Same green/amber/red the explore map uses. These pins
+                      // sit beside the same cards now, so a level that paints
+                      // the pin on one screen and not the other is the kind of
+                      // difference that makes two screens feel like two apps.
+                      priority={candidatePriority(stop)}
+                    />
+                  </AdvancedMarker>
+                ))}
+            </GoogleMap>
+          ) : (
+            <p className="p-4 text-neutral-500">
+              Set VITE_GOOGLE_MAPS_API_KEY to display the map.
+            </p>
+          )}
+          {selectedPlace && (
+            <p
+              data-testid="map-selected-caption"
+              className="absolute bottom-3 left-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-medium text-neutral-900 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-white"
+            >
+              Showing: {selectedPlace.name}
+            </p>
+          )}
+
+          {/* Plain forms/buttons, not GoogleMap children — they only need
             `center` (sourced from trip.settings, independent of apiKey), so
             unlike the marker tiers above they render with no Maps key too
             (this sandbox's own CI runs e2e with none set, same as every
@@ -671,114 +681,122 @@ export function OverviewMapScreen() {
             right, not the left: Google's own map type (Satellit/Karta)
             control sits top-left by default and these used to sit right on
             top of it. */}
-        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
-          <AddCorridorStopForm tripId={tripId} defaultLocation={{ ...center, name: '' }} />
-          <RescanCorridorButton
-            tripId={tripId}
-            center={center}
-            area={searchArea}
-            planMeta={trip.planMeta}
-            armed={aimingSearch}
-            onArmedChange={setAimingSearch}
-          />
+          <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+            <AddCorridorStopForm
+              tripId={tripId}
+              defaultLocation={{ ...center, name: '' }}
+            />
+            <RescanCorridorButton
+              tripId={tripId}
+              center={center}
+              area={searchArea}
+              planMeta={trip.planMeta}
+              armed={aimingSearch}
+              onArmedChange={setAimingSearch}
+            />
+          </div>
         </div>
 
-      </div>
-
-      {/* The overview, kept alive after the plan exists (2026-08-19).
-        *
-        * Reported as: "I'm not happy with how the overview is gone after the
-        * plan is done... as we moved into detailed planning, the previously
-        * researched thing just look boring and can only be removed, so the
-        * whole functionality is gone." It was accurate. This screen had no
-        * list at all — every curated stop existed only as a map pin whose
-        * tap opened a card showing its name, its "why" and a Remove button,
-        * because the card it opened gated "Lock in" on `proposed`, and
-        * nothing curated in explore mode is `proposed`.
-        *
-        * So the same card the explore list uses is used here, and the two
-        * screens now differ only in what a plan makes possible: an "Add to
-        * route" button, and an "On route" badge for stops already reconciled
-        * into a day. Interest levels, the photo, the sight's own
-        * description, the base town, the time it needs and the Maps link all
-        * survive into planning rather than being thrown away at the moment
-        * the traveler starts using them.
-        */}
-      {consideredStops.length > 0 && (
-        <div className="flex min-h-0 flex-col border-t border-neutral-200 dark:border-neutral-800">
-          <button
-            type="button"
-            data-testid="considered-stops-toggle"
-            onClick={() => setConsideredOpen((open) => !open)}
-            className="flex w-full items-center justify-between p-3 text-left text-sm font-medium text-neutral-900 dark:text-white"
-          >
-            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span>Stops to consider ({consideredStops.length})</span>
-              {/* The key, for the same reason the explore map carries one:
-                * colour is only information once the reader is told what it
-                * means. */}
-              <span
-                data-testid="considered-stops-legend"
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-neutral-500 dark:text-neutral-400"
-              >
-                {TIER_ORDER.map((tier) => (
-                  <span key={tier} className="flex items-center gap-1">
-                    <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full border-2 ${PRIORITY_PIN_CLASS[tier]}`}
-                    />
-                    {TIER_LABEL[tier]}
-                  </span>
-                ))}
-              </span>
-            </span>
-            <span aria-hidden className="text-neutral-400">
-              {consideredOpen ? '▾' : '▸'}
-            </span>
-          </button>
-          {consideredOpen && (
-            <div
-              // Scrolls inside itself and stops at half the viewport, so a
-              // twenty-four stop corridor cannot push the map off the
-              // screen — the two halves are meant to be usable together.
-              className="max-h-[50vh] min-h-0 space-y-2 overflow-y-auto p-3 pt-0"
-              data-testid="considered-stops-list"
+        {/* The overview, kept alive after the plan exists (2026-08-19).
+         *
+         * Reported as: "I'm not happy with how the overview is gone after the
+         * plan is done... as we moved into detailed planning, the previously
+         * researched thing just look boring and can only be removed, so the
+         * whole functionality is gone." It was accurate. This screen had no
+         * list at all — every curated stop existed only as a map pin whose
+         * tap opened a card showing its name, its "why" and a Remove button,
+         * because the card it opened gated "Lock in" on `proposed`, and
+         * nothing curated in explore mode is `proposed`.
+         *
+         * So the same card the explore list uses is used here, and the two
+         * screens now differ only in what a plan makes possible: an "Add to
+         * route" button, and an "On route" badge for stops already reconciled
+         * into a day. Interest levels, the photo, the sight's own
+         * description, the base town, the time it needs and the Maps link all
+         * survive into planning rather than being thrown away at the moment
+         * the traveler starts using them.
+         */}
+        {consideredStops.length > 0 && (
+          <div className="flex min-h-0 flex-col border-t border-neutral-200 lg:landscape:w-96 lg:landscape:flex-none lg:landscape:border-t-0 lg:landscape:border-l dark:border-neutral-800">
+            <button
+              type="button"
+              data-testid="considered-stops-toggle"
+              onClick={() => setConsideredOpen((open) => !open)}
+              className="flex w-full items-center justify-between p-3 text-left text-sm font-medium text-neutral-900 dark:text-white"
             >
-              {consideredStops.map((stop) => (
-                <ExploreCandidateCard
-                  key={stop.id}
-                  stop={stop}
-                  // Straight-line detour needs a corridor to measure
-                  // against; on a planned trip the real answer is the day a
-                  // stop lands on, which "On route" already says.
-                  detourKm={null}
-                  onRoute={stop.linkedDayIds.length > 0}
-                  highlighted={selectedCorridorStopId === stop.id}
-                  innerRef={(element) => {
-                    if (element) consideredRefs.current.set(stop.id, element)
-                    else consideredRefs.current.delete(stop.id)
-                  }}
-                  onSelect={() => selectCorridorStop(stop.id)}
-                  onSetPriority={(priority) =>
-                    setCandidatePriority(tripId, stop.id, priority)
-                  }
-                  onLock={() => setCorridorStopStatus(tripId, stop.id, 'locked')}
-                  onUnlock={() =>
-                    setCorridorStopStatus(tripId, stop.id, 'candidate')
-                  }
-                  onReject={() => {
-                    void rejectCorridorStop(tripId, stop.id)
-                    setSelectedCorridorStopId(null)
-                  }}
-                  // Opens the panel that actually reconciles a stop into the
-                  // day sequence — the same one "Edit route" opens, which
-                  // already takes exactly this set as `addableStops`.
-                  onAddToRoute={() => setReorderOpen(true)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span>Stops to consider ({consideredStops.length})</span>
+                {/* The key, for the same reason the explore map carries one:
+                 * colour is only information once the reader is told what it
+                 * means. */}
+                <span
+                  data-testid="considered-stops-legend"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-neutral-500 dark:text-neutral-400"
+                >
+                  {TIER_ORDER.map((tier) => (
+                    <span key={tier} className="flex items-center gap-1">
+                      <span
+                        className={`inline-block h-2.5 w-2.5 rounded-full border-2 ${PRIORITY_PIN_CLASS[tier]}`}
+                      />
+                      {TIER_LABEL[tier]}
+                    </span>
+                  ))}
+                </span>
+              </span>
+              <span aria-hidden className="text-neutral-400">
+                {consideredOpen ? '▾' : '▸'}
+              </span>
+            </button>
+            {consideredOpen && (
+              <div
+                // Scrolls inside itself and stops at half the viewport, so a
+                // twenty-four stop corridor cannot push the map off the
+                // screen — the two halves are meant to be usable together.
+                // The 50vh ceiling is what stops a long corridor pushing the
+                // map off a stacked screen; side by side there is no such
+                // conflict, so the list simply fills its own column.
+                className="max-h-[50vh] min-h-0 space-y-2 overflow-y-auto p-3 pt-0 lg:landscape:max-h-none lg:landscape:flex-1"
+                data-testid="considered-stops-list"
+              >
+                {consideredStops.map((stop) => (
+                  <ExploreCandidateCard
+                    key={stop.id}
+                    stop={stop}
+                    // Straight-line detour needs a corridor to measure
+                    // against; on a planned trip the real answer is the day a
+                    // stop lands on, which "On route" already says.
+                    detourKm={null}
+                    onRoute={stop.linkedDayIds.length > 0}
+                    highlighted={selectedCorridorStopId === stop.id}
+                    innerRef={(element) => {
+                      if (element) consideredRefs.current.set(stop.id, element)
+                      else consideredRefs.current.delete(stop.id)
+                    }}
+                    onSelect={() => selectCorridorStop(stop.id)}
+                    onSetPriority={(priority) =>
+                      setCandidatePriority(tripId, stop.id, priority)
+                    }
+                    onLock={() =>
+                      setCorridorStopStatus(tripId, stop.id, 'locked')
+                    }
+                    onUnlock={() =>
+                      setCorridorStopStatus(tripId, stop.id, 'candidate')
+                    }
+                    onReject={() => {
+                      void rejectCorridorStop(tripId, stop.id)
+                      setSelectedCorridorStopId(null)
+                    }}
+                    // Opens the panel that actually reconciles a stop into the
+                    // day sequence — the same one "Edit route" opens, which
+                    // already takes exactly this set as `addableStops`.
+                    onAddToRoute={() => setReorderOpen(true)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

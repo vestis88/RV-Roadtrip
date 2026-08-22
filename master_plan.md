@@ -1899,6 +1899,52 @@ replaces the other, and the failure mode of pretending otherwise runs in both
 directions — three empty scans when the model was asked to measure, and a
 suppressed local favourite when Places is asked to judge.
 
+### 2026-08-22 — side by side on a landscape tablet
+
+Requested: "there was previously a side by side map and list in landscape
+mode on iPad. It's gone since the map size fix. Bring it back!"
+
+Checked before building: **it was never on these screens.** All twelve
+versions of OverviewMapScreen in history stack, and none contains a single
+responsive class. The split being remembered is DayViewScreen's — `lg:flex-row`
+with map and detail each `lg:w-1/2` — which has been there since the first
+commit and which the 2026-08-19 map-size fix never touched. Said plainly and
+then built anyway, because the request is right on its own terms: an iPad in
+landscape has room for both at full height, and stacking spends half of it on
+a list that then scrolls inside itself.
+
+Both map screens now split, matching Day View. `lg:landscape:` rather than
+`lg:` alone, and the orientation half is the part that matters: the 12.9"
+iPad is **1024px wide in portrait too** — through the breakpoint, and exactly
+the shape that should stay stacked. Width only rules out phones held
+sideways; orientation is the actual question. The list becomes a fixed 384px
+sidebar rather than a share of the width, because these cards carry a photo,
+a paragraph and four buttons and should read the same at every size.
+
+**Two test failures worth recording, both mine, and neither a layout bug.**
+
+First, the portrait assertion failed claiming the map was 1248px tall when it
+is 1021. It measured the map BEFORE the corridorStops snapshot arrived — so
+the map still had the screen to itself — and then measured a list that only
+existed afterwards. A geometric assertion is only as good as the moment it is
+taken at; both elements are awaited before either is measured now.
+
+Second, and more interesting: `explore.spec.ts` "marking a stop must-see"
+started failing on `card.click()`. Playwright's default viewport is
+1280×720 — wider than `lg` AND landscape — so the e2e browser now gets the
+sidebar, exactly as a desktop should. In a 384px column a card is tall
+enough that its geometric CENTRE, which is where `click()` aims, lands on one
+of its own buttons. The click hit a control instead of the card. Fixed by
+clicking a fixed offset inside the card's padding, since every other element
+in the card is conditional on the stop's data and the padding is not.
+
+That second one is a genuine finding rather than a test detail: the default
+e2e viewport now exercises the split on every run, which is the cheapest
+possible coverage of it. New tests assert the geometry at 1180×820
+(side by side) and 1024×1366 (still stacked) — by bounding box rather than by
+class name, because what can break here is a layout that computes wrong, not
+a class that goes missing.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

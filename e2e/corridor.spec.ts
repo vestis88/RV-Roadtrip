@@ -761,3 +761,98 @@ test('a stop turned down in plan mode is remembered, not deleted', async ({
   await expect(page.getByTestId('considered-stops-toggle')).toHaveCount(0)
   await expect(page.getByTestId('considered-stops-list')).toHaveCount(0)
 })
+
+/** A curated stop, so the screen actually has a list beside the map. */
+async function seedConsideredStop(tripId: string) {
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('corridorStops')
+    .add({
+      name: 'Jotunheimen National Park',
+      lat: 61.5,
+      lng: 8.3,
+      country: 'NO',
+      why: 'Norway’s highest peaks, with marked day hikes from the road.',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      region: 'Gudbrandsdalen',
+      rank: 0,
+      baseTown: 'Lom',
+      interest: 'hiking',
+      timeNeeded: 'full-day',
+    })
+}
+
+/**
+ * Requested 2026-08-22: "there was previously a side by side map and list in
+ * landscape mode on iPad. It's gone since the map size fix."
+ *
+ * It was not, in fact, ever on this screen — every version of it in history
+ * stacks, and the split the traveler remembers is DayViewScreen's, which the
+ * map-size fix never touched. The request is right regardless: an iPad in
+ * landscape has room for both at full height, and stacking spends half the
+ * screen on a list that then scrolls inside itself.
+ *
+ * Asserted geometrically rather than by class name, because the failure this
+ * guards against is a layout that computes wrong, not a class that went
+ * missing — the same reason the map's own floor is asserted by bounding box.
+ * The 2026-08-19 regression shipped past a green suite for exactly the
+ * opposite reason: nothing looked at the map at all.
+ */
+test('iPad landscape puts the map and the stops list side by side', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1180, height: 820 })
+  const tripId = await createTripWithPlan(page)
+  await seedConsideredStop(tripId)
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  const map = page.getByTestId('map-canvas')
+  const list = page.getByTestId('considered-stops-toggle')
+  await map.waitFor()
+  await list.waitFor()
+
+  const mapBox = await map.boundingBox()
+  const listBox = await list.boundingBox()
+  if (!mapBox || !listBox) throw new Error('map or list not laid out')
+
+  // Side by side: the list starts to the RIGHT of where the map ends...
+  expect(listBox.x).toBeGreaterThanOrEqual(mapBox.x + mapBox.width - 1)
+  // ...and they overlap vertically, rather than one sitting under the other.
+  expect(listBox.y).toBeLessThan(mapBox.y + mapBox.height)
+  // The map keeps real height — the thing that broke last time.
+  expect(mapBox.height).toBeGreaterThan(400)
+})
+
+test('a portrait tablet still stacks them', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 1366 })
+  const tripId = await createTripWithPlan(page)
+  await seedConsideredStop(tripId)
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  // Both waited for BEFORE either is measured. Measuring the map first made
+  // this fail at a height of 1248 rather than 1021: the corridorStops
+  // snapshot had not arrived, so the map still had the screen to itself and
+  // was measured mid-layout, against a list that only appeared afterwards.
+  // A geometric assertion is only as good as the moment it is taken at.
+  const map = page.getByTestId('map-canvas')
+  const list = page.getByTestId('considered-stops-toggle')
+  await map.waitFor()
+  await list.waitFor()
+
+  const mapBox = await map.boundingBox()
+  const listBox = await list.boundingBox()
+  if (!mapBox || !listBox) throw new Error('map or list not laid out')
+
+  // 1024px wide clears the `lg` breakpoint, which is exactly why the
+  // orientation check has to be there: this is a tall screen and belongs
+  // stacked.
+  expect(listBox.y).toBeGreaterThanOrEqual(mapBox.y + mapBox.height - 1)
+  expect(mapBox.height).toBeGreaterThan(200)
+})

@@ -318,8 +318,16 @@ test('marking a stop must-see does not put it in the route', async ({
   await expect(card).toHaveClass(/border-sky-600/)
 
   // Tap-to-view stays a separate, orange highlight that takes priority.
+  //
+  // Clicked at a fixed offset inside the card's own padding, not at its
+  // centre. `card.click()` aims at the CENTRE, and once the list became a
+  // 384px sidebar in landscape (2026-08-22) a card is tall enough that its
+  // centre lands on one of its own buttons — so the click selected nothing,
+  // and the test failed on a layout change rather than on a behaviour one.
+  // Every other element inside the card is conditional on the stop's data;
+  // the padding is not.
   await expect(card).not.toHaveClass(/border-orange-600/)
-  await card.click()
+  await card.click({ position: { x: 5, y: 5 } })
   await expect(card).toHaveClass(/border-orange-600/)
 })
 

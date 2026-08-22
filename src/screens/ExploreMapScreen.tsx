@@ -48,17 +48,16 @@ import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
-import {
-  RESCAN_RADIUS_KM,
-  visibleRadiusKm,
-} from '../lib/rescanCorridorAction'
+import { RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
-import { DirectionsRoute, type RouteTotals } from '../components/DirectionsRoute'
+import {
+  DirectionsRoute,
+  type RouteTotals,
+} from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
-
 
 interface ExploreMapScreenProps {
   tripId: string
@@ -229,7 +228,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       // order it was given is the steady state, and storing that agreement
       // would re-render, rebuild the arrays and ask again — see routeOrder.ts.
       setRouteOrder((held) =>
-        isNewRouteOrder(held, orderKey, order) ? { key: orderKey, order } : held,
+        isNewRouteOrder(held, orderKey, order)
+          ? { key: orderKey, order }
+          : held,
       )
     },
     [orderKey],
@@ -298,7 +299,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const detourByStopId = useMemo(() => {
     const map = new Map<string, number>()
     for (const stop of candidates) {
-      map.set(stop.id, estimateDetourKm({ lat: stop.lat, lng: stop.lng }, backbone))
+      map.set(
+        stop.id,
+        estimateDetourKm({ lat: stop.lat, lng: stop.lng }, backbone),
+      )
     }
     return map
   }, [candidates, backbone])
@@ -325,7 +329,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     // must be caught here rather than relying on the Claude call itself to
     // notice — it previously just returned zero stops with no explanation.
     if (!hasRoute(trip.settings)) {
-      setGenError('Set a start and finish point in Trip Setup first — pick each from the suggestions so we can place it on the map.')
+      setGenError(
+        'Set a start and finish point in Trip Setup first — pick each from the suggestions so we can place it on the map.',
+      )
       return
     }
     setGenerating(true)
@@ -336,7 +342,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       const found =
         candidateCount > 0
           ? `Added ${candidateCount} new ${candidateCount === 1 ? 'find' : 'finds'}${
-              alreadyKnown > 0 ? ` — the other ${alreadyKnown} you already had` : ''
+              alreadyKnown > 0
+                ? ` — the other ${alreadyKnown} you already had`
+                : ''
             }.`
           : alreadyKnown > 0
             ? `Nothing new this time — all ${alreadyKnown} suggestions are already on your list.`
@@ -404,7 +412,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const canCommit = candidates.length > 0
 
   return (
-    <div className="flex h-full w-full flex-col" data-testid="explore-map-screen">
+    <div
+      className="flex h-full w-full flex-col"
+      data-testid="explore-map-screen"
+    >
       <div
         className="surface flex flex-wrap items-center justify-center gap-2 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
         data-testid="explore-header"
@@ -423,7 +434,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               : 'Find great stops'}
         </button>
         {genError && (
-          <p data-testid="explore-find-stops-error" className="text-sm text-red-600">
+          <p
+            data-testid="explore-find-stops-error"
+            className="text-sm text-red-600"
+          >
             {genError}
           </p>
         )}
@@ -448,7 +462,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           </p>
         )}
         {actionError && (
-          <p data-testid="explore-action-error" className="text-sm text-red-600">
+          <p
+            data-testid="explore-action-error"
+            className="text-sm text-red-600"
+          >
             {actionError}
           </p>
         )}
@@ -477,16 +494,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       )}
 
       {/* The drive the traveler has actually committed to so far: start →
-        * every kept stop → finish. Real Directions figures, not the
-        * straight-line estimate the per-candidate badges use, because the
-        * Directions results were already being fetched to draw the route
-        * line and every field except the geometry was being discarded — so
-        * this costs no extra request.
-        *
-        * Hidden entirely rather than shown as zero when no stop is kept
-        * yet: "0 h" would read as a finding about the route rather than the
-        * absence of one. Shown as unknown when the requests failed, since a
-        * partial sum is indistinguishable on screen from a real one. */}
+       * every kept stop → finish. Real Directions figures, not the
+       * straight-line estimate the per-candidate badges use, because the
+       * Directions results were already being fetched to draw the route
+       * line and every field except the geometry was being discarded — so
+       * this costs no extra request.
+       *
+       * Hidden entirely rather than shown as zero when no stop is kept
+       * yet: "0 h" would read as a finding about the route rather than the
+       * absence of one. Shown as unknown when the requests failed, since a
+       * partial sum is indistinguishable on screen from a real one. */}
       {routeStops.length > 0 && (
         <p
           data-testid="explore-route-totals"
@@ -520,9 +537,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       )}
 
       {/* Colour is only information if the reader is told what it means, and
-        * the list is below the fold on a phone — so the key sits with the
-        * map rather than with the cards. Only shown once there are pins to
-        * explain. */}
+       * the list is below the fold on a phone — so the key sits with the
+       * map rather than with the cards. Only shown once there are pins to
+       * explain. */}
       {candidates.length > 0 && (
         <p
           data-testid="explore-pin-legend"
@@ -539,178 +556,210 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         </p>
       )}
 
-      <div className="relative" style={{ height: '45vh', minHeight: '260px' }} data-testid="explore-map-canvas">
-        {apiKey ? (
-          <GoogleMap
-            defaultCenter={{
-              lat: trip.settings.startPoint.lat,
-              lng: trip.settings.startPoint.lng,
-            }}
-            defaultZoom={zoom}
-            mapId="rv-trip-explore"
-            gestureHandling="greedy"
-            onCameraChanged={(event: MapCameraChangedEvent) => {
-              setZoom(event.detail.zoom)
-              // What "this area" means — see visibleRadiusKm. Stored as the
-              // four numbers rather than the object, which arrives fresh
-              // every frame of a drag.
-              setBounds((prev) =>
-                prev &&
-                prev.north === event.detail.bounds.north &&
-                prev.south === event.detail.bounds.south &&
-                prev.east === event.detail.bounds.east &&
-                prev.west === event.detail.bounds.west
-                  ? prev
-                  : event.detail.bounds,
-              )
-              // Fires every frame of a drag, and the centre arrives as a
-              // fresh object each time — storing it unconditionally
-              // re-rendered this whole screen (map + candidate list) per
-              // frame. Only the value matters here (it anchors "Rescan this
-              // area"/"Add stop"), so ignore no-op updates.
-              setCenter((prev) =>
-                prev.lat === event.detail.center.lat &&
-                prev.lng === event.detail.center.lng
-                  ? prev
-                  : event.detail.center,
-              )
-            }}
-          >
-            <DirectionsRoute
-              points={askedBackbone}
-              onError={setRouteError}
-              onTotals={handleRouteTotals}
-              // Explore mode only. Nobody has committed to this order — it
-              // is our own projection guess — so Google reordering it
-              // against real roads is strictly better information. The
-              // generated plan's route is NOT optimized: those points are
-              // days with dates on them.
-              optimizeOrder
-              onOrder={handleOrder}
-            />
-            {/* Only while aiming. Drawn on every map all the time, it
+      {/* Side by side once there is room for it, stacked otherwise.
+       * Requested 2026-08-22 for iPad landscape, where stacking wastes the
+       * screen: a 45vh map over a list that scrolls in the remaining half,
+       * on a display wide enough to show both at full height.
+       *
+       * `lg:landscape:` rather than `lg:` alone, because the 12.9" iPad is
+       * 1024px wide in PORTRAIT too — wide enough for the breakpoint, and
+       * the wrong shape for a split, since stacking is what suits a tall
+       * screen. Orientation is the actual question; width only rules out
+       * phones held sideways. DayViewScreen has had this split since the
+       * beginning (`lg:flex-row`); these two screens never got it. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:landscape:flex-row">
+        <div
+          className="relative h-[45vh] min-h-[260px] lg:landscape:h-auto lg:landscape:flex-1"
+          data-testid="explore-map-canvas"
+        >
+          {apiKey ? (
+            <GoogleMap
+              defaultCenter={{
+                lat: trip.settings.startPoint.lat,
+                lng: trip.settings.startPoint.lng,
+              }}
+              defaultZoom={zoom}
+              mapId="rv-trip-explore"
+              gestureHandling="greedy"
+              onCameraChanged={(event: MapCameraChangedEvent) => {
+                setZoom(event.detail.zoom)
+                // What "this area" means — see visibleRadiusKm. Stored as the
+                // four numbers rather than the object, which arrives fresh
+                // every frame of a drag.
+                setBounds((prev) =>
+                  prev &&
+                  prev.north === event.detail.bounds.north &&
+                  prev.south === event.detail.bounds.south &&
+                  prev.east === event.detail.bounds.east &&
+                  prev.west === event.detail.bounds.west
+                    ? prev
+                    : event.detail.bounds,
+                )
+                // Fires every frame of a drag, and the centre arrives as a
+                // fresh object each time — storing it unconditionally
+                // re-rendered this whole screen (map + candidate list) per
+                // frame. Only the value matters here (it anchors "Rescan this
+                // area"/"Add stop"), so ignore no-op updates.
+                setCenter((prev) =>
+                  prev.lat === event.detail.center.lat &&
+                  prev.lng === event.detail.center.lng
+                    ? prev
+                    : event.detail.center,
+                )
+              }}
+            >
+              <DirectionsRoute
+                points={askedBackbone}
+                onError={setRouteError}
+                onTotals={handleRouteTotals}
+                // Explore mode only. Nobody has committed to this order — it
+                // is our own projection guess — so Google reordering it
+                // against real roads is strictly better information. The
+                // generated plan's route is NOT optimized: those points are
+                // days with dates on them.
+                optimizeOrder
+                onOrder={handleOrder}
+              />
+              {/* Only while aiming. Drawn on every map all the time, it
                 buried the pins under a boundary nobody had asked to see. */}
-            {aimingSearch && (
-              <SearchAreaCircle
-                center={center}
-                radiusKm={searchArea.radiusKm}
-                capped={searchArea.cappedFrom !== undefined}
-              />
-            )}
-            <MapPanner target={selected ? { lat: selected.lat, lng: selected.lng } : null} />
-            <AdvancedMarker
-              position={{ lat: trip.settings.startPoint.lat, lng: trip.settings.startPoint.lng }}
-              title="Start"
-            />
-            <AdvancedMarker
-              position={{ lat: trip.settings.endPoint.lat, lng: trip.settings.endPoint.lng }}
-              title="Finish"
-            />
-            {candidates.map((stop) => (
-              <AdvancedMarker
-                key={stop.id}
-                position={{ lat: stop.lat, lng: stop.lng }}
-                title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
-                data-testid={`explore-marker-${stop.id}`}
-                onClick={() => setSelectedId(stop.id)}
-              >
-                <MarkerBadge
-                  icon={CORRIDOR_CANDIDATE_ICON}
-                  // Blue = "this one is in my route" — exactly the kept
-                  // (`locked`) stops buildRouteBackbone is drawn through
-                  // (routeStopIds), so the pin, the card and the route line
-                  // can never disagree about which stops are in.
-                  selected={routeStopIds.has(stop.id)}
-                  highlighted={selectedId === stop.id}
-                  // Green/amber/red by interest level. Read straight off the
-                  // stop through the same helper the card's selector uses,
-                  // so a level changed on the card repaints the pin on the
-                  // next snapshot with nothing to keep in sync — corridorStops
-                  // is a live subscription and the write goes to the doc both
-                  // of them render from.
-                  priority={candidatePriority(stop)}
+              {aimingSearch && (
+                <SearchAreaCircle
+                  center={center}
+                  radiusKm={searchArea.radiusKm}
+                  capped={searchArea.cappedFrom !== undefined}
                 />
-              </AdvancedMarker>
-            ))}
-          </GoogleMap>
-        ) : (
-          <p className="p-4 text-neutral-500">
-            Set VITE_GOOGLE_MAPS_API_KEY to display the map.
-          </p>
-        )}
-
-        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
-          <AddCorridorStopForm
-            tripId={tripId}
-            defaultLocation={{ ...center, name: '' }}
-            backbone={backbone}
-            waypointNames={waypointNames}
-          />
-          <RescanCorridorButton
-            tripId={tripId}
-            center={center}
-            area={searchArea}
-            planMeta={trip.planMeta}
-            armed={aimingSearch}
-            onArmedChange={setAimingSearch}
-          />
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="explore-candidate-list">
-        {candidates.length === 0 ? (
-          <p
-            className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400"
-            data-testid="explore-empty-state"
-          >
-            {describeEmptyCandidateList(trip.planMeta, countryName)}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {orderedCandidates.map((stop) => (
-              <ExploreCandidateCard
-                key={stop.id}
-                stop={stop}
-                detourKm={detourByStopId.get(stop.id) ?? null}
-                onRoute={routeStopIds.has(stop.id)}
-                highlighted={selectedId === stop.id}
-                innerRef={(element) => {
-                  if (element) cardRefs.current.set(stop.id, element)
-                  else cardRefs.current.delete(stop.id)
-                }}
-                onSelect={() => setSelectedId(stop.id)}
-                onSetPriority={(priority) => setInterest(stop.id, priority)}
-                onLock={() =>
-                  runStopAction(
-                    setCorridorStopStatus(tripId, stop.id, 'locked'),
-                    'Could not lock in that stop — please try again.',
-                  )
+              )}
+              <MapPanner
+                target={
+                  selected ? { lat: selected.lat, lng: selected.lng } : null
                 }
-                onUnlock={() =>
-                  runStopAction(
-                    // Straight back to 'candidate' — the stop keeps its
-                    // interest level and its place in the list, and only
-                    // stops bending the route. Nothing else about it changes,
-                    // which is the whole difference between this and "Not
-                    // interested".
-                    setCorridorStopStatus(tripId, stop.id, 'candidate'),
-                    'Could not unlock that stop — please try again.',
-                  )
-                }
-                onReject={() => {
-                  runStopAction(
-                    // Kept as a tombstone rather than deleted, so the next
-                    // "Find more stops" doesn't hand it straight back —
-                    // see rejectCorridorStop.
-                    rejectCorridorStop(tripId, stop.id),
-                    'Could not remove that stop — please try again.',
-                  )
-                  if (selectedId === stop.id) setSelectedId(null)
-                }}
               />
-            ))}
+              <AdvancedMarker
+                position={{
+                  lat: trip.settings.startPoint.lat,
+                  lng: trip.settings.startPoint.lng,
+                }}
+                title="Start"
+              />
+              <AdvancedMarker
+                position={{
+                  lat: trip.settings.endPoint.lat,
+                  lng: trip.settings.endPoint.lng,
+                }}
+                title="Finish"
+              />
+              {candidates.map((stop) => (
+                <AdvancedMarker
+                  key={stop.id}
+                  position={{ lat: stop.lat, lng: stop.lng }}
+                  title={`${stop.name}${stop.country ? ` ${isoCountryFlag(stop.country)}` : ''}`}
+                  data-testid={`explore-marker-${stop.id}`}
+                  onClick={() => setSelectedId(stop.id)}
+                >
+                  <MarkerBadge
+                    icon={CORRIDOR_CANDIDATE_ICON}
+                    // Blue = "this one is in my route" — exactly the kept
+                    // (`locked`) stops buildRouteBackbone is drawn through
+                    // (routeStopIds), so the pin, the card and the route line
+                    // can never disagree about which stops are in.
+                    selected={routeStopIds.has(stop.id)}
+                    highlighted={selectedId === stop.id}
+                    // Green/amber/red by interest level. Read straight off the
+                    // stop through the same helper the card's selector uses,
+                    // so a level changed on the card repaints the pin on the
+                    // next snapshot with nothing to keep in sync — corridorStops
+                    // is a live subscription and the write goes to the doc both
+                    // of them render from.
+                    priority={candidatePriority(stop)}
+                  />
+                </AdvancedMarker>
+              ))}
+            </GoogleMap>
+          ) : (
+            <p className="p-4 text-neutral-500">
+              Set VITE_GOOGLE_MAPS_API_KEY to display the map.
+            </p>
+          )}
+
+          <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+            <AddCorridorStopForm
+              tripId={tripId}
+              defaultLocation={{ ...center, name: '' }}
+              backbone={backbone}
+              waypointNames={waypointNames}
+            />
+            <RescanCorridorButton
+              tripId={tripId}
+              center={center}
+              area={searchArea}
+              planMeta={trip.planMeta}
+              armed={aimingSearch}
+              onArmedChange={setAimingSearch}
+            />
           </div>
-        )}
+        </div>
+
+        <div
+          // A fixed sidebar rather than a share of the width: these cards carry
+          // a photo, a paragraph and four buttons, and they read the same at
+          // every screen size instead of reflowing with the map.
+          className="min-h-0 flex-1 overflow-y-auto p-3 lg:landscape:w-96 lg:landscape:flex-none lg:landscape:border-l lg:landscape:border-neutral-200 dark:lg:landscape:border-neutral-800"
+          data-testid="explore-candidate-list"
+        >
+          {candidates.length === 0 ? (
+            <p
+              className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400"
+              data-testid="explore-empty-state"
+            >
+              {describeEmptyCandidateList(trip.planMeta, countryName)}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {orderedCandidates.map((stop) => (
+                <ExploreCandidateCard
+                  key={stop.id}
+                  stop={stop}
+                  detourKm={detourByStopId.get(stop.id) ?? null}
+                  onRoute={routeStopIds.has(stop.id)}
+                  highlighted={selectedId === stop.id}
+                  innerRef={(element) => {
+                    if (element) cardRefs.current.set(stop.id, element)
+                    else cardRefs.current.delete(stop.id)
+                  }}
+                  onSelect={() => setSelectedId(stop.id)}
+                  onSetPriority={(priority) => setInterest(stop.id, priority)}
+                  onLock={() =>
+                    runStopAction(
+                      setCorridorStopStatus(tripId, stop.id, 'locked'),
+                      'Could not lock in that stop — please try again.',
+                    )
+                  }
+                  onUnlock={() =>
+                    runStopAction(
+                      // Straight back to 'candidate' — the stop keeps its
+                      // interest level and its place in the list, and only
+                      // stops bending the route. Nothing else about it changes,
+                      // which is the whole difference between this and "Not
+                      // interested".
+                      setCorridorStopStatus(tripId, stop.id, 'candidate'),
+                      'Could not unlock that stop — please try again.',
+                    )
+                  }
+                  onReject={() => {
+                    runStopAction(
+                      // Kept as a tombstone rather than deleted, so the next
+                      // "Find more stops" doesn't hand it straight back —
+                      // see rejectCorridorStop.
+                      rejectCorridorStop(tripId, stop.id),
+                      'Could not remove that stop — please try again.',
+                    )
+                    if (selectedId === stop.id) setSelectedId(null)
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
