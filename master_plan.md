@@ -1945,6 +1945,63 @@ possible coverage of it. New tests assert the geometry at 1180×820
 class name, because what can break here is a layout that computes wrong, not
 a class that goes missing.
 
+### 2026-08-22 — asking Google what KIND of place it is
+
+Reported with a screenshot: a card headed "Noleggio E-bike ERBEZZO c/o
+Ristorante La Stua" carrying the description "A proper downhill/enduro bike
+park on the Lessinia plateau with lift-served gravity trails". The question
+asked was the right one: "Two rental bike places rather than what the text
+seems to reference. Is there another solution to this issue? Or can I trust
+that there are mtb trails there?"
+
+**No, and the reason is worth stating plainly, because it governs every card
+on that screen.** The description is Claude's, written about the place it
+PROPOSED. The name, the pin and the photo are Google's, from whatever Places
+matched. When those two disagree nothing reconciles them — the blurb stays
+attached to the wrong place. So the text may well describe a real bike park
+on the Lessinia plateau while the pin sits on a rental counter at a
+restaurant, and the pin is the part that is checked.
+
+This is the Bruzaholm go-kart bug's family, and the third time this shape has
+been reported. String comparison cannot fix it: "Bike Park Erbezzo" and
+"Noleggio E-bike ERBEZZO" share the village AND share the word "bike", which
+`CATEGORY_GROUPS` treats as agreement — correctly, since that is the same
+rule matching "Kronborg Slot" to "Kronborg Castle". The difference is not in
+the words at all. One is a place you ride, the other a counter you hire from.
+
+**Google has always known which, and this file had never asked.**
+`places.primaryType` is Google's own classification of the listing. It costs
+nothing extra in the field mask, it has been available on every response this
+code has ever made, and it was not requested. So a listing Google files as a
+bike shop, a rental desk, a dealership or a mall is now rejected when the
+request did not itself say shop or rental — `servesTheWrongPurpose`.
+
+Two deliberate limits on it:
+
+- **A deny-list of service types, not an allow-list of acceptable ones.**
+  Places has hundreds of types; an allow-list would silently reject
+  everything nobody thought of. Over-tightening this gate has a known cost
+  and it is not hypothetical — a rejected proposal is not shown as a gap, it
+  is quietly replaced with a template blurb, which is exactly what "the
+  descriptions have become quite generic" was on 2026-08-18. Nothing here
+  rejects a place for being obscure, only for being a different KIND of
+  business. A weavery you can visit is still a sight.
+- **Retail words in the REQUEST disable it.** Someone who types "bike hire"
+  wants precisely that listing, and the check must not fire for them —
+  matched across the languages this corridor actually crosses
+  (noleggio/verleih/uthyrning/hire/…), not just English.
+- **An unclassified listing is not evidence.** No `primaryType` means the
+  gate stays shut, the same conservative reading `origin` takes for stops
+  written before that field existed.
+
+Still open, and NOT fixed by this: when a proposal does resolve to a
+plausible-but-different place, the traveler is shown Claude's description of
+what it meant rather than of what was found, with nothing on the card saying
+so. The honest options are to say it on the card ("suggested X, nearest
+match Y") or to drop Claude's blurb whenever Places' name diverges far
+enough. Neither is built; the type check removes the commonest cause rather
+than the class.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

@@ -84,6 +84,8 @@ const MEAL_PLACE_TYPE: Record<Meal, string> = {
 interface PlaceCandidate {
   id: string
   name: string
+  /** Google's OWN classification of the place — see servesTheWrongPurpose. */
+  primaryType?: string
   lat: number
   lng: number
   rating?: number
@@ -99,6 +101,7 @@ interface PlaceCandidate {
 interface RawPlace {
   id: string
   displayName?: { text?: string }
+  primaryType?: string
   location?: { latitude?: number; longitude?: number }
   rating?: number
   userRatingCount?: number
@@ -136,6 +139,7 @@ function mapRawPlace(raw: RawPlace, apiKey: string): PlaceCandidate {
     openingHours: raw.regularOpeningHours?.weekdayDescriptions,
     priceLevel: raw.priceLevel ? PRICE_LEVEL_MAP[raw.priceLevel] : undefined,
     editorialSummary: raw.editorialSummary?.text,
+    primaryType: raw.primaryType,
   }
 }
 
@@ -635,7 +639,98 @@ function isUsableMatch(
     !excludeIds.has(candidate.id) &&
     haversineDistanceKm(near, { lat: candidate.lat, lng: candidate.lng }) <=
       maxDistanceKm &&
-    nameLooksRight(expectedName, candidate.name)
+    nameLooksRight(expectedName, candidate.name) &&
+    !servesTheWrongPurpose(expectedName, candidate)
+  )
+}
+
+/**
+ * Businesses that SERVE an activity rather than being the place you go to do
+ * it. A bike shop is not a bike park; a car rental desk is not a road trip.
+ *
+ * Reported 2026-08-22 with a screenshot: a card headed "Noleggio E-bike
+ * ERBEZZO c/o Ristorante La Stua" carrying the description "A proper
+ * downhill/enduro bike park on the Lessinia plateau with lift-served gravity
+ * trails". Both halves were doing their job — Claude proposed the bike park
+ * and wrote about it, Places matched a shop in the same village sharing the
+ * word "bike" — and the traveler's question was the right one: "can I trust
+ * that there are mtb trails there?" No. Not on that pin.
+ *
+ * The name check cannot separate these, for the same reason it could not
+ * separate the Bruzaholm go-kart track from the bike park: "Bike Park
+ * Erbezzo" and "Noleggio E-bike ERBEZZO" share the village and share the
+ * word "bike", which is exactly what CATEGORY_GROUPS treats as agreement.
+ * More string arithmetic will not fix it.
+ *
+ * Google already knows. `primaryType` is its own classification of the
+ * listing, and it has been available on every response this file has ever
+ * made — simply never asked for. So a listing Google files as a shop, a
+ * rental desk or a dealership is rejected when what was asked for does not
+ * itself say shop or rental.
+ *
+ * Deliberately a small deny-list of SERVICE types rather than an allow-list
+ * of acceptable ones. Places has hundreds of types, an allow-list would
+ * silently reject everything nobody thought of, and over-tightening this
+ * gate has its own reported cost: a rejected proposal is not shown as a gap,
+ * it is quietly replaced by a template blurb, which is what "the
+ * descriptions have become quite generic" was. Nothing here rejects a place
+ * for being obscure — only for being a different KIND of business.
+ */
+const SERVICE_TYPES = new Set([
+  'bicycle_store',
+  'sporting_goods_store',
+  'car_rental',
+  'car_dealer',
+  'car_repair',
+  'car_wash',
+  'travel_agency',
+  'insurance_agency',
+  'real_estate_agency',
+  'bank',
+  'atm',
+  'gas_station',
+  'supermarket',
+  'grocery_store',
+  'shopping_mall',
+  'clothing_store',
+  'electronics_store',
+  'furniture_store',
+  'home_goods_store',
+])
+
+/**
+ * Words that mean the traveler ASKED for a shop or a rental, in the
+ * languages this corridor actually crosses. Then a shop is the right answer
+ * and this gate must not fire — "Noleggio E-bike Erbezzo" is a perfectly
+ * good find for someone who typed "bike hire".
+ */
+const RETAIL_WORDS = [
+  'rental',
+  'rent',
+  'hire',
+  'noleggio',
+  'verleih',
+  'vermietung',
+  'uthyrning',
+  'utleie',
+  'udlejning',
+  'shop',
+  'store',
+  'butik',
+  'negozio',
+  'magasin',
+  'laden',
+]
+
+function servesTheWrongPurpose(
+  expectedName: string | undefined,
+  candidate: PlaceCandidate,
+): boolean {
+  if (!expectedName || !candidate.primaryType) return false
+  if (!SERVICE_TYPES.has(candidate.primaryType)) return false
+  const asked = rawTokens(expectedName)
+  return !asked.some((token) =>
+    RETAIL_WORDS.some((word) => token === word || token.includes(word)),
   )
 }
 
@@ -715,6 +810,7 @@ export const __testing = {
   nameTokens,
   nameLooksRight,
   nameMatchScore,
+  servesTheWrongPurpose,
   bestCandidate,
   bestFromLadder,
   PLACE_VERIFY_BAR,
@@ -728,7 +824,7 @@ export const __testing = {
 // asks for ratings, photos and opening hours, so this is not the field that
 // decides what tier the request is billed at.
 const FIELD_MASK =
-  'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel,places.editorialSummary'
+  'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.googleMapsUri,places.photos,places.regularOpeningHours.weekdayDescriptions,places.priceLevel,places.editorialSummary,places.primaryType'
 
 async function textSearch(
   query: string,

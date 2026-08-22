@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { __testing } from './placesApi.js'
 
 const {
+  servesTheWrongPurpose,
   nameLooksRight,
   nameMatchScore,
   nameTokens,
@@ -460,5 +461,85 @@ describe('German compound names against their translated listings', () => {
   it('still rejects an unrelated landmark', () => {
     expect(nameLooksRight('Restaurant Sletten', 'Designer Outlet Berlin')).toBe(false)
     expect(nameLooksRight('Vallåsen Bike Park', 'Vrå')).toBe(false)
+  })
+})
+
+/**
+ * Reported 2026-08-22: a card headed "Noleggio E-bike ERBEZZO c/o Ristorante
+ * La Stua" carrying "A proper downhill/enduro bike park on the Lessinia
+ * plateau with lift-served gravity trails", and the right question — "can I
+ * trust that there are mtb trails there?"
+ *
+ * No, and no amount of string comparison would have caught it. "Bike Park
+ * Erbezzo" and "Noleggio E-bike ERBEZZO" share the village and share the
+ * word "bike", which CATEGORY_GROUPS treats as agreement — correctly, since
+ * that is the same rule matching "Kronborg Slot" to "Kronborg Castle". The
+ * difference is not in the words. It is that one is a place you ride and the
+ * other is a counter you hire from, and Google has always known which.
+ */
+describe('a business that serves an activity is not the activity', () => {
+  function place(name: string, primaryType?: string) {
+    return { id: 'p1', name, lat: 0, lng: 0, primaryType }
+  }
+
+  it('rejects the bike shop that stood in for the bike park', () => {
+    expect(
+      servesTheWrongPurpose(
+        'Bike Park Erbezzo',
+        place('Noleggio E-bike ERBEZZO c/o Ristorante La Stua', 'bicycle_store'),
+      ),
+    ).toBe(true)
+  })
+
+  // The traveler who typed "bike hire" wants exactly this listing.
+  it('allows a shop when a shop is what was asked for', () => {
+    expect(
+      servesTheWrongPurpose(
+        'Noleggio E-bike Erbezzo',
+        place('Noleggio E-bike ERBEZZO', 'bicycle_store'),
+      ),
+    ).toBe(false)
+    expect(
+      servesTheWrongPurpose('Erbezzo bike rental', place('Bike Rental', 'bicycle_store')),
+    ).toBe(false)
+  })
+
+  it('says nothing about a place Google files as somewhere to go', () => {
+    expect(
+      servesTheWrongPurpose('Bike Park Erbezzo', place('Bikepark Erbezzo', 'cycling_park')),
+    ).toBe(false)
+    expect(
+      servesTheWrongPurpose('Lusia Ski Area', place('Ski Area Lusia', 'ski_resort')),
+    ).toBe(false)
+  })
+
+  // A listing with no classification is not evidence of anything. The gate
+  // stays shut rather than guessing — the same conservative reading the
+  // `origin` field takes for stops written before it existed.
+  it('does not reject a listing Google has not classified', () => {
+    expect(servesTheWrongPurpose('Bike Park Erbezzo', place('Some Place'))).toBe(false)
+  })
+
+  it('does not fire when nothing in particular was asked for', () => {
+    expect(servesTheWrongPurpose(undefined, place('Bike Shop', 'bicycle_store'))).toBe(false)
+  })
+
+  // The shopping mall once served as lunch, now caught by its own
+  // classification rather than only by its name.
+  it('rejects a mall standing in for a restaurant', () => {
+    expect(
+      servesTheWrongPurpose('Restaurant Sletten', place('BIG Shopping', 'shopping_mall')),
+    ).toBe(true)
+  })
+
+  // Nothing here rejects a place for being obscure — only for being a
+  // different kind of business. A weavery you can visit is a sight.
+  it('leaves an unusual but genuine sight alone', () => {
+    expect(
+      servesTheWrongPurpose(
+        'Klässbols Linneväveri',
+        place('Klässbols Linneväveri', 'tourist_attraction'),
+      ),
+    ).toBe(false)
   })
 })
