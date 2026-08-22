@@ -2028,11 +2028,26 @@ A traveler rescanning ground they had already covered got a second card for a
 stop they had already judged, including ones they had turned down, which is
 the worse half.
 
-- `existingStopNames` now reaches the prompt as `alreadyOnTheList`, capped at
-  60. Rule 1d: do not propose them again, and use "already on your list" (or
-  "on your radar", or anything of that kind) ONLY about a name that appears
-  on it — and when the list is absent, say nothing of the kind at all,
-  because not knowing is not the same as knowing it is there.
+**Then the traveler answered the open question: "They were not in notes."**
+That rules out the only grounded source. `waypointNames` — the other thing
+the prompt carries that names places — is the start point, the LOCKED route
+stops and the end point, all of which are on the map and findable. There was
+nothing left for the model to have been reading. It asserted it.
+
+That changed the fix. The first version of rule 1d allowed the phrase when it
+was TRUE — only about a name on the list — which is a rule about the model's
+judgement, evaluated by the model. Forbidding the claim outright is a rule
+about its output. And it costs nothing: **whether a stop is saved is
+something the app knows for certain and already marks on every card** ("On
+route", "Locked in"), so this was never a fact the model was the right source
+for. The division is the same one that keeps being the answer here — Places
+for what exists, the app for the trip's own state, the model for judgement.
+
+- `existingStopNames` reaches the prompt as `alreadyOnTheList`, capped at 60,
+  and is now for ONE purpose: not proposing the same place twice. Rule 1d
+  forbids writing "already on your list", "already on your radar", "already
+  planned" or anything of the kind, and forbids referring to the traveler's
+  other stops, route or itinerary in "why" at all.
 - Omitted rather than sent empty on a trip with no stops yet: an empty array
   reads as a statement that the list is empty, which is a different claim
   from having nothing to say.
@@ -2043,6 +2058,13 @@ the worse half.
   here silently discards a genuine new find.
 - `stopsWritten` counts what was actually written, so the banner cannot say
   "Found 2 new stops" about one.
+
+**Suite note.** The full e2e run finished 125 passed / 2 failed —
+`countries.spec.ts:163` and `dayview.spec.ts:140` — both of which pass when
+their files are run together (19/19) and neither of which touches anything in
+this change. Same load-flakiness already recorded for `corridor.spec.ts:22`
+and `share-view.spec.ts:32`; `countries.spec.ts:163` is a new member of that
+set. Recorded rather than reported as green.
 
 ### Known documentation gap
 

@@ -181,15 +181,36 @@ describe('what the traveler already has', () => {
     expect(JSON.parse(user).alreadyOnTheList.length).toBeLessThanOrEqual(60)
   })
 
-  it('forbids proposing a stop the trip already has', () => {
+  /**
+   * The half the report was actually about, and the stronger reading of it.
+   *
+   * The first version of this rule allowed the phrase when it was TRUE —
+   * only about a name on the list. Then the traveler confirmed the places
+   * were not in their notes either, which leaves nothing the model could
+   * have been reading: it simply asserted it. A rule that permits a claim
+   * under a condition the model evaluates itself is a rule about its
+   * judgement; forbidding the claim outright is a rule about its output.
+   *
+   * It costs nothing, either. Whether a stop is saved is something the APP
+   * knows for certain and already marks on every card — "On route",
+   * "Locked in" — so this is a fact the model was never the right source
+   * for.
+   */
+  it('forbids claiming anything is already saved, true or not', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 60 })
-    expect(system).toMatch(/Do not propose them again/)
+    expect(system).toMatch(/NEVER write that something is "already on your list"/)
+    expect(system).toMatch(/already on your radar/)
+    expect(system).toMatch(/never refer to the traveler's other stops, their route or their itinerary/)
   })
 
-  // The half the report was actually about: the phrase itself.
-  it('allows the phrase only about a name on that list', () => {
+  it('says who owns that fact instead', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 60 })
-    expect(system).toMatch(/already on your list.*ONLY about a name that appears on it/s)
-    expect(system).toMatch(/If the list is absent you do not know what is on it/)
+    expect(system).toMatch(/The app already shows the traveler what is on their list/)
+  })
+
+  // The list is still sent, and still does its actual job.
+  it('keeps using the list to avoid proposing duplicates', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 60 })
+    expect(system).toMatch(/do not propose them again/i)
   })
 })
