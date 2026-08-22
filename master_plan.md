@@ -1719,62 +1719,74 @@ German listings would break the English proposals the same way. The logging
 above is what will settle it — the rejected names it prints say which
 language Places actually answered in.
 
-### 2026-08-22 — "this area" meant seven kilometres
+### 2026-08-22 — the search was told it was looking at a district
 
-The rescan above shipped, and the next scan of the same spot answered:
-"Found 4 places, but they were outside the 7 km searched around the middle of
-the map — zoom in on them and scan again." Reported as "Still similar. There
-should be things to do in the area!!" There are — Neuschwanstein, Füssen,
-Linderhof and the Ehrenberg ruins are all within about 20 km of Plansee. The
-search was seven kilometres wide.
+The 7 km scan over Plansee returned four finds, all outside the circle. The
+first reading of that was that 7 km was too small, and a 25 km floor shipped.
+That was wrong, and the correction was immediate: "It was right to limit at
+7 km. It was wrong to find nothing within the 7 km. There are for sure things
+to do! How did it conclude there was nothing within the circle?"
 
-Two separate defects, and the first message change is what exposed them: the
-finds were being dropped for DISTANCE, which the previous wording had been
-reporting as "could not be found on the map".
+It never concluded that. It was never asked.
 
-**The radius had no floor.** `visibleRadiusKm` measures from the map centre
-to the corner of the viewport, which was the right fix for a viewport LARGER
-than the old fixed circle (a view from Båstad to Markaryd searching 25 km).
-It was applied in both directions without asking whether the small end meant
-anything. It does not: the map pane on a phone is a band a few hundred pixels
-tall with a card list under it, so an ordinary look at a lake is a 7 km
-circle — while a traveler pointing at that lake means "around here", and in a
-vehicle covering 2,000 km in a trip that is not seven kilometres.
+**The model is given no coordinates.** That is deliberate — hard rule 2 of
+the prompt, so it cannot invent distances — which makes `areaDescription`,
+one reverse-geocoded string, the ENTIRE statement of where the circle is. Its
+precision therefore has to match the circle's size, and nothing made it.
 
-Floored at `MIN_RESCAN_RADIUS_KM = 25`, which is what the fixed radius was
-before viewports were consulted at all and never produced this complaint. The
-asymmetry is what decides it: too small returns NOTHING and cannot be
-recovered from by looking harder, while too large returns places further out
-than ideal, each carrying its own detour badge, to keep or turn down. Choices
-beat silence. Not reported as a cap, unlike the upper clamp — a circle larger
-than the view promises more than was asked for, and arming the button draws
-it and labels it in km before anything is searched.
+`reverseGeocode.ts` preferred `locality`, then `postal_town`, then
+`administrative_area_level_2`. A point in the middle of a lake is in no
+locality at all, so it fell through to level 2 — in Austria the Bezirk. The
+search was told: *area "Reutte, Austria", radius 7 km*. Reutte District is
+about 1,200 km². It answered with the best of that district — Ehrenberg, the
+highline, Reutte itself — four real places, every one a correct answer to the
+question it was actually asked, and every one 10 km or more from a circle
+they were then measured against and dropped for missing.
 
-**The advice was unconditional and therefore half wrong.** "Zoom in" is
-correct at the cap and only there: past `MAX_RESCAN_RADIUS_KM` the circle has
-stopped growing with the view, so zooming out only enlarges the part of the
-screen that is not searched — the Lithuania report, fixed on 2026-08-17.
-Below the cap the circle tracks the view, so the correct advice is the exact
-opposite, and telling someone looking at a 7 km circle to zoom in guarantees
-the same answer just as reliably as the bug it replaced. It now branches on
-whether the cap actually bit.
+Nothing in the reply was wrong. The question was.
 
-**A verification failure worth recording, of a kind not seen here before.**
-The e2e test for that message seeded `rescanLastRadiusKm: 50` and asserted
-"zoom in", with a comment reasoning "the search radius is already capped".
-50 WAS the cap when it was written. When the cap moved to 150 on 2026-08-17
-the premise silently became false, and the test kept passing — because the
-advice it asserted was given unconditionally, so it passed whether the
-premise held or not. A test can stop testing what it says it tests without
-ever going red, and the thing that hid it was the very unconditionality this
-change removes. It now seeds `MAX_RESCAN_RADIUS_KM` by name rather than by
-value, with a sibling test at 25 km asserting the opposite advice.
+- **A named feature now outranks any administrative area.** `NAME_PRECEDENCE`
+  runs natural feature → park → attraction → establishment → settlement →
+  road → administrative area, largest last, so the centre resolves to
+  "Plansee" rather than to the district it floats in. Plus codes are excluded
+  outright: a plus code is a coordinate in disguise and names nothing. The
+  original intent — the town, not the street address of whatever pixel the
+  centre landed on, and not "Austria" either — survives as this ordering
+  instead of as a three-rung ladder that skipped past the lake.
+- **The prompt now says the radius binds, not the area name** (rule 1a), and
+  that the region's best-known places are the WRONG answer to a small circle
+  even though they are the best-known places in it.
+- **And what a small circle IS answered by** (rule 1b), which is the half
+  that makes it produce something rather than merely produce less: the lake
+  and where you swim in it, the marked trail from the car park, the
+  viewpoint, the gorge walk, the hut, the cable car station, the one
+  restaurant in the hamlet. An empty list is for empty ground, not for ground
+  that merely has nothing famous on it.
 
-That import is also why `MIN_/MAX_RESCAN_RADIUS_KM` moved to
-`src/lib/rescanRadius.ts`: naming the cap from a Playwright spec pulled
-`rescanCorridorAction`'s Firebase import into the Node-side test process,
-which fails on `import.meta.env`. Constants a test needs to name should not
-sit behind a client SDK.
+**The 25 km floor is reverted.** Aiming the circle is the traveler's, and a
+floor overrides the aim — it answered "the circle is too small" to a report
+that was never about the circle. Recorded here rather than quietly dropped,
+because the wrong fix shipped to production before the right one: the
+symptom (finds outside a small circle) admits both readings, and the one that
+required no explanation of how the search actually works was the one taken
+first.
+
+Kept from that attempt, because it is right on its own terms: **the
+out-of-area advice branches on whether the cap bit.** "Zoom in" is correct at
+`MAX_RESCAN_RADIUS_KM`, where the circle has stopped tracking the view, and
+backwards below it.
+
+**A verification failure of a kind not seen here before.** The e2e test for
+that message seeded `rescanLastRadiusKm: 50` and asserted "zoom in", with a
+comment reasoning "the search radius is already capped". 50 WAS the cap when
+it was written. The cap moved to 150 on 2026-08-17, the premise silently
+became false, and the test kept passing — because the advice it asserted was
+given unconditionally, so it passed whether the premise held or not. A test
+can stop testing what it claims to test without ever going red. It now seeds
+`MAX_RESCAN_RADIUS_KM` by name, with a sibling at 25 km asserting the
+opposite advice; naming the cap from a spec is also why the radius constants
+moved to `src/lib/rescanRadius.ts`, since importing them used to drag a
+Firebase client import into the Node-side test process.
 
 ### Known documentation gap
 

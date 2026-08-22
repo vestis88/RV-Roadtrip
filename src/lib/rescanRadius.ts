@@ -27,30 +27,3 @@ export const RESCAN_RADIUS_KM = 25
  */
 export const MAX_RESCAN_RADIUS_KM = 150
 
-/**
- * The smallest circle "this area" is ever allowed to mean.
- *
- * Reported 2026-08-22 from a map centred on Plansee: "Found 4 places, but
- * they were outside the 7 km searched" — with Neuschwanstein, Füssen,
- * Linderhof and the Ehrenberg ruins all just beyond it, and the objection
- * "There should be things to do in the area!!" There are. The search was
- * 7 km wide.
- *
- * Tracking the viewport was the right fix for a viewport LARGER than the
- * circle (see visibleRadiusKm), and it was applied in both directions
- * without asking whether the small end meant anything. It does not. The map
- * pane on a phone is a band a few hundred pixels tall with a card list under
- * it, so an ordinary look at a lake is a 7 km circle — while the traveler
- * pointing at that lake means "around here", and in a vehicle that does
- * 2,000 km in a trip, "around here" is not seven kilometres.
- *
- * The two failure modes are not symmetrical, which is what decides the
- * floor. Too small returns NOTHING and cannot be recovered from by looking
- * harder — it is the empty answer that started all of this. Too large
- * returns places that are further away than ideal, each one carrying its own
- * detour badge, for the traveler to keep or turn down. Choices beat silence.
- *
- * 25 km, which is what the fixed radius was before viewports were consulted
- * at all — a value that never produced this complaint.
- */
-export const MIN_RESCAN_RADIUS_KM = 25

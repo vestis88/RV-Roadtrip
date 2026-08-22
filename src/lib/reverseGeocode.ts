@@ -49,19 +49,90 @@ async function resolveName(
     const { results } = await new Geocoder().geocode({ location: point })
     if (results.length === 0) return undefined
 
-    // Prefer the smallest administrative name that still means something to
-    // a reader — the town, not the street address of whatever happened to be
-    // nearest the centre pixel, and not "Denmark" either.
-    const preferred =
-      results.find((result) => result.types.includes('locality')) ??
-      results.find((result) => result.types.includes('postal_town')) ??
-      results.find((result) =>
-        result.types.includes('administrative_area_level_2'),
-      ) ??
-      results[0]
+    const preferred = mostSpecific(results) ?? results[0]
     return preferred.formatted_address
   } catch (error) {
     console.warn('Reverse geocoding the map centre failed', error)
     return undefined
   }
+}
+
+/**
+ * How much use a name is as the ONLY thing telling a search where it is.
+ *
+ * Reported 2026-08-22 from a map centred on Plansee with a 7 km circle: four
+ * finds, every one of them outside it, and the objection "It was right to
+ * limit at 7 km. It was wrong to find nothing within the 7 km. There are for
+ * sure things to do!" There are, and the search never had a chance to name
+ * them — because the model is deliberately given no coordinates (see the
+ * prompt's hard rule 2, and its own note on why), so this string is the
+ * entire statement of where the circle is.
+ *
+ * The old ladder was locality, then postal_town, then
+ * administrative_area_level_2. A point in the middle of a lake is in no
+ * locality at all, so it fell to level 2 — in Austria the Bezirk — and the
+ * search was told it was looking at "Reutte, Austria", a district of some
+ * 1,200 km², with a radius of 7. It answered with the best of that district:
+ * Ehrenberg, the highline, Reutte itself. Four real places, all correct
+ * answers to the question asked, all 10 km or more from the circle they were
+ * then measured against and dropped for missing.
+ *
+ * Nothing in the reply was wrong. The question was.
+ *
+ * So a named feature now outranks any administrative area: "Plansee" locates
+ * a 7 km circle and "Reutte District" cannot. The original intent — not the
+ * street address of whatever pixel the centre landed on, not "Austria"
+ * either — survives as the ordering below rather than as a three-rung
+ * ladder that skipped straight past the lake it was floating on.
+ */
+const NAME_PRECEDENCE = [
+  // Named features and places. The centre is ON one of these, so it is the
+  // most precise thing that is also recognisable.
+  'natural_feature',
+  'park',
+  'tourist_attraction',
+  'point_of_interest',
+  'establishment',
+  // Then settlements, smallest first.
+  'locality',
+  'postal_town',
+  'sublocality',
+  'neighborhood',
+  // Then roads: precise, and dull, but they anchor a circle.
+  'street_address',
+  'route',
+  // Administrative areas last, largest last. These are what the search can
+  // do least with, because their name says nothing about their size.
+  'administrative_area_level_3',
+  'administrative_area_level_2',
+  'administrative_area_level_1',
+]
+
+function rank(result: google.maps.GeocoderResult): number {
+  // A plus code is a coordinate in disguise: it names nothing, so it is
+  // never the answer even though it is usually the most "precise" result.
+  if (result.types.length === 1 && result.types[0] === 'plus_code') {
+    return Number.POSITIVE_INFINITY
+  }
+  const best = result.types
+    .map((type) => NAME_PRECEDENCE.indexOf(type))
+    .filter((index) => index >= 0)
+  return best.length > 0 ? Math.min(...best) : Number.POSITIVE_INFINITY
+}
+
+export function mostSpecific(
+  results: google.maps.GeocoderResult[],
+): google.maps.GeocoderResult | undefined {
+  let best: google.maps.GeocoderResult | undefined
+  let bestRank = Number.POSITIVE_INFINITY
+  for (const result of results) {
+    const current = rank(result)
+    // Strictly better, so Google's own ordering breaks ties — it returns
+    // results most specific first.
+    if (current < bestRank) {
+      best = result
+      bestRank = current
+    }
+  }
+  return best
 }

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  MAX_RESCAN_RADIUS_KM,
-  MIN_RESCAN_RADIUS_KM,
-  visibleRadiusKm,
-} from './rescanCorridorAction'
+import { MAX_RESCAN_RADIUS_KM, visibleRadiusKm } from './rescanCorridorAction'
 
 describe('visibleRadiusKm', () => {
   // The report this exists for: the visible map ran roughly Båstad to
@@ -24,14 +20,16 @@ describe('visibleRadiusKm', () => {
   })
 
   /**
-   * This asserted `radiusKm < 10` until 2026-08-22, under the heading "a
-   * close-in scan stays close in". Tracking the viewport downwards was never
-   * asked for by any report — it came along with tracking it upwards, which
-   * was — and it is what produced "Found 4 places, but they were outside the
-   * 7 km searched" on a map centred on Plansee, with four real attractions
-   * sitting just beyond the circle.
+   * Briefly floored at 25 km on 2026-08-22 and reverted the same day.
+   *
+   * A 7 km scan over Plansee returned four finds, all outside the circle,
+   * and the floor was the wrong reading of it: "It was right to limit at
+   * 7 km. It was wrong to find nothing within the 7 km." Aiming the circle
+   * is the traveler's, and a floor overrides the aim. The real fault was
+   * that the search was told it was looking at a 1,200 km² district — see
+   * reverseGeocode.ts.
    */
-  it('never searches less than the floor, however far in the map is zoomed', () => {
+  it('shrinks with the viewport, so a close-in scan stays close in', () => {
     const { radiusKm, cappedFrom } = visibleRadiusKm({
       north: 56.55,
       south: 56.45,
@@ -39,21 +37,8 @@ describe('visibleRadiusKm', () => {
       west: 12.95,
     })
 
-    expect(radiusKm).toBe(MIN_RESCAN_RADIUS_KM)
-    // Not reported as a cap: a circle larger than the view promises MORE
-    // than was asked for, and is drawn on the map before the search runs.
+    expect(radiusKm).toBeLessThan(10)
     expect(cappedFrom).toBeUndefined()
-  })
-
-  it('still tracks the viewport once it is wider than the floor', () => {
-    const { radiusKm } = visibleRadiusKm({
-      north: 56.9,
-      south: 56.2,
-      east: 13.7,
-      west: 12.7,
-    })
-
-    expect(radiusKm).toBeGreaterThan(MIN_RESCAN_RADIUS_KM)
   })
 
   // Capping is right — a whole-country viewport is not a searchable area —

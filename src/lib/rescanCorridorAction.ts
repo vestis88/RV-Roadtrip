@@ -2,12 +2,9 @@ import { httpsCallable } from 'firebase/functions'
 import { haversineDistanceKm, type LatLng } from '@rv/shared'
 import { functions } from './firebase'
 import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
-import {
-  MAX_RESCAN_RADIUS_KM,
-  MIN_RESCAN_RADIUS_KM,
-} from './rescanRadius'
+import { MAX_RESCAN_RADIUS_KM } from './rescanRadius'
 
-export { MAX_RESCAN_RADIUS_KM, MIN_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM } from './rescanRadius'
+export { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM } from './rescanRadius'
 
 /**
  * How far "this area" actually reaches, from what the traveler can see.
@@ -37,16 +34,10 @@ export function visibleRadiusKm(bounds: {
     lng: (bounds.east + bounds.west) / 2,
   }
   const corner = { lat: bounds.north, lng: bounds.east }
-  const visible = Math.round(haversineDistanceKm(center, corner))
-  if (visible > MAX_RESCAN_RADIUS_KM) {
-    return { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: visible }
-  }
-  // Floored, not clamped-and-reported: a circle LARGER than the view needs
-  // no warning, because it promises more than the traveler asked for rather
-  // than less. It is also drawn before the search runs — arming the button
-  // paints the circle and labels it in km — so a floor that reaches past the
-  // edge of the screen is visible as exactly that.
-  return { radiusKm: Math.max(MIN_RESCAN_RADIUS_KM, visible) }
+  const visible = Math.max(1, Math.round(haversineDistanceKm(center, corner)))
+  return visible > MAX_RESCAN_RADIUS_KM
+    ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: visible }
+    : { radiusKm: visible }
 }
 
 /**
