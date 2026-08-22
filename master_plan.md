@@ -1719,6 +1719,63 @@ German listings would break the English proposals the same way. The logging
 above is what will settle it — the rejected names it prints say which
 language Places actually answered in.
 
+### 2026-08-22 — "this area" meant seven kilometres
+
+The rescan above shipped, and the next scan of the same spot answered:
+"Found 4 places, but they were outside the 7 km searched around the middle of
+the map — zoom in on them and scan again." Reported as "Still similar. There
+should be things to do in the area!!" There are — Neuschwanstein, Füssen,
+Linderhof and the Ehrenberg ruins are all within about 20 km of Plansee. The
+search was seven kilometres wide.
+
+Two separate defects, and the first message change is what exposed them: the
+finds were being dropped for DISTANCE, which the previous wording had been
+reporting as "could not be found on the map".
+
+**The radius had no floor.** `visibleRadiusKm` measures from the map centre
+to the corner of the viewport, which was the right fix for a viewport LARGER
+than the old fixed circle (a view from Båstad to Markaryd searching 25 km).
+It was applied in both directions without asking whether the small end meant
+anything. It does not: the map pane on a phone is a band a few hundred pixels
+tall with a card list under it, so an ordinary look at a lake is a 7 km
+circle — while a traveler pointing at that lake means "around here", and in a
+vehicle covering 2,000 km in a trip that is not seven kilometres.
+
+Floored at `MIN_RESCAN_RADIUS_KM = 25`, which is what the fixed radius was
+before viewports were consulted at all and never produced this complaint. The
+asymmetry is what decides it: too small returns NOTHING and cannot be
+recovered from by looking harder, while too large returns places further out
+than ideal, each carrying its own detour badge, to keep or turn down. Choices
+beat silence. Not reported as a cap, unlike the upper clamp — a circle larger
+than the view promises more than was asked for, and arming the button draws
+it and labels it in km before anything is searched.
+
+**The advice was unconditional and therefore half wrong.** "Zoom in" is
+correct at the cap and only there: past `MAX_RESCAN_RADIUS_KM` the circle has
+stopped growing with the view, so zooming out only enlarges the part of the
+screen that is not searched — the Lithuania report, fixed on 2026-08-17.
+Below the cap the circle tracks the view, so the correct advice is the exact
+opposite, and telling someone looking at a 7 km circle to zoom in guarantees
+the same answer just as reliably as the bug it replaced. It now branches on
+whether the cap actually bit.
+
+**A verification failure worth recording, of a kind not seen here before.**
+The e2e test for that message seeded `rescanLastRadiusKm: 50` and asserted
+"zoom in", with a comment reasoning "the search radius is already capped".
+50 WAS the cap when it was written. When the cap moved to 150 on 2026-08-17
+the premise silently became false, and the test kept passing — because the
+advice it asserted was given unconditionally, so it passed whether the
+premise held or not. A test can stop testing what it says it tests without
+ever going red, and the thing that hid it was the very unconditionality this
+change removes. It now seeds `MAX_RESCAN_RADIUS_KM` by name rather than by
+value, with a sibling test at 25 km asserting the opposite advice.
+
+That import is also why `MIN_/MAX_RESCAN_RADIUS_KM` moved to
+`src/lib/rescanRadius.ts`: naming the cap from a Playwright spec pulled
+`rescanCorridorAction`'s Firebase import into the Node-side test process,
+which fails on `import.meta.env`. Constants a test needs to name should not
+sit behind a client SDK.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

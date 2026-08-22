@@ -2,26 +2,12 @@ import { httpsCallable } from 'firebase/functions'
 import { haversineDistanceKm, type LatLng } from '@rv/shared'
 import { functions } from './firebase'
 import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
+import {
+  MAX_RESCAN_RADIUS_KM,
+  MIN_RESCAN_RADIUS_KM,
+} from './rescanRadius'
 
-/**
- * The fallback when the map hasn't reported its bounds yet. Everything else
- * uses the viewport — see visibleRadiusKm.
- */
-export const RESCAN_RADIUS_KM = 25
-
-/**
- * The callable's own cap, mirrored so the client can say when it bites.
- *
- * Raised from 50 on 2026-08-17, because what set it at 50 no longer applies.
- * It was a cost guard from when a rescan ran up to three web searches per
- * turn and the bill grew with the ground covered. The search is now one
- * tool-free Claude call returning at most MAX_RESCAN_RESULTS finds, and that
- * costs the same whether it is asked about 25 km or 150. What remains is a
- * quality bound — "what is worth stopping for within 500 km of here" is a
- * worse question than "within 100 km", not a more expensive one — so the cap
- * stays, at a size that covers a normal regional view instead of a city one.
- */
-export const MAX_RESCAN_RADIUS_KM = 150
+export { MAX_RESCAN_RADIUS_KM, MIN_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM } from './rescanRadius'
 
 /**
  * How far "this area" actually reaches, from what the traveler can see.
@@ -51,10 +37,16 @@ export function visibleRadiusKm(bounds: {
     lng: (bounds.east + bounds.west) / 2,
   }
   const corner = { lat: bounds.north, lng: bounds.east }
-  const radiusKm = Math.max(1, Math.round(haversineDistanceKm(center, corner)))
-  return radiusKm > MAX_RESCAN_RADIUS_KM
-    ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: radiusKm }
-    : { radiusKm }
+  const visible = Math.round(haversineDistanceKm(center, corner))
+  if (visible > MAX_RESCAN_RADIUS_KM) {
+    return { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: visible }
+  }
+  // Floored, not clamped-and-reported: a circle LARGER than the view needs
+  // no warning, because it promises more than the traveler asked for rather
+  // than less. It is also drawn before the search runs — arming the button
+  // paints the circle and labels it in km — so a floor that reaches past the
+  // edge of the screen is visible as exactly that.
+  return { radiusKm: Math.max(MIN_RESCAN_RADIUS_KM, visible) }
 }
 
 /**

@@ -2,6 +2,7 @@ import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import { MAX_RESCAN_RADIUS_KM } from '../src/lib/rescanRadius'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
 const PROJECT_ID = 'demo-rv-trip-planner'
@@ -460,7 +461,11 @@ test('a scan that found places outside the area says so, not "nothing"', async (
       'planMeta.rescanLastRunAt': new Date().toISOString(),
       'planMeta.rescanLastFoundCount': 0,
       'planMeta.rescanLastDroppedTooFar': 4,
-      'planMeta.rescanLastRadiusKm': 50,
+      // The CAP, not a round number. Seeded as 50 until 2026-08-22, which is
+      // what the cap was when this was written — and when the cap moved to
+      // 150 this quietly stopped testing its own premise, because the advice
+      // it asserts was given unconditionally and passed either way.
+      'planMeta.rescanLastRadiusKm': MAX_RESCAN_RADIUS_KM,
     })
 
   await page.getByTestId('nav-map').click()
@@ -468,13 +473,47 @@ test('a scan that found places outside the area says so, not "nothing"', async (
 
   const status = page.getByTestId('rescan-corridor-status')
   await expect(status).toContainText('4 places')
-  // Names the circle it is talking about, and points INWARD. "Zoom out" was
-  // the old advice and it was backwards: the search radius is already capped,
+  // Names the circle it is talking about, and points INWARD — correct here
+  // and only here: at the cap the circle has stopped growing with the view,
   // so zooming out only enlarges the part of the view that is not searched.
-  await expect(status).toContainText('50 km')
+  await expect(status).toContainText(`${MAX_RESCAN_RADIUS_KM} km`)
   await expect(status).toContainText('zoom in')
   await expect(status).not.toContainText('zoom out')
   await expect(status).not.toContainText('Nothing new found')
+})
+
+/**
+ * The same message below the cap, where the advice reverses.
+ *
+ * Reported 2026-08-22 from a map centred on Plansee: "Found 4 places, but
+ * they were outside the 7 km searched — zoom in on them and scan again",
+ * with four real attractions just beyond the circle. Zooming in shrinks the
+ * circle, so following that instruction guarantees the same answer.
+ */
+test('a scan whose circle came from the viewport says to zoom OUT', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 0,
+      'planMeta.rescanLastDroppedTooFar': 4,
+      'planMeta.rescanLastRadiusKm': 25,
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+
+  const status = page.getByTestId('rescan-corridor-status')
+  await expect(status).toContainText('4 places')
+  await expect(status).toContainText('25 km')
+  await expect(status).toContainText('zoom out')
+  await expect(status).not.toContainText('zoom in')
 })
 
 // The other way "Nothing new found nearby" was untrue: the search proposed

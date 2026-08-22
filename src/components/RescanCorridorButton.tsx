@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { LatLng, PlanMeta } from '@rv/shared'
-import { rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { MAX_RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
+import { describeResult } from '../lib/rescanResultMessage'
 import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
@@ -67,49 +68,6 @@ function isStale(beatAt: string | undefined, now: number): boolean {
   if (!beatAt) return false
   const beat = new Date(beatAt).getTime()
   return Number.isFinite(beat) && now - beat > STALE_HEARTBEAT_MS
-}
-
-/**
- * What to say when a search comes back.
- *
- * "Nothing new found nearby" was said even when the search had found real
- * places and discarded every one of them for sitting outside the area — a
- * sentence describing a completely different failure from the one that
- * happened, and the reason a narrow search read as a broken one. When
- * something was thrown away, say that instead, and name the fix.
- */
-function describeResult(
-  found: number,
-  droppedTooFar: number,
-  notLocated: number,
-  radiusKm: number | undefined,
-): string {
-  if (found > 0) {
-    return `Found ${found} new stop${found === 1 ? '' : 's'} nearby.`
-  }
-  if (droppedTooFar > 0) {
-    // "Zoom out and scan again" was the advice here, and it was backwards.
-    // The search is a circle around the map's centre capped at
-    // MAX_RESCAN_RADIUS_KM, so zooming out cannot widen it — it only makes
-    // the part of the view that ISN'T searched bigger. Reported from a map
-    // showing the whole of Lithuania: two finds, both in view, both outside
-    // the 50 km circle, and an instruction that would guarantee the same
-    // answer again.
-    const circle = radiusKm
-      ? `the ${Math.round(radiusKm)} km searched`
-      : 'the area searched'
-    return droppedTooFar === 1
-      ? `Found 1 place, but it was outside ${circle} around the middle of the map — zoom in on it and scan again.`
-      : `Found ${droppedTooFar} places, but they were outside ${circle} around the middle of the map — zoom in on them and scan again.`
-  }
-  // Not the traveler's problem to fix, and saying "nothing here" would blame
-  // the area for what is a map-data failure — see notLocated().
-  if (notLocated > 0) {
-    return notLocated === 1
-      ? 'Suggested 1 place, but it could not be found on the map, so it was dropped.'
-      : `Suggested ${notLocated} places, but none of them could be found on the map, so they were dropped.`
-  }
-  return 'Nothing new found nearby.'
 }
 
 function elapsedLabel(startedAt: string | undefined, now: number): string {
@@ -207,6 +165,9 @@ export function RescanCorridorButton({
           planMeta.rescanLastDroppedTooFar ?? 0,
           planMeta.rescanLastNotLocated ?? 0,
           planMeta.rescanLastRadiusKm,
+          // The radius the SEARCH ran at, against the cap — not the current
+          // viewport, which the traveler may already have moved.
+          (planMeta.rescanLastRadiusKm ?? 0) >= MAX_RESCAN_RADIUS_KM,
         )
       : null
 
