@@ -335,17 +335,15 @@ describe('nameLooksRight — strict enough to catch the wrong place, no stricter
     ).toBe(true)
   })
 
-  // A known limitation, asserted so it is recorded rather than assumed away:
-  // a category translated into a COMPOUND ("Nature Reserve" against German
-  // "Naturschutzgebiet") is still not matched. CATEGORY_GROUPS handles the
-  // cases where the category is its own word; teaching it compound
-  // translations is a bigger job than this fix, and getting it wrong reopens
-  // the go-kart hole. Loosening the count would not fix this either — the
-  // place name is one hit out of three.
-  it('does not yet match a category translated into a compound', () => {
+  // Recorded on 2026-08-18 as a known limitation and asserted false; fixed
+  // 2026-08-22 by giving the table the compound forms themselves, so this
+  // now asserts the opposite. Kept in place rather than deleted, because
+  // what it documents is that a category welded into one word is the same
+  // question as a category standing alone.
+  it('matches a category translated into a compound', () => {
     expect(
       nameLooksRight('Schellbruch Nature Reserve', 'Naturschutzgebiet Schellbruch'),
-    ).toBe(false)
+    ).toBe(true)
   })
 
   // And the guard that actually caught the go-kart track is untouched, so
@@ -354,5 +352,113 @@ describe('nameLooksRight — strict enough to catch the wrong place, no stricter
     expect(
       nameLooksRight('Lübeck Bike Park Trails', 'Lübeck Golfklubb Anlage'),
     ).toBe(false)
+  })
+})
+
+/**
+ * Reported 2026-08-22 from a rescan over the Alps: "Suggested 5 places, but
+ * none of them could be found on the map, so they were dropped" — with the
+ * fair objection that five real-looking suggestions and not one locatable is
+ * not a believable answer.
+ *
+ * On the rescan path it is not believable, and the code says why. That path
+ * calls verifyPlaceLocation with NO_QUALITY_BAR and an unbounded distance,
+ * so neither ratings nor geography can drop anything: the name check is the
+ * ONLY gate left, and "none of them" means it rejected every one.
+ *
+ * German is where it breaks, and it breaks structurally rather than
+ * occasionally. Danish and Swedish put the category in its own word
+ * ("Kronborg Slot"), which the table already handled. German welds it onto
+ * the place name or leads with it, while the listing that comes back
+ * separates and translates it — so a one-word name and its own listing can
+ * share no word at all and score zero out of one.
+ */
+describe('German compound names against their translated listings', () => {
+  const pairs: [string, string][] = [
+    ['Pöllatschlucht', 'Pöllat Gorge'],
+    ['Marienbrücke', "Mary's Bridge"],
+    ['Aussichtsplattform Höllkopf', 'Höllkopf Viewing Platform'],
+    ['Naturschutzgebiet Ammergauer Alpen', 'Ammergauer Alpen Nature Reserve'],
+  ]
+
+  for (const [proposed, listed] of pairs) {
+    it(`matches ${proposed} to ${listed}`, () => {
+      expect(nameLooksRight(proposed, listed)).toBe(true)
+    })
+  }
+
+  // Where no group names the welded-on part — a funicular, a mill, a farm —
+  // the shared opening is the only evidence there is.
+  it('matches a compound to the bare place name it is built on', () => {
+    expect(nameLooksRight('Tegelbergbahn', 'Tegelberg Cable Car')).toBe(true)
+    expect(nameLooksRight('Pöllatschlucht', 'Pöllat')).toBe(true)
+  })
+
+  // Six characters, so the shared opening is evidence rather than the
+  // coincidence of two places in one valley both starting "Berg".
+  it('does not treat a short shared opening as a match', () => {
+    expect(nameLooksRight('Bergbahn', 'Bergkirchen')).toBe(false)
+    expect(nameLooksRight('Steinsee', 'Steinbach')).toBe(false)
+  })
+
+  // A prefix, not a substring anywhere: German compounds append. Chosen so
+  // the two names share no category either — "Wolfsklamm"/"Almbachklamm"
+  // would pass, but on the category rule rather than this one.
+  it('does not match on a shared ending alone', () => {
+    expect(nameLooksRight('Wolfsteig', 'Almbachsteig')).toBe(false)
+  })
+
+  /**
+   * The cost of the category rule, and the thing that pays for it.
+   *
+   * Every gorge agrees with every other gorge, so a one-word name whose only
+   * matchable signal is its category matches all of them — that is what lets
+   * "Pöllatschlucht" find "Pöllat Gorge", and it cannot be had one-way.
+   * What must not happen is the stranger WINNING, and before the weighting
+   * it could: both scored one hit out of the same union, the tie fell
+   * through to rating, and rating is exactly where the famous wrong answer
+   * is strongest.
+   */
+  it('passes a same-category stranger but ranks the real one above it', () => {
+    expect(nameLooksRight('Wolfsklamm', 'Almbachklamm')).toBe(true)
+    expect(nameMatchScore('Wolfsklamm', 'Wolfsklamm Gorge')).toBeGreaterThan(
+      nameMatchScore('Wolfsklamm', 'Almbachklamm'),
+    )
+  })
+
+  it('prefers the German listing over any other bridge', () => {
+    const asked = 'Marienbrücke'
+    expect(nameMatchScore(asked, 'Marienbrücke')).toBeGreaterThan(
+      nameMatchScore(asked, 'Alte Brücke'),
+    )
+  })
+
+  /**
+   * The limitation that remains, asserted so it is recorded rather than
+   * assumed away.
+   *
+   * Once the listing is TRANSLATED, "Marienbrücke" and "Mary's Bridge" share
+   * no word at all — the match rests entirely on both being bridges, and so
+   * would a match against any other bridge. Nothing in a string comparison
+   * can separate them; it would take a dictionary. What protects the result
+   * is that this is not the last gate: the rescan path filters every find by
+   * distance from the searched area afterwards, so a bridge in the wrong
+   * valley is dropped there and reported as out of area rather than shown.
+   */
+  it('cannot rank a translated compound against a same-category stranger', () => {
+    const asked = 'Marienbrücke'
+    expect(nameMatchScore(asked, "Mary's Bridge")).toBe(
+      nameMatchScore(asked, 'Alte Brücke'),
+    )
+  })
+
+  // The failures every one of these gates exists for, unchanged.
+  it('still rejects a different kind of place sharing the name', () => {
+    expect(nameLooksRight('Bruzaholms MTB', 'Bruzaholms Gokart')).toBe(false)
+  })
+
+  it('still rejects an unrelated landmark', () => {
+    expect(nameLooksRight('Restaurant Sletten', 'Designer Outlet Berlin')).toBe(false)
+    expect(nameLooksRight('Vallåsen Bike Park', 'Vrå')).toBe(false)
   })
 })

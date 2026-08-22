@@ -333,7 +333,22 @@ const CATEGORY_GROUPS: Record<string, string[]> = {
   waterfall: ['vattenfall', 'foss', 'fossen', 'waterfall', 'wasserfall'],
   climbing: ['klattring', 'klatring', 'climbing', 'klettersteig', 'via ferrata'],
   themepark: ['tivoli', 'nojespark', 'fornoyelsespark', 'freizeitpark', 'themepark'],
-  campsite: ['camping', 'campingplats', 'campingplass', 'stellplatz', 'ställplats'],
+  campsite: ['camping', 'campingplats', 'campingplass', 'stellplatz', 'stallplats'],
+  // Added 2026-08-22, all four from the same report: an Alpine rescan
+  // proposing five places and locating none of them. German does not put the
+  // category in its own word the way "Kronborg Slot" does — it welds it onto
+  // the place name ("Pöllatschlucht", "Marienbrücke") or leads with it
+  // ("Aussichtsplattform Höllkopf", "Naturschutzgebiet Schellbruch") — while
+  // the listing that comes back separates and translates it ("Pöllat Gorge",
+  // "Mary's Bridge"). Without a group bridging the two, a one-word compound
+  // shares no word at all with its own listing and scores zero.
+  gorge: ['klamm', 'schlucht', 'gorge', 'canyon', 'ravine', 'juvet'],
+  bridge: ['brucke', 'bridge', 'broen', 'bron'],
+  viewpoint: ['aussichtsplattform', 'aussichtspunkt', 'aussichtsturm', 'viewpoint', 'viewing', 'utsiktspunkt', 'utsikten', 'belvedere'],
+  // Closes a limitation recorded as open on 2026-08-18: "Schellbruch Nature
+  // Reserve" against "Naturschutzgebiet Schellbruch" was noted then as
+  // unmatchable, and it is exactly this shape.
+  naturereserve: ['naturschutzgebiet', 'naturreservat', 'naturpark', 'nationalpark', 'reserve', 'reservat'],
 }
 
 /**
@@ -345,6 +360,13 @@ const CATEGORY_GROUPS: Record<string, string[]> = {
  */
 const CATEGORY_SUBSTRING_MIN = 4
 
+/**
+ * Keywords are matched against `rawTokens` output, which is already
+ * case-folded and de-accented — so every keyword above must be written that
+ * way too. An accented keyword is dead: it can never equal or appear inside
+ * a token that has had its accents stripped. ('ställplats' sat in the table
+ * unmatchable for exactly this reason until 2026-08-22.)
+ */
 const CATEGORY_OF_KEYWORD = new Map<string, string>(
   Object.entries(CATEGORY_GROUPS).flatMap(([group, words]) =>
     words.map((word) => [word, group] as [string, string]),
@@ -429,14 +451,77 @@ function categoryConflict(expectedName: string, actual: string): boolean {
  * stricter threshold below.
  */
 function nameMatchHits(expected: string[], actual: string): number {
+  const { strong, category } = countHits(expected, actual)
+  return strong + category
+}
+
+/**
+ * Hits split by how much they are worth.
+ *
+ * A word the result actually contains identifies a place. A word that merely
+ * agrees about what KIND of place it is does not: every gorge in the Alps
+ * agrees with every other, and "Marienbrücke" matches any bridge at all on
+ * that evidence alone. Both are enough to PASS the gate — that is what lets
+ * a translated listing through, and it is the whole point of the table — but
+ * they must not weigh the same when two results are ordered against each
+ * other, or the best-known bridge in the region beats the one asked for.
+ */
+function countHits(
+  expected: string[],
+  actual: string,
+): { strong: number; category: number } {
   const found = new Set(nameTokens(actual))
   const stems = new Set([...found].map(withoutGenitive))
   const actualCategories = categoriesIn(actual)
-  return expected.filter((token) => {
-    if (found.has(token) || stems.has(withoutGenitive(token))) return true
+  let strong = 0
+  let category = 0
+  for (const token of expected) {
+    if (
+      found.has(token) ||
+      stems.has(withoutGenitive(token)) ||
+      [...found].some((word) => compoundOf(token, word))
+    ) {
+      strong += 1
+      continue
+    }
     const group = categoryOfToken(token)
-    return group !== undefined && actualCategories.has(group)
-  }).length
+    if (group !== undefined && actualCategories.has(group)) category += 1
+  }
+  return { strong, category }
+}
+
+/**
+ * The shortest a shared opening may be and still be evidence rather than
+ * coincidence. Six characters, not four: at four, "Berg-", "Stein-", "Sand-"
+ * and every other German landscape word would make unrelated places in the
+ * same valley match each other, which is the go-kart failure again in a new
+ * costume.
+ */
+const COMPOUND_PREFIX_MIN = 6
+
+/**
+ * Whether two words are the same name with a category welded onto one of
+ * them — "Tegelbergbahn" against Places' "Tegelberg", "Pöllatschlucht"
+ * against "Pöllat".
+ *
+ * A German compound is one token to `nameTokens`, so where the listing
+ * separates the parts there is literally no shared word to count, and a
+ * one-word name needs one hit. The category table above bridges this
+ * whenever the welded-on part is a category somebody thought to list; this
+ * is the rest of the cases, where it is a funicular, a farm, a mill or
+ * anything else nobody enumerated.
+ *
+ * Prefix-anchored on purpose. German compounds append, so the place name is
+ * the opening of the token — an unanchored substring test would let any word
+ * containing another anywhere match, which is far more than this needs.
+ */
+function compoundOf(a: string, b: string): boolean {
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  return (
+    shorter.length >= COMPOUND_PREFIX_MIN &&
+    shorter.length < longer.length &&
+    longer.startsWith(shorter)
+  )
 }
 
 /**
@@ -493,10 +578,43 @@ function nameMatchScore(expectedName: string | undefined, actual: string): numbe
   if (!expectedName) return 1
   const expected = nameTokens(expectedName)
   if (expected.length === 0) return 1
-  const hits = nameMatchHits(expected, actual)
-  const union = expected.length + (new Set(nameTokens(actual)).size - hits)
-  return hits / union
+  const { strong, category } = countHits(expected, actual)
+  const hits = strong + category
+  // Words the result ADDS are evidence against it — but the translated
+  // category is not one of them. "Wolfsklamm Gorge" says "gorge" twice, once
+  // in each language; charging it for the English half made it score below a
+  // completely different gorge whose single word happened to be its whole
+  // name, which is the opposite of the intended ordering. Only words that
+  // say something the request did not are counted.
+  const wanted = categoriesIn(expectedName)
+  const added = [...new Set(nameTokens(actual))].filter((word) => {
+    const accounted = expected.some(
+      (token) =>
+        token === word ||
+        withoutGenitive(token) === withoutGenitive(word) ||
+        compoundOf(token, word),
+    )
+    if (accounted) return false
+    const group = categoryOfToken(word)
+    return !(group !== undefined && wanted.has(group))
+  }).length
+  const union = expected.length + added
+  // A result that shares no actual WORD with the request, and matches only
+  // by agreeing what kind of place it is, ranks below one that does. It
+  // still passes the gate — that is what lets a translated listing through —
+  // but "some bridge" and "this bridge" must not rank equally, or the tie
+  // falls through to rating, and rating is exactly where the famous wrong
+  // answer is strongest. That is the shopping mall wearing a different noun.
+  //
+  // Applied to the whole score rather than to the hit, because the union
+  // shrinks for a short name and would otherwise hand the discount straight
+  // back: one category hit out of one word scored the same as one real hit
+  // out of two.
+  const score = hits / union
+  return strong === 0 ? score * CATEGORY_ONLY_PENALTY : score
 }
+
+const CATEGORY_ONLY_PENALTY = 0.5
 
 /**
  * The single gate every text-search result must pass before it is accepted as
@@ -1025,6 +1143,34 @@ export async function verifyPlaceLocation(
     NO_QUALITY_BAR,
     maxDistanceKm,
   )
+  // Why a name was dropped, which until now was recorded nowhere at all.
+  //
+  // Reported 2026-08-22 as "Suggested 5 places, but none of them could be
+  // found on the map" over the Alps, with a reasonable objection: five
+  // real-looking suggestions and not one locatable is not a believable
+  // answer. It was not diagnosable either — this function returned null and
+  // the caller dropped the find in silence, so which five names failed, and
+  // what Places said instead, existed nowhere.
+  //
+  // The two sub-causes need telling apart and read completely differently:
+  // nothing came back at all (a name that does not exist, or a query Places
+  // cannot parse) versus results came back and none of them satisfied the
+  // name check (the place is right there and the gate is wrong). Logging the
+  // rejected names is what makes the second one answerable, because the
+  // interesting part is the comparison — asked for one thing, offered
+  // another, no shared word.
+  if (!match) {
+    if (results.length === 0) {
+      console.info(`Places had no results at all for "${query}"`)
+    } else {
+      console.info(
+        `Places found nothing matching "${expectedName ?? query}" — rejected: ${results
+          .slice(0, 5)
+          .map((candidate) => `"${candidate.name}"`)
+          .join(', ')}`,
+      )
+    }
+  }
   return match
     ? {
         name: match.name,

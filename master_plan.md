@@ -1626,6 +1626,99 @@ plan stale when it can see it was ready, so nothing happened. It now waits
 for `plan-status` to read `ready` first. Worth recording because the failure
 looked exactly like a missing invalidation rule.
 
+### 2026-08-22 — five finds, none locatable, and why that was never believable
+
+Reported from a rescan over the Alps near Plansee: "Suggested 5 places, but
+none of them could be found on the map, so they were dropped." Objection:
+"This seems unlikely, why would it find 5 stops but then no map?" Correct —
+on this path it is not merely unlikely, it is close to impossible, and the
+code says why.
+
+`verifyPlaceLocation` is called there with `NO_QUALITY_BAR` and
+`Number.POSITIVE_INFINITY` as the distance ceiling, deliberately: geography
+is `filterFindsToCorridor`'s job afterwards. So neither ratings nor distance
+can drop anything on that call. A Places outage cannot produce this message
+either — `textSearch` throws on any non-OK status, and an all-failed batch
+re-throws rather than reporting places-not-found. By elimination the **name
+check was the only gate left**, and "none of them" means it rejected all
+five.
+
+**German is where it breaks, and it breaks structurally.** Danish and Swedish
+put the category in its own word — "Kronborg Slot" → "Kronborg Castle" — which
+`CATEGORY_GROUPS` already bridged. German welds it onto the place name
+("Pöllatschlucht", "Marienbrücke") or leads with it ("Aussichtsplattform
+Höllkopf"), while the listing that comes back separates and translates it
+("Pöllat Gorge", "Mary's Bridge", "Höllkopf Viewing Platform"). A German
+compound is ONE token, `requiredNameHits(1)` is 1, and a one-word name can
+therefore share no word at all with its own listing and score zero out of
+one. Verified before changing anything: of twelve name pairs of that shape,
+five were rejected outright.
+
+Three fixes, in the order they matter:
+
+- **The drop is logged now.** It was recorded nowhere: `verifyPlaceLocation`
+  returned null and the caller dropped the find in silence, so which five
+  names failed, and what Places offered instead, existed nowhere at all.
+  This is why the answer above is reasoning from code rather than from the
+  incident — the incident left no evidence. It now logs the two sub-causes
+  apart, because they read completely differently: nothing came back at all,
+  versus results came back and none satisfied the name check. The second
+  form prints the rejected names, since the comparison is the whole
+  diagnosis.
+- **`CATEGORY_GROUPS` gained gorge, bridge, viewpoint and nature reserve** —
+  each one taken from a demonstrated rejection. This also closes a
+  limitation recorded here as open on 2026-08-18: "Schellbruch Nature
+  Reserve" against "Naturschutzgebiet Schellbruch" was asserted unmatchable
+  then, and its test now asserts the opposite. Found while doing it:
+  `'ställplats'` had sat in that table unmatchable since it was written —
+  keywords are compared against de-accented tokens, so an accented keyword is
+  dead on arrival. Fixed, and the rule is now stated above the table.
+- **A compound matches the bare name it is built on** (`compoundOf`):
+  "Tegelbergbahn" against "Tegelberg", for the cases where the welded-on part
+  is a funicular or a mill and no table will ever list it. Prefix-anchored
+  and six characters minimum — at four, "Berg-" and "Stein-" would make every
+  unrelated place in one valley match, which is the go-kart failure in a new
+  costume.
+
+**What the category rule costs, and the part that pays for it.** Every gorge
+agrees with every other gorge, so a name whose only matchable signal is its
+category matches all of them. That cannot be had one-way — it is the same
+rule that finds "Pöllat Gorge". What must not happen is the stranger
+*winning*, and before this it could: both scored one hit, the tie fell
+through to rating, and rating is where the famous wrong answer is strongest.
+So `nameMatchScore` halves a match with no shared word at all. Two attempts
+at that were wrong before one was right, and both failures were the same
+shape — the union denominator handing the discount straight back:
+
+1. Discounting the hit instead of the score: one category hit out of a
+   one-word name scored exactly what one real hit out of a two-word name did.
+2. Discounting the score, while still charging the result for the translated
+   category as an "added" word. "Wolfsklamm Gorge" says gorge twice, once per
+   language, and being charged for the English half put it *below* a
+   different gorge whose single word was its whole name.
+
+Added words are still evidence against a result — that is what keeps
+"Sletten Bageri" below "Sletten" — but a word restating a category the
+request already stated says nothing new and is no longer counted.
+
+Recorded as still open, and asserted as a test rather than assumed away: once
+a listing is fully translated, "Marienbrücke" and "Mary's Bridge" share no
+word, so the match rests entirely on both being bridges — and so would a
+match against any other bridge. No string comparison separates those; it
+needs a dictionary. The corridor distance filter is what protects the result,
+and it reports an out-of-area drop rather than a silent one.
+
+**Not changed, deliberately.** The `textSearch` request sends no
+`languageCode`, so which language a listing comes back in is not something
+this code decides — and the card in the report reads "Neuschwanstein Castle",
+not "Schloss Neuschwanstein", which is consistent with English being
+returned but does not establish it, since Claude may simply have proposed the
+English name. Setting `languageCode` per country would as easily flip the
+failures as remove them: Claude proposes in either language, and forcing
+German listings would break the English proposals the same way. The logging
+above is what will settle it — the rejected names it prints say which
+language Places actually answered in.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
