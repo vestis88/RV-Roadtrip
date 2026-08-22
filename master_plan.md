@@ -1852,6 +1852,53 @@ change. That is the same load-flakiness already recorded here for
 `corridor.spec.ts:22` and `share-view.spec.ts:32`, now with a third member.
 Recorded as a known flake rather than reported as a green suite.
 
+### 2026-08-22 — the sweep is a floor, not a ceiling
+
+Challenged, correctly, on the previous entry: "But there must have been some
+merit to the old solution!? And now it's disabled for all rescan calls? I
+don't like that."
+
+The model was never disabled — it still runs on every rescan and still writes
+every "why". But the objection found a real defect, and this codebase has the
+scar already: **web_search was removed on 2026-08-16 for exactly this**, and
+the note above says so in as many words — "that made the search a GATE on
+what could be proposed rather than a source... anything they missed was
+forbidden, including everything the model already knew". Handing the model a
+Places list has precisely that shape, and the first version of it wrote
+"ground truth about what is there and you should build your answer from it",
+which is how a source becomes a gate.
+
+Three things were wrong, all in that direction:
+
+- **The sweep claimed a circle it had not covered.** Places caps a nearby
+  search at 50 km. On a 150 km circle the sweep surveys the middle third and
+  knows nothing about the rest — while the prompt called it "every notable
+  place Google Maps knows of INSIDE the circle". A partial list offered as a
+  complete one is worse than no list, because everything absent from it reads
+  as absent from the ground. The sweep is now skipped entirely above
+  `SWEEP_COVERS_UP_TO_KM`, which is also exactly where the model unaided has
+  always been good: "what is worth stopping for within 150 km of here" is a
+  question it answers well and has since this feature existed. The sweep is
+  for the small circle, where that question is unanswerable.
+- **`natural_feature` was missing from the types.** In an Alpine valley that
+  omits most of what anyone stops for — the Plansee itself would not have
+  been on the list handed to a search about the Plansee.
+  `historical_landmark` added alongside it.
+- **The rule now says the list is a FLOOR, NOT A CEILING**, and says why:
+  Google has no listing for most trailheads, swimming spots, free-camping
+  pull-offs, viewpoints and local favourites, and ranks what it does have by
+  review count rather than by whether anyone should go. So: use it as
+  evidence, and go on adding the places you know are in that circle whether
+  or not they appear on it. "A good answer that Google has never heard of is
+  exactly what this search is for."
+
+What each half is actually for, which is the thing the first version blurred:
+Places can prove a place is inside a circle and cannot judge whether it is
+worth stopping at; the model can judge that and cannot measure. Neither
+replaces the other, and the failure mode of pretending otherwise runs in both
+directions — three empty scans when the model was asked to measure, and a
+suppressed local favourite when Places is asked to judge.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

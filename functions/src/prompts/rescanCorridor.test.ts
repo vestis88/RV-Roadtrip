@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parseRescanResponse } from './rescanCorridor.js'
+import { generateRescanCandidates, parseRescanResponse } from './rescanCorridor.js'
+import { SWEEP_COVERS_UP_TO_KM } from '../placesApi.js'
 
 describe('parseRescanResponse', () => {
   it('parses a recorded response', () => {
@@ -44,11 +45,14 @@ vi.mock('@anthropic-ai/sdk', () => ({
 // the whole point (a card read "Vrå Bike Park" over a pin sitting on
 // Vallåsen Bike Park, because the verified name was thrown away).
 const verifyPlaceMock = vi.fn()
+const sweepMock = vi.fn(() => Promise.resolve([]))
+
 vi.mock('../placesApi.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../placesApi.js')>()
   return {
     ...actual,
     verifyPlaceLocation: (...args: unknown[]) => verifyPlaceMock(...args),
+    searchPlacesInArea: (...args: unknown[]) => sweepMock(...(args as [])),
   }
 })
 
@@ -865,5 +869,61 @@ describe('generateRescanCandidates — a lookup that fails is not a place that i
     const finds = await generateRescanCandidates({ center: NEAR, radiusKm: 25 })
 
     expect(finds.map((find) => find.name)).toEqual(['Good'])
+  })
+})
+
+/**
+ * When the circle is swept, and — more importantly — when it is not.
+ *
+ * Places caps a nearby search at 50 km. Past that the sweep surveys the
+ * middle of the circle and knows nothing about the rest, and a partial list
+ * offered as a complete one is worse than none: everything absent from it
+ * reads as absent from the ground. That is also precisely where the model's
+ * own knowledge has always been good — "what is worth stopping for within
+ * 150 km of here" is a question it answers well and has answered well since
+ * this feature existed.
+ */
+describe('when the area sweep runs', () => {
+  beforeEach(() => {
+    sweepMock.mockClear()
+    sweepMock.mockResolvedValue([])
+  })
+
+  it('sweeps a small circle, where the model cannot answer unaided', async () => {
+    await generateRescanCandidates({ center: CENTER, radiusKm: 6 })
+    expect(sweepMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('sweeps right up to the limit of what Places can cover', async () => {
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: SWEEP_COVERS_UP_TO_KM,
+    })
+    expect(sweepMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a wide circle to the model alone', async () => {
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: SWEEP_COVERS_UP_TO_KM + 1,
+    })
+    expect(sweepMock).not.toHaveBeenCalled()
+  })
+
+  it('does not sweep a corridor search, which is not a circle at all', async () => {
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 6,
+      backbone: [CENTER, { lat: CENTER.lat + 1, lng: CENTER.lng + 1 }],
+    })
+    expect(sweepMock).not.toHaveBeenCalled()
+  })
+
+  // A sweep that throws must not take the search down with it.
+  it('searches anyway when the sweep fails', async () => {
+    sweepMock.mockRejectedValue(new Error('Places quota exceeded'))
+    await expect(
+      generateRescanCandidates({ center: CENTER, radiusKm: 6 }),
+    ).resolves.toBeDefined()
   })
 })

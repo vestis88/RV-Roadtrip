@@ -107,22 +107,34 @@ describe('the real places inside the circle', () => {
     expect(JSON.parse(user)).not.toHaveProperty('placesInArea')
   })
 
-  it('tells the model the list is a hard bound, not a suggestion', () => {
+  it('says everything on the list really is inside the circle', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
-    expect(system).toMatch(/USE "placesInArea" WHEN IT IS GIVEN/)
-    expect(system).toMatch(/not near it, inside it/)
+    expect(system).toMatch(/everything on it is genuinely in there/)
   })
 
-  // The judgement is still the model's — a raw Places dump ranked by rating
-  // is exactly what this call exists not to be.
-  it('still asks which of them are worth stopping for', () => {
+  /**
+   * The scar this codebase already carries once, from web search: a source
+   * offered to a model becomes a GATE on what it is allowed to say unless
+   * the prompt is explicit that it is not one. web_search was removed on
+   * 2026-08-16 for exactly that — three queries over a viewport, and
+   * anything they missed was forbidden, including everything the model
+   * already knew. Handing it a Places list has the same shape, so it gets
+   * the same warning in the opposite direction.
+   */
+  it('is explicit that the list is a floor and not a ceiling', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
-    expect(system).toMatch(/choosing the ones genuinely worth stopping for/)
-    expect(system).toMatch(/may add a place that is not on the list/)
+    expect(system).toMatch(/FLOOR, NOT A CEILING/)
+    expect(system).toMatch(/NOT the complete set/)
   })
 
-  it('forbids reading an empty list as an empty area', () => {
+  it('asks for the places Google has no listing for', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
-    expect(system).toMatch(/may not use the list's absence as evidence/)
+    expect(system).toMatch(/trailheads, swimming spots, free-camping/)
+    expect(system).toMatch(/A good answer that Google has never heard of/)
+  })
+
+  it('forbids reading absence from the list as absence on the ground', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
+    expect(system).toMatch(/Never treat absence from the list as evidence/)
   })
 })

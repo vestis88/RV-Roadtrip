@@ -2,7 +2,11 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
-import { searchPlacesInArea, verifyPlaceLocation } from '../placesApi.js'
+import {
+  searchPlacesInArea,
+  SWEEP_COVERS_UP_TO_KM,
+  verifyPlaceLocation,
+} from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
 import { extractJsonObject } from './jsonFromClaude.js'
@@ -245,7 +249,18 @@ export async function generateRescanCandidates(input: {
   // Places-first path in querySearch.ts. A failure here is not fatal — the
   // prompt simply goes out without the list, exactly as it did before.
   let placesInArea: string[] = []
-  if (!input.backbone) {
+  // Not above SWEEP_COVERS_UP_TO_KM. Places caps a nearby search at 50 km,
+  // so on a 150 km circle the sweep surveys the middle third and knows
+  // nothing about the rest — and a partial list offered as a complete one is
+  // worse than no list, because everything absent from it reads as absent
+  // from the ground.
+  //
+  // That is also exactly where the model's own knowledge is at its best: ask
+  // it what is worth stopping for within 150 km of a named town and it
+  // answers well, which it has done since this feature existed. The sweep
+  // exists for the small circle, where that question is unanswerable. It is
+  // a source for the wide one, not a replacement.
+  if (!input.backbone && input.radiusKm <= SWEEP_COVERS_UP_TO_KM) {
     try {
       const nearby = await searchPlacesInArea(input.center, input.radiusKm)
       placesInArea = nearby.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)

@@ -1037,9 +1037,15 @@ export async function searchPlacesByQuery(
 const AREA_SWEEP_TYPES = [
   'tourist_attraction',
   'hiking_area',
+  // Lakes, waterfalls, gorges, peaks. Omitted in the first version of this
+  // sweep, which in an Alpine valley leaves out most of what anyone stops
+  // for — the Plansee itself would not have been on the list handed to a
+  // search about the Plansee.
+  'natural_feature',
   'national_park',
   'park',
   'museum',
+  'historical_landmark',
   'beach',
   'campground',
   'rv_park',
@@ -1049,8 +1055,19 @@ const AREA_SWEEP_TYPES = [
   'restaurant',
 ]
 
-/** Places' own cap on a nearby search's radius. */
-const MAX_NEARBY_RADIUS_METERS = 50_000
+/**
+ * Places' own cap on a nearby search's radius, and therefore the largest
+ * circle this sweep can honestly claim to have covered.
+ *
+ * It is exported because that distinction matters to the caller rather than
+ * to this function: past this, a sweep is no longer a survey of the circle,
+ * it is a survey of the middle of it — and a partial list presented as a
+ * complete one is worse than no list, because it invites the reader to treat
+ * everything absent from it as absent from the ground.
+ */
+export const SWEEP_COVERS_UP_TO_KM = 50
+
+const MAX_NEARBY_RADIUS_METERS = SWEEP_COVERS_UP_TO_KM * 1000
 
 /**
  * Every notable place Places knows of inside a circle — a HARD bound, not a
