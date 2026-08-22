@@ -24,6 +24,7 @@ If a "focusQuery" is given, it OVERRIDES the ordering above: the traveler has as
 Hard rules:
 1. STAY CLOSE. When a center+radius is given, only propose places genuinely within that radius. When routeWaypoints are given instead, only propose places that are a small, reasonable detour off that route — not a place near one waypoint that would require backtracking far off the corridor to reach. Anything too far will be discarded server-side regardless of how good it is.
 1a. THE RADIUS WINS OVER THE AREA NAME. "areaDescription" is whatever the map centre reverse-geocodes to, and it is often the name of something far larger than the circle — a district, a valley, a municipality. It tells you WHERE the centre is, never how much ground to cover. If the radius is small, the well-known highlights of the wider region are the wrong answer even though they are the best-known places in it: they will be measured against the circle and discarded.
+1c. USE "placesInArea" WHEN IT IS GIVEN. That list is every notable place Google Maps knows of INSIDE the circle — not near it, inside it, as a hard bound. It is ground truth about what is there and you should build your answer from it, choosing the ones genuinely worth stopping for given the interests and notes, and ignoring the ones that are not. You may add a place that is not on the list if you are confident it is inside the circle and the list missed it; you may not use the list's absence as evidence that an area is empty. If the list is present and you propose nothing from it, you are almost certainly answering about the wider region instead of the circle.
 1b. A SMALL RADIUS IS ANSWERED BY ORDINARY THINGS. Within a few kilometres of a point there is rarely a famous sight, and that is not the same as nothing to do. The lake itself and where you can swim in it or launch a boat, the marked trail from the car park, the viewpoint, the gorge walk, the mountain hut, the cable car station, the campsite, the one restaurant in the hamlet — these are real answers and a traveler parked there wants them. Name them at the scale the radius asks for. Reserve an empty list for genuinely empty ground, not for ground that merely has nothing famous on it.
 2. DO NOT invent or state exact distances, drive times, or coordinates — not in "why", not anywhere. Those are checked against real data after you respond. Describe where a place roughly is in words and stop there.
 3. "name" MUST be the real, searchable name of a real place, spelled the way Google Maps would have it (e.g. "Vallåsen Bike Park", "Hovs Hallar", "Klässbols Linneväveri"). Every name is looked up against real map data after you respond and DISCARDED if it can't be found, so a generic entry ("a nice forest walk", "a local café") is a wasted one — name the park, the operator, the trailhead, the resort's own base area.
@@ -84,6 +85,22 @@ export function buildRescanCorridorPrompt(input: {
   // remains as the fallback: reverse geocoding is best-effort client-side.
   centerName?: string
   waypointNames?: string[]
+  /**
+   * Every notable place Google Maps knows of inside the circle, from a
+   * `locationRestriction` sweep (see searchPlacesInArea).
+   *
+   * The fix for three consecutive reports of a small circle coming back
+   * empty. Without it the model is asked to recall what is within a few
+   * kilometres of a reverse-geocoded name, holding no coordinates and no
+   * tools — a fair question at 150 km and an impossible one at 6, which it
+   * answered the only way it could: with the best-known places of the wider
+   * region, all of which the distance filter then discarded.
+   *
+   * Absent for a backbone search (a corridor is not a circle) and for typed
+   * queries (querySearch.ts is already Places-first), and absent whenever
+   * the sweep fails — in which case this prompt behaves exactly as it did.
+   */
+  placesInArea?: string[]
 }): { system: string; user: string } {
   const namedRoute =
     input.waypointNames && input.waypointNames.length >= 2
@@ -108,6 +125,9 @@ export function buildRescanCorridorPrompt(input: {
             `latitude ${input.center.lat.toFixed(2)}, longitude ${input.center.lng.toFixed(2)}`,
           radiusKm: input.radiusKm,
         }),
+    ...(input.placesInArea && input.placesInArea.length > 0
+      ? { placesInArea: input.placesInArea }
+      : {}),
     interests: input.interests ?? [],
     notes: input.notesFreeText ?? '',
     ...(input.query ? { focusQuery: input.query } : {}),

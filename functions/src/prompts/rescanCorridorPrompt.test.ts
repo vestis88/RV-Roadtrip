@@ -71,3 +71,58 @@ describe('what the search is told about where it is', () => {
     expect(JSON.parse(user).radiusKm).toBe(7)
   })
 })
+
+/**
+ * The third fix for the same report, and the one that stops asking the
+ * question that could not be answered.
+ *
+ * A 6 km circle over the Plansee came back "found 5, all outside" while
+ * Google's own map drew the Höllkopf viewpoint, the Stuibenfälle, the
+ * Soldatenkopf trail, a campsite and a guest house inside it. The model was
+ * being asked to recall what lies within a few kilometres of a
+ * reverse-geocoded name, with no coordinates and no tools. Places knows
+ * exactly, and can be made to answer with a hard bound.
+ */
+describe('the real places inside the circle', () => {
+  const places = ['Aussichtsplattform Höllkopf', 'Stuibenfälle', 'Campingplatz Fischer am See']
+
+  it('is handed the list when the sweep found something', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 6,
+      centerName: 'Plansee, Austria',
+      placesInArea: places,
+    })
+    expect(JSON.parse(user).placesInArea).toEqual(places)
+  })
+
+  // A failed sweep must leave the search working exactly as before, not
+  // send an empty list that reads as "there is nothing here".
+  it('omits the key entirely when the sweep found nothing', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 6,
+      placesInArea: [],
+    })
+    expect(JSON.parse(user)).not.toHaveProperty('placesInArea')
+  })
+
+  it('tells the model the list is a hard bound, not a suggestion', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
+    expect(system).toMatch(/USE "placesInArea" WHEN IT IS GIVEN/)
+    expect(system).toMatch(/not near it, inside it/)
+  })
+
+  // The judgement is still the model's — a raw Places dump ranked by rating
+  // is exactly what this call exists not to be.
+  it('still asks which of them are worth stopping for', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
+    expect(system).toMatch(/choosing the ones genuinely worth stopping for/)
+    expect(system).toMatch(/may add a place that is not on the list/)
+  })
+
+  it('forbids reading an empty list as an empty area', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
+    expect(system).toMatch(/may not use the list's absence as evidence/)
+  })
+})

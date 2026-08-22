@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
-import { verifyPlaceLocation } from '../placesApi.js'
+import { searchPlacesInArea, verifyPlaceLocation } from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
 import { buildRescanCorridorPrompt } from './rescanCorridorPrompt.js'
 import { extractJsonObject } from './jsonFromClaude.js'
@@ -77,6 +77,17 @@ export const MAX_RESCAN_RESULTS = 10
  * a genuinely minor detour, not a 50km side trip.
  */
 export const MAX_QUERY_SEARCH_DETOUR_KM = 30
+
+/**
+ * How many of the circle's real places to put in front of the model.
+ *
+ * Enough that a quiet valley is fully described and a busy one is well
+ * represented; not so many that the list becomes the answer. The model is
+ * still choosing what is worth stopping FOR — that judgement is the reason
+ * this call exists at all, and a raw Places dump ranked by rating is exactly
+ * what it is not.
+ */
+const MAX_PLACES_IN_AREA = 40
 
 const rescanCandidateSchema = z.object({
   name: z.string(),
@@ -227,7 +238,25 @@ export async function generateRescanCandidates(input: {
   deadlineMs?: number
 }): Promise<RescanFind[]> {
   const client = new Anthropic({ apiKey: claudeApiKey.value() })
-  const { system, user } = buildRescanCorridorPrompt(input)
+  // What is ACTUALLY in the circle, before asking anyone to remember.
+  //
+  // Only for a plain point-and-radius sweep: a backbone search spans a whole
+  // corridor rather than a circle, and a typed query already has its own
+  // Places-first path in querySearch.ts. A failure here is not fatal — the
+  // prompt simply goes out without the list, exactly as it did before.
+  let placesInArea: string[] = []
+  if (!input.backbone) {
+    try {
+      const nearby = await searchPlacesInArea(input.center, input.radiusKm)
+      placesInArea = nearby.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)
+      console.info(
+        `Area sweep found ${nearby.length} places within ${input.radiusKm} km of the map centre`,
+      )
+    } catch (error) {
+      console.warn('Area sweep failed — searching without it', error)
+    }
+  }
+  const { system, user } = buildRescanCorridorPrompt({ ...input, placesInArea })
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: user }]
 
   let found: z.infer<typeof rescanResponseSchema> | undefined

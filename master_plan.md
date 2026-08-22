@@ -1788,6 +1788,70 @@ opposite advice; naming the cap from a spec is also why the radius constants
 moved to `src/lib/rescanRadius.ts`, since importing them used to drag a
 Firebase client import into the Node-side test process.
 
+### 2026-08-22 — asking Places what is in the circle, instead of asking Claude to remember
+
+Third report of the same thing, now at 6 km: "Found 5 places, but they were
+outside the 6 km searched." And in the same screenshot, drawn by Google
+inside that circle: Aussichtsplattform Höllkopf, the Stuibenfälle, the
+Soldatenkopf trail, Campingplatz Fischer am See, Sunnawirt.
+
+The two previous fixes were aimed at the ANSWER — first the circle was too
+small (wrong, and reverted), then the anchor named a district instead of a
+lake (real, and worth fixing, but not sufficient). What neither touched is
+that the question itself cannot be answered by the thing being asked.
+
+**The plain rescan asks Claude, from memory, to name places near a
+reverse-geocoded area name.** No coordinates, deliberately, so it cannot
+invent distances. No tools, deliberately, since web search was removed on
+2026-08-16 for suppressing correct answers. So at 150 km it is a fair
+question and the answer is good; at 6 km it is impossible, and the model does
+the only thing it can — name the best-known places of the region — which the
+distance filter then discards in full. Every "found N, all too far" reply was
+that, and no amount of prompt tuning fixes a question with no answer.
+
+Google Places knows exactly what is in that circle. It is what drew the map.
+
+`searchPlacesInArea` sweeps the circle with `locationRestriction` — a HARD
+bound, unlike the `locationBias` used elsewhere, which only nudges ranking
+and still returns whatever it likes. One request per place type rather than
+one for all of them, because Places ranks a mixed request by prominence: in a
+valley with one famous sight, a single call returns that sight twenty times
+and never mentions the trailhead. The types are deliberately wider than
+`ACTIVITY_PLACE_TYPE`, which serves a day's itinerary — this answers "we are
+parked HERE, what is there", so campsites, RV parks and guest houses belong
+in it as much as museums do.
+
+The result goes into the prompt as `placesInArea`, with rule 1c: it is ground
+truth about what is inside the circle, build the answer from it, choose the
+ones genuinely worth stopping for, and its absence is never evidence that an
+area is empty. The judgement stays the model's — a raw Places dump ranked by
+rating is exactly what this call exists not to be — but it now judges a real
+list instead of recalling a region.
+
+Structurally, the failure that was reported three times is now impossible for
+anything sourced this way: a place returned under `locationRestriction`
+cannot be outside the circle, so the corridor filter has nothing to drop.
+
+Scoped deliberately:
+- **Only for a plain point-and-radius sweep.** A backbone search spans a
+  corridor rather than a circle, and a typed query already has its own
+  Places-first path (querySearch.ts, 2026-08-02 — this is the same lesson
+  arriving at the path the app drives itself rather than the traveler).
+- **A failed sweep is not a failed search.** The key is omitted and the
+  prompt behaves exactly as it did, rather than sending an empty list that
+  reads as "there is nothing here".
+
+Also kept from the previous commit and still correct: named features outrank
+administrative areas when naming the centre, and the out-of-area advice
+branches on whether the cap bit.
+
+**Suite note, stated rather than smoothed over.** The full e2e run finished
+124 passed / 1 failed — `dayview.spec.ts:140` ("a submitted rest day is
+acknowledged"), which passes on its own (14/14) and touches nothing in this
+change. That is the same load-flakiness already recorded here for
+`corridor.spec.ts:22` and `share-view.spec.ts:32`, now with a third member.
+Recorded as a known flake rather than reported as a green suite.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

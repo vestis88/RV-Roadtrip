@@ -1027,6 +1027,157 @@ export async function searchPlacesByQuery(
 }
 
 /**
+ * The place types a plain "what's worth stopping for here" sweep asks about.
+ *
+ * Deliberately wider than ACTIVITY_PLACE_TYPE, which serves a day's
+ * itinerary. This answers "we are parked HERE, what is there" — so the
+ * campsite, the guest house and the cable car station belong in it as much
+ * as the museum does.
+ */
+const AREA_SWEEP_TYPES = [
+  'tourist_attraction',
+  'hiking_area',
+  'national_park',
+  'park',
+  'museum',
+  'beach',
+  'campground',
+  'rv_park',
+  'playground',
+  'ski_resort',
+  'cycling_park',
+  'restaurant',
+]
+
+/** Places' own cap on a nearby search's radius. */
+const MAX_NEARBY_RADIUS_METERS = 50_000
+
+/**
+ * Every notable place Places knows of inside a circle — a HARD bound, not a
+ * bias.
+ *
+ * Reported three times over two days from a map of the Plansee: a scan of a
+ * 6–7 km circle answering that everything it found was outside the circle,
+ * while Google's own map drew the Höllkopf viewpoint, the Stuibenfälle, the
+ * Soldatenkopf trail, a campsite and a guest house inside it.
+ *
+ * The plain rescan asked Claude, from memory, to name places near a
+ * reverse-geocoded area name — no coordinates, no tools, nothing to measure
+ * with. That is a fair question at 150 km and an impossible one at 6, and
+ * every fix aimed at the question rather than at the asking got a variation
+ * of the same answer back. querySearch.ts reached this conclusion for TYPED
+ * queries on 2026-08-02 and moved to Places-first; this is the same lesson
+ * arriving at the path the app drives itself.
+ *
+ * `locationRestriction` is the point: a bias only nudges Places' ranking and
+ * still returns whatever it likes, whereas a restriction cannot return a
+ * place outside the circle. So the corridor filter downstream has nothing
+ * left to drop, and the "found N, all too far" answer becomes structurally
+ * impossible for anything sourced here.
+ */
+export async function searchPlacesInArea(
+  near: LatLng,
+  radiusKm: number,
+): Promise<QueryPlaceFind[]> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — area search requires real data and has no synthetic fallback.',
+    )
+  }
+  const radius = Math.min(Math.max(radiusKm, 1) * 1000, MAX_NEARBY_RADIUS_METERS)
+  const byId = new Map<string, QueryPlaceFind>()
+  // One request per type rather than one for all of them: Places ranks a
+  // mixed request by prominence, so a single call in a valley with one
+  // famous sight returns that sight twenty times over and never mentions the
+  // trailhead. Asking each type separately guarantees the quiet categories
+  // are represented at all.
+  const perType = await Promise.all(
+    AREA_SWEEP_TYPES.map(async (includedType) => {
+      try {
+        return await nearbySearchInCircle(includedType, near, radius, apiKey)
+      } catch (error) {
+        // One bad category must not empty the sweep — see nearbySearch's own
+        // note on why a 400 here is about the type and not about the key.
+        console.warn(`Area sweep for type "${includedType}" failed`, error)
+        return [] as QueryPlaceFind[]
+      }
+    }),
+  )
+  for (const find of perType.flat()) {
+    const key = `${find.name}|${find.lat.toFixed(4)}|${find.lng.toFixed(4)}`
+    if (!byId.has(key)) byId.set(key, find)
+  }
+  return [...byId.values()].sort(
+    (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.ratingCount ?? 0) - (a.ratingCount ?? 0),
+  )
+}
+
+async function nearbySearchInCircle(
+  includedType: string,
+  near: LatLng,
+  radiusMeters: number,
+  apiKey: string,
+): Promise<QueryPlaceFind[]> {
+  const response = await fetch(
+    'https://places.googleapis.com/v1/places:searchNearby',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': QUERY_SEARCH_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        includedTypes: [includedType],
+        maxResultCount: 20,
+        locationRestriction: {
+          circle: {
+            center: { latitude: near.lat, longitude: near.lng },
+            radius: radiusMeters,
+          },
+        },
+      }),
+    },
+  )
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `Places area search failed with ${response.status}: ${body.slice(0, 300)}`,
+    )
+  }
+  const data = (await response.json()) as {
+    places?: {
+      displayName?: { text?: string }
+      location?: { latitude: number; longitude: number }
+      rating?: number
+      userRatingCount?: number
+      addressComponents?: { shortText?: string; types?: string[] }[]
+      editorialSummary?: { text?: string }
+      googleMapsUri?: string
+      formattedAddress?: string
+    }[]
+  }
+  return (data.places ?? []).flatMap((place) => {
+    const name = place.displayName?.text
+    const country = countryFromAddressComponents(place.addressComponents)
+    if (!name || !place.location || !country) return []
+    return [
+      {
+        name,
+        lat: place.location.latitude,
+        lng: place.location.longitude,
+        country,
+        rating: place.rating,
+        ratingCount: place.userRatingCount,
+        summary: place.editorialSummary?.text ?? place.formattedAddress,
+        ...(place.googleMapsUri ? { googleMapsUrl: place.googleMapsUri } : {}),
+      },
+    ]
+  })
+}
+
+/**
  * Resolves a free-text place query (e.g. "Lillehammer Camping, Lillehammer,
  * NO") to coordinates, biased near a reference point. Unlike the resolvers
  * above, this applies no quality bar — a town/campsite name isn't a "tourist
