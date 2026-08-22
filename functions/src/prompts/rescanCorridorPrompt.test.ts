@@ -138,3 +138,58 @@ describe('the real places inside the circle', () => {
     expect(system).toMatch(/Never treat absence from the list as evidence/)
   })
 })
+
+/**
+ * Reported 2026-08-22: "here are a lot of references to 'already on my list',
+ * but I can't find any other stops. Why?"
+ *
+ * Because the search had never been told what the list was. The prompt
+ * carried interests, freeform notes, route waypoints and the Places sweep —
+ * and nothing about the corridor's own stops. So "already on your list" could
+ * only ever have meant a line in the NOTES, which is not a stop, or nothing
+ * at all; and the traveler reads it as "this is already a stop" and goes
+ * looking for it.
+ */
+describe('what the traveler already has', () => {
+  const mine = ['Cima Grappa', 'Greenway Fiume Sile']
+
+  it('sends the trip’s own stops when it has some', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 60,
+      existingStopNames: mine,
+    })
+    expect(JSON.parse(user).alreadyOnTheList).toEqual(mine)
+  })
+
+  it('omits the key entirely on a trip with no stops yet', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 60,
+      existingStopNames: [],
+    })
+    expect(JSON.parse(user)).not.toHaveProperty('alreadyOnTheList')
+  })
+
+  it('caps a long corridor rather than sending everything', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `Stop ${i}`)
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 60,
+      existingStopNames: many,
+    })
+    expect(JSON.parse(user).alreadyOnTheList.length).toBeLessThanOrEqual(60)
+  })
+
+  it('forbids proposing a stop the trip already has', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 60 })
+    expect(system).toMatch(/Do not propose them again/)
+  })
+
+  // The half the report was actually about: the phrase itself.
+  it('allows the phrase only about a name on that list', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 60 })
+    expect(system).toMatch(/already on your list.*ONLY about a name that appears on it/s)
+    expect(system).toMatch(/If the list is absent you do not know what is on it/)
+  })
+})

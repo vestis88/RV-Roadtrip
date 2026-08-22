@@ -69,6 +69,8 @@ export async function findStopsForQuery(input: {
   backbone?: LatLng[]
   centerName?: string
   waypointNames?: string[]
+  /** Passed straight through to the Claude fallback — see rescanCorridor. */
+  existingStopNames?: string[]
 }): Promise<{ finds: RescanFind[]; source: 'places' | 'claude' }> {
   const startedAt = Date.now()
   let places: QueryPlaceFind[] = []

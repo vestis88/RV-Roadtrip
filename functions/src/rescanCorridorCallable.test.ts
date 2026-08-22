@@ -274,3 +274,69 @@ describe('runRescanCorridor — what it discarded', () => {
     expect(droppedTooFar).toBe(1)
   })
 })
+
+/**
+ * Reported 2026-08-22: "here are a lot of references to 'already on my list',
+ * but I can't find any other stops."
+ *
+ * The prompt half of that is covered in rescanCorridorPrompt.test.ts. This is
+ * the half with no words attached: with no idea what the trip already had,
+ * nothing stopped a rescan proposing it again, and nothing here deduplicated
+ * it either — every find was added unconditionally.
+ */
+describe('runRescanCorridor and the stops the trip already has', () => {
+  it('tells the search what is already on the list', async () => {
+    const { tripId } = await createTripForUser('uidRescanKnown')
+    await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Cima Grappa',
+        lat: 45.87,
+        lng: 11.8,
+        country: 'IT',
+        why: 'Already kept.',
+        status: 'candidate',
+        linkedDayIds: [],
+      })
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(tripId, CENTER, 25)
+
+    const [input] = generateRescanCandidatesMock.mock.calls[0]
+    expect(input.existingStopNames).toContain('Cima Grappa')
+  })
+
+  it('does not add a stop the trip already has', async () => {
+    const { tripId } = await createTripForUser('uidRescanDupe')
+    const stops = getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+    await stops.add({
+      name: 'Cima Grappa',
+      lat: 45.87,
+      lng: 11.8,
+      country: 'IT',
+      why: 'Already kept.',
+      status: 'candidate',
+      linkedDayIds: [],
+    })
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([
+      // The same place, spelled the way Places would hand it back.
+      { name: 'CIMA GRAPPA', country: 'IT', why: 'Panoramic.', lat: 45.87, lng: 11.8 },
+      { name: 'Parco Regionale del Fiume Sile', country: 'IT', why: 'Flat cycling.', lat: 45.66, lng: 12.24 },
+    ])
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    const { stopsWritten } = await runRescanCorridor(tripId, CENTER, 25)
+
+    // Reported as written, too — a duplicate silently dropped while the
+    // banner says "Found 2 new stops" is its own small lie.
+    expect(stopsWritten).toBe(1)
+    const names = (await stops.get()).docs.map((d) => d.data().name).sort()
+    expect(names).toEqual(['Cima Grappa', 'Parco Regionale del Fiume Sile'])
+  })
+})

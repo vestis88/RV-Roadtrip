@@ -232,6 +232,8 @@ export async function generateRescanCandidates(input: {
   backbone?: LatLng[]
   centerName?: string
   waypointNames?: string[]
+  /** The stops this trip already has — see buildRescanCorridorPrompt. */
+  existingStopNames?: string[]
   /**
    * When this whole search has to be finished, as an epoch millisecond.
    * Supplied by the callable from its own remaining budget so the search

@@ -88,6 +88,28 @@ export async function runRescanCorridor(
   const trip = tripSnap.data() as Trip
   const isExploring = trip.planMeta.status === 'idle'
 
+  /**
+   * The stops this trip already has, by name.
+   *
+   * Reported 2026-08-22: cards reading "Already on your list — …" and "the
+   * Greenway Fiume Sile cycle path already on your list", from a traveler
+   * who could not find any such stops. They were right to look: **this
+   * search has never been told what is on the list.** The prompt carries the
+   * interests, the freeform notes, the route waypoints and (for a small
+   * circle) the Places sweep — and nothing at all about the corridor's own
+   * stops. Any claim that something is already on it is therefore either a
+   * reference to a line in the NOTES, which is not a stop, or unfounded.
+   *
+   * It also had a second cost with no words attached: with no idea what
+   * exists, nothing stopped a rescan proposing a stop the trip already had,
+   * and nothing downstream deduplicated it either — every find was added
+   * unconditionally.
+   */
+  const existingSnap = await tripRef.collection('corridorStops').get()
+  const existingStopNames = existingSnap.docs
+    .map((doc) => (doc.data() as { name?: string }).name)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+
   // A typed query goes to Places first (see findStopsForQuery); the plain
   // "Rescan this area" pass has no query to search for and is Claude's job
   // by definition — "what's worth stopping for around here" is a judgement,
@@ -104,6 +126,7 @@ export async function runRescanCorridor(
           backbone,
           centerName,
           waypointNames,
+          ...(existingStopNames.length > 0 ? { existingStopNames } : {}),
         })
       ).finds
     : await generateRescanCandidates({
@@ -118,11 +141,22 @@ export async function runRescanCorridor(
         backbone,
         centerName,
         waypointNames,
-          ...(deadlineMs !== undefined ? { deadlineMs } : {}),
-  })
+        // Omitted rather than sent empty: a trip with no stops yet has
+        // nothing to say about its list, and an empty array would read as a
+        // statement that the list is empty.
+        ...(existingStopNames.length > 0 ? { existingStopNames } : {}),
+        ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+      })
+
+  // Nothing was deduplicated before this: a rescan of ground already
+  // covered re-proposed what the trip had, and the traveler got a second
+  // card for a stop they had already judged — including ones they had
+  // turned down, which is the worse half.
+  const known = new Set(existingStopNames.map(normalizeStopName))
+  const fresh = finds.filter((find) => !known.has(normalizeStopName(find.name)))
 
   let nextRank = 0
-  if (isExploring && finds.length > 0) {
+  if (isExploring && fresh.length > 0) {
     const existingTierSnap = await tripRef
       .collection('corridorStops')
       .where('status', '==', 'candidate')
@@ -132,7 +166,7 @@ export async function runRescanCorridor(
   }
 
   await Promise.all(
-    finds.map((find, i) =>
+    fresh.map((find, i) =>
       tripRef.collection('corridorStops').add(
         corridorStopSchema.parse({
           name: find.name,
@@ -161,10 +195,27 @@ export async function runRescanCorridor(
   )
 
   return {
-    stopsWritten: finds.length,
+    stopsWritten: fresh.length,
     droppedTooFar: droppedForDistance(finds),
     notLocated: notLocated(finds),
   }
+}
+
+/**
+ * Names compared the way a reader would: case and punctuation folded, and
+ * the diacritics that Places and Claude disagree about ("Cima Grappa" vs
+ * "Cima Grappa") folded with them. Deliberately not the full nameLooksRight
+ * machinery — this is asking "is this literally the stop we already have",
+ * not "is this plausibly the same place", and the cost of a false positive
+ * here is silently dropping a genuine new find.
+ */
+function normalizeStopName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 
 export const rescanCorridor = onCall(

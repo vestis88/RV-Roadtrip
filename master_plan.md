@@ -2002,6 +2002,48 @@ match Y") or to drop Claude's blurb whenever Places' name diverges far
 enough. Neither is built; the type check removes the commonest cause rather
 than the class.
 
+### 2026-08-22 — "already on your list", about a list nobody sent
+
+Reported with a screenshot of two cards — "Already on your list — this is one
+of the best hiking and panoramic points…" and "(which the Greenway Fiume Sile
+cycle path already on your list runs through)" — and the question: "I can't
+find any other stops. Why?"
+
+**Because the search has never been told what is on the list.** The rescan
+prompt carries the trip's interests, its freeform notes, the route waypoints,
+and (for a small circle) the Places sweep. It has never carried the
+corridor's own stops. So that phrase could only ever have meant one of two
+things: a line in the NOTES, which is not a stop and does not appear on the
+map, or nothing at all. Either way the traveler reads it as "this is already
+a stop" and goes looking for something that is not there.
+
+Which of the two it was on this trip is **not determinable from here** — it
+depends on what that trip's notes say, and this environment cannot read them.
+Both are fixed the same way.
+
+The same gap had a second cost with no words attached: with no idea what the
+trip already held, nothing stopped a rescan re-proposing it, **and nothing on
+the write path deduplicated either** — every find was `add`ed unconditionally.
+A traveler rescanning ground they had already covered got a second card for a
+stop they had already judged, including ones they had turned down, which is
+the worse half.
+
+- `existingStopNames` now reaches the prompt as `alreadyOnTheList`, capped at
+  60. Rule 1d: do not propose them again, and use "already on your list" (or
+  "on your radar", or anything of that kind) ONLY about a name that appears
+  on it — and when the list is absent, say nothing of the kind at all,
+  because not knowing is not the same as knowing it is there.
+- Omitted rather than sent empty on a trip with no stops yet: an empty array
+  reads as a statement that the list is empty, which is a different claim
+  from having nothing to say.
+- The write path drops a find whose name matches a stop the trip already
+  has, folding case, punctuation and diacritics. Deliberately NOT the
+  `nameLooksRight` machinery: this asks "is this literally the stop we
+  already have", not "is this plausibly the same place", and a false positive
+  here silently discards a genuine new find.
+- `stopsWritten` counts what was actually written, so the banner cannot say
+  "Found 2 new stops" about one.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
