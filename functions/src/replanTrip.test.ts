@@ -211,7 +211,7 @@ describe('replanTrip', () => {
     // The regenerated remainder (past days are historical fact and aren't
     // re-paced) respects the pacing rules.
     const remainderDays = [staleSnap.data() as TripDay, finalDaySnap.data() as TripDay]
-    expect(validatePacing(remainderDays, 4)).toBeNull()
+    expect(validatePacing(remainderDays)).toBeNull()
   })
 
   it('preserves locked days from the "Request changes" flow, even when they fall in the future', async () => {

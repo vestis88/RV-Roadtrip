@@ -338,7 +338,21 @@ describe('runReconcileCorridor', () => {
     expect(trip?.planMeta.totalKm).toBeGreaterThan(0)
   })
 
-  it('leaves the trip untouched when the new order fails pacing validation', async () => {
+  /**
+   * This asserted the OPPOSITE until 2026-08-23 — that an order breaking the
+   * drive-hours limit was rejected and the trip left untouched — and the
+   * flip is the whole point of the phase.
+   *
+   * Reported as "make it looser and easier to change / less strict about
+   * pace/exact days". On the incremental path the old behaviour was at its
+   * worst: one stop reordered, one day made long, and the ENTIRE edit
+   * discarded with an error naming a limit the traveler set themselves and
+   * may well have been willing to exceed for this stop. The limit is a
+   * preference; it is reported now, and the edit lands.
+   *
+   * The rest-day invariant is still a hard failure — see validatePacing.
+   */
+  it('commits an order that exceeds the drive-hours limit, and warns about it', async () => {
     const db = getFirestore()
     const { tripId } = await createTripForUser('uidReconcilePacingFail')
     const tripRef = db.collection('trips').doc(tripId)
@@ -376,15 +390,19 @@ describe('runReconcileCorridor', () => {
       linkedDayIds: [bRef.id],
     } satisfies CorridorStop)
 
-    await expect(
-      runReconcileCorridor(tripId, [bStopRef.id, aStopRef.id]),
-    ).rejects.toThrow(/pacing validation failed/)
+    const result = await runReconcileCorridor(tripId, [bStopRef.id, aStopRef.id])
 
+    // The edit landed: B is now the first day.
     const daysSnap = await tripRef.collection('days').orderBy('date').get()
-    expect(daysSnap.docs.map((d) => d.data().date)).toEqual([
-      '2026-07-10',
-      '2026-07-11',
-    ])
+    expect(daysSnap.docs.map((d) => d.data().overnight.name)).toEqual(['B', 'A'])
+
+    // And the long day is reported rather than swallowed — on the result,
+    // and on the trip where PlanStrip's banner reads it from.
+    expect(result.pacingWarnings.join(' ')).toMatch(/you asked for/)
+    const planMeta = (await tripRef.get()).data()?.planMeta
+    expect((planMeta?.pacingWarnings as string[]).join(' ')).toMatch(
+      /you asked for/,
+    )
   })
 })
 

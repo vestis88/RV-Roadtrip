@@ -190,7 +190,7 @@ export async function runReplan(
   // Past days are historical fact and can't be re-paced; per 6.2, only the
   // regenerated remainder needs to satisfy the pacing check.
   const remainderDays = daysToWrite.map((r) => r.day)
-  const violation = validatePacing(remainderDays, trip.settings.maxDriveHoursPerDay)
+  const violation = validatePacing(remainderDays)
   if (violation) {
     throw new Error(`Pacing validation failed: ${violation.reason}`)
   }
@@ -198,7 +198,11 @@ export async function runReplan(
   // days are historical fact, and telling a traveler mid-trip that a day
   // they already drove was wasted is noise. The remainder's own average is
   // also the right yardstick here — it's the ground left over the days left.
-  const warnings = pacingWarnings(remainderDays)
+  const warnings = pacingWarnings(
+    remainderDays,
+    new Map(),
+    trip.settings.maxDriveHoursPerDay,
+  )
 
   // The `daysSnap` read this entire run is built on happened minutes ago,
   // before a Claude call and a per-day Places/Routes pass. Everything below

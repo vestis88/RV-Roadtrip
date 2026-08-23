@@ -398,7 +398,11 @@ export async function computeCorridorReconciliation(
     }
   }
 
-  const violation = validatePacing(finalDays, trip.settings.maxDriveHoursPerDay)
+  // Structural only. A long day is no longer a failure here — it is a
+  // warning returned with the writes, because failing an incremental edit
+  // over one long drive threw away the edit AND told the traveler nothing
+  // they could act on. See validatePacing's own note.
+  const violation = validatePacing(finalDays)
   if (violation) {
     throw new Error(`reconcileCorridor: pacing validation failed: ${violation.reason}`)
   }
@@ -429,7 +433,11 @@ export async function computeCorridorReconciliation(
     // Advisory, not a gate — see pacingWarnings(). Reordering or dropping a
     // stop is exactly the kind of edit that can leave a day with nowhere to
     // go, so it's recomputed here rather than left over from generation.
-    pacingWarnings: pacingWarnings(finalDays),
+    pacingWarnings: pacingWarnings(
+      finalDays,
+      new Map(),
+      trip.settings.maxDriveHoursPerDay,
+    ),
     ...(endDateChange ? { endDateChange } : {}),
   }
 }

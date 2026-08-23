@@ -214,7 +214,14 @@ test('a country with no chip can be found by search, and persists like a preset'
   await expect(page.getByTestId('country-chip-LU')).toHaveCount(0)
 })
 
-test('editing settings on a trip with a ready plan marks it stale', async ({
+/**
+ * Retitled and re-pointed 2026-08-23. It used to move the DRIVE-HOURS slider
+ * and assert staleness, which was true of every setting then and is true of
+ * almost none of them now — see NON_INVALIDATING_SETTINGS. What survives is
+ * the rule underneath: a setting that changes the ground the days were built
+ * on still invalidates, and the trip's dates are the clearest such setting.
+ */
+test('editing a setting the days were built on marks the plan stale', async ({
   page,
 }) => {
   await signIn(page)
@@ -230,7 +237,7 @@ test('editing settings on a trip with a ready plan marks it stale', async ({
   await page.getByTestId('trip-name-input').waitFor()
   await expect(page.getByTestId('plan-status')).toHaveText('ready')
 
-  await setRange(page.getByTestId('max-drive-hours-input'), '6')
+  await page.getByTestId('end-date-input').fill('2026-07-28')
 
   await expect(page.getByTestId('plan-status')).toHaveText('stale')
 })
@@ -521,4 +528,42 @@ test('changing the trip’s length offers no shortcut', async ({ page }) => {
   await expect(page.getByTestId('generate-plan-button')).toHaveText(
     'Rebuild plan',
   )
+})
+
+/**
+ * Phase 2 of the board rework, 2026-08-23: "I don't like that it goes 'stale'
+ * and needs full generation. It should just grow organically."
+ *
+ * `stale` was never a broken plan — it has exactly two effects, this button's
+ * label and the date-shift gate, and nothing blocks on it. So the question
+ * per setting is whether it makes the days ALREADY WRITTEN wrong. A pacing
+ * preference does not; it changes what the plan should be measured against,
+ * and pacing is advice now.
+ */
+test('changing the drive-hours limit no longer offers to rebuild the plan', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  await adminDb.collection('trips').doc(tripId).update({
+    'planMeta.status': 'ready',
+  })
+  await page.reload()
+  await page.getByTestId('trip-name-input').waitFor()
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
+
+  await setRange(page.getByTestId('max-drive-hours-input'), '6')
+
+  // The setting is saved…
+  await expect
+    .poll(async () =>
+      (await adminDb.collection('trips').doc(tripId).get()).data()?.settings
+        ?.maxDriveHoursPerDay,
+    )
+    .toBe(6)
+  // …and the plan is still usable, with no rebuild put in front of anyone.
+  await expect(page.getByTestId('plan-status')).toHaveText('ready')
 })

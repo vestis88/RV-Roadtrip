@@ -17,30 +17,31 @@ export interface PacingViolation {
 const MAX_DRIVE_HOURS_TOLERANCE = 1.5
 
 /**
- * Validates a generated plan's structural correctness: no day may drive
- * more than MAX_DRIVE_HOURS_TOLERANCE x the traveler's own stated
- * maxDriveHoursPerDay, and rest days must stay at the previous day's
- * overnight rather than land in a fresh transit stop. Softer pacing
- * preferences (the outline's own target distance, a relaxed finish) are
- * left as prompt guidance for the generator rather than a hard post-hoc
- * gate — see each day's highlightReason for why a longer day was chosen.
+ * Validates a plan's STRUCTURAL correctness. One rule, and it is an
+ * invariant rather than a preference: a rest day must stay at the previous
+ * day's overnight, not land in a fresh transit town. A plan that breaks it
+ * is malformed wherever it was built, so this still throws in all three
+ * callers.
+ *
+ * WHAT LEFT THIS FUNCTION, AND WHY (2026-08-23).
+ *
+ * It also used to fail a plan for driving more than
+ * MAX_DRIVE_HOURS_TOLERANCE x the traveler's stated maxDriveHoursPerDay.
+ * That conflated two different kinds of thing under one throw: a malformed
+ * plan, and a plan the traveler might simply accept. Reported as "make it
+ * looser and easier to change / less strict about pace/exact days" — and
+ * the sharp edge was on the incremental path, where adding ONE stop that
+ * made ONE day long failed the entire operation and wrote nothing
+ * (corridorReconciliation.ts's own call).
+ *
+ * A long day is now advice: see driveLengthWarnings, which reports it
+ * alongside the back-load and sight-load warnings the traveler already
+ * receives, and the day is written. The person who chose the stop is the
+ * one who knows whether the drive is worth it — the same reasoning that
+ * removed the trip-average targets from this function earlier (see
+ * MAX_DRIVE_HOURS_TOLERANCE above).
  */
-export function validatePacing(
-  days: TripDay[],
-  maxDriveHoursPerDay: number,
-): PacingViolation | null {
-  const driveDays = days.filter((day) => day.type === 'drive' && day.drive)
-  const maxDriveMinutes = maxDriveHoursPerDay * 60 * MAX_DRIVE_HOURS_TOLERANCE
-
-  for (const day of driveDays) {
-    const durationMin = day.drive?.durationMin ?? 0
-    if (durationMin > maxDriveMinutes) {
-      return {
-        reason: `Day ${day.index} (${day.date}) drives ${(durationMin / 60).toFixed(1)}h, exceeding ${MAX_DRIVE_HOURS_TOLERANCE}x the requested ${maxDriveHoursPerDay}h/day max.`,
-      }
-    }
-  }
-
+export function validatePacing(days: TripDay[]): PacingViolation | null {
   for (let i = 1; i < days.length; i++) {
     const day = days[i]
     const previous = days[i - 1]
@@ -114,8 +115,45 @@ const MIN_REMAINING_DRIVE_DAYS = 3
 export function pacingWarnings(
   days: TripDay[],
   sightTime: ReadonlyMap<string, SightTimeNeeded> = new Map(),
+  maxDriveHoursPerDay?: number,
 ): string[] {
-  return [...backloadWarnings(days), ...sightLoadWarnings(days, sightTime)]
+  return [
+    ...backloadWarnings(days),
+    ...sightLoadWarnings(days, sightTime),
+    ...driveLengthWarnings(days, maxDriveHoursPerDay),
+  ]
+}
+
+/**
+ * Days that drive further than the traveler asked for.
+ *
+ * This was a hard failure inside validatePacing until 2026-08-23 — see that
+ * function's own note. It is a preference, stated by the traveler, and the
+ * traveler is also the one adding the stop that breaks it; failing the whole
+ * write taught them nothing and lost the edit.
+ *
+ * One warning per offending day rather than one per trip, unlike
+ * back-loading: each of these is a specific day with a specific fix (move
+ * the stop, split the drive, add a night), whereas back-loading is a single
+ * fact about the trip's shape.
+ *
+ * `maxDriveHoursPerDay` optional so a caller with no settings to hand — a
+ * test, the shared-trip projection — gets the other warnings rather than a
+ * type error. Every production caller passes it.
+ */
+export function driveLengthWarnings(
+  days: TripDay[],
+  maxDriveHoursPerDay?: number,
+): string[] {
+  if (!maxDriveHoursPerDay || maxDriveHoursPerDay <= 0) return []
+  const maxDriveMinutes = maxDriveHoursPerDay * 60 * MAX_DRIVE_HOURS_TOLERANCE
+  return days
+    .filter((day) => day.type === 'drive' && day.drive)
+    .filter((day) => (day.drive?.durationMin ?? 0) > maxDriveMinutes)
+    .map(
+      (day) =>
+        `Day ${day.index + 1} (${day.date}) drives ${((day.drive?.durationMin ?? 0) / 60).toFixed(1)}h — more than the ${maxDriveHoursPerDay}h/day you asked for.`,
+    )
 }
 
 function backloadWarnings(days: TripDay[]): string[] {

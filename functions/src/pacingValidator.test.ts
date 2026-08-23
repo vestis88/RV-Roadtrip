@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TripDay } from '@rv/shared'
-import { pacingWarnings, validatePacing } from './pacingValidator.js'
+import { driveLengthWarnings, pacingWarnings, validatePacing } from './pacingValidator.js'
 
 function day(overrides: Partial<TripDay> & { index: number }): TripDay {
   return {
@@ -55,7 +55,7 @@ describe('validatePacing', () => {
       }),
     ]
 
-    expect(validatePacing(days, 4)).toBeNull()
+    expect(validatePacing(days)).toBeNull()
   })
 
   it('allows a single long day driven to reach a worthwhile stop, as long as it stays within tolerance of the requested max drive hours', () => {
@@ -85,7 +85,7 @@ describe('validatePacing', () => {
 
     // maxDriveHoursPerDay=4 (240min) x 1.5 tolerance = 360min — day 1's
     // 291min fits, even though it's far above day 0's own distance/time.
-    expect(validatePacing(days, 4)).toBeNull()
+    expect(driveLengthWarnings(days, 4)).toEqual([])
   })
 
   it('rejects a day that drives more than 1.5x the requested max drive hours', () => {
@@ -112,9 +112,25 @@ describe('validatePacing', () => {
       }),
     ]
 
-    const violation = validatePacing(days, 4)
-    expect(violation).not.toBeNull()
-    expect(violation?.reason).toContain('4h/day max')
+    /**
+     * This asserted a REJECTION until 2026-08-23, and the change is the
+     * point of the phase: a day longer than the traveler asked for is a
+     * preference of theirs being exceeded, not a malformed plan. It cost
+     * the whole write on the incremental path — one stop added, one day
+     * made long, entire edit discarded — which is what "less strict about
+     * pace/exact days" was about.
+     */
+    expect(validatePacing(days)).toBeNull()
+
+    const warnings = driveLengthWarnings(days, 4)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('4h/day you asked for')
+    // Day numbers read as the traveler sees them, not as the index.
+    expect(warnings[0]).toContain('Day 2')
+  })
+
+  it('says nothing about drive length when no limit is known', () => {
+    expect(driveLengthWarnings([], undefined)).toEqual([])
   })
 
   it('rejects a rest day placed in a fresh transit town', () => {
@@ -137,7 +153,11 @@ describe('validatePacing', () => {
       }),
     ]
 
-    const violation = validatePacing(days, 4)
+    // Still a hard failure, and deliberately so: a rest day that teleports
+    // to a fresh transit town is malformed wherever it was built, which is
+    // why this half stayed in validatePacing when the drive-length half
+    // became advice.
+    const violation = validatePacing(days)
     expect(violation).not.toBeNull()
     expect(violation?.reason).toContain('rest day')
   })

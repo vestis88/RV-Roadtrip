@@ -2137,6 +2137,80 @@ day budget; the cheap skeleton commit; manual route order; per-stop overnight;
 position marker and mark-done; live mode) are planned and tracked but not
 started.
 
+### 2026-08-23 — pace is advice, and almost nothing goes stale (board rework, phase 2 of 8)
+
+*"Keep the generate trip thing but make it looser and easier to change /
+less strict about pace/exact days. I don't like that it goes 'stale' and
+needs full generation."* Two separate mechanisms, and reading each changed
+what the fix should be.
+
+**Pace: split the validator rather than move its throw.**
+
+The approved plan said "keep `validatePacing`'s throw in `generatePlan`, drop
+it in reconciliation". Reading the function made that the wrong cut, because
+it enforced **two different kinds of thing under one throw**:
+
+| Rule | Kind |
+|---|---|
+| day drives > 1.5 × `maxDriveHoursPerDay` | a **preference the traveler set** |
+| rest day not at the previous day's overnight | a **malformed plan** |
+
+A rest day that teleports to a fresh transit town is broken wherever it was
+built, so it must keep throwing everywhere. A long day is the traveler's to
+accept — and it was at its worst on the incremental path, where reordering
+one stop that made one day long **discarded the entire edit** and returned an
+error naming a limit they set themselves.
+
+So `validatePacing(days)` keeps only the rest-day invariant and still throws
+in all three callers; the drive-length check moved into `pacingWarnings` as
+`driveLengthWarnings`, one warning per offending day, phrased as *"drives
+7.2h — more than the 4h/day you asked for"*. No UI work: `PlanStrip` already
+renders `pacing-warning-banner` and both write sites already populate
+`planMeta.pacingWarnings`. The signature change made the compiler find all
+eight call sites, which is why this was safe to do at all.
+
+**Staleness: check what it does before deciding how much can leave it.**
+
+It does far less than the name suggests. `stale` has **exactly two effects** —
+the Trip-setup button reads "Rebuild plan", and `dateShift.ts:59` gates its
+shortcut on it. Nothing blocks. A stale plan renders, opens, shares and
+drives like a ready one. It was never a broken plan; it was an offer to pay
+for a new one.
+
+`NON_INVALIDATING_SETTINGS` grew from `{detailWindowDays, interests}` to also
+cover `maxDriveHoursPerDay`, `restDayFrequency`, `preferredCountries`,
+`travelers`, `vehicle` and `offGridTolerance`. The test each had to pass was
+not "could this matter?" but **"does this make the days already written
+wrong?"** — and none of them do. They change what to look for, what is
+suitable, or what to measure against, all of which apply from here on.
+
+Still invalidating, deliberately: `startDate`/`endDate` and
+`startPoint`/`endPoint`, which change the ground the days were built on.
+Dates already have the cheap answer (the "Move the plan N days later"
+shortcut); endpoints get one in phase 4.
+
+**The trap this was checked against, and it would have been silent.**
+`staleSettings` is written with `arrayUnion`, so it **accumulates**, and
+`detectDateShift` only offers the shift when every entry is a date key.
+Widening that field to record every edit — tempting, for a "what changed
+since" note on the board — would have meant that changing the drive-hours
+limit and *later* changing the dates left
+`['maxDriveHoursPerDay','startDate']`, no longer dates-only, and yesterday's
+shift button would have quietly stopped appearing on precisely the trips that
+had been fiddled with most. So the field keeps its exact meaning, no
+informational field was added, and a test now drives that two-edit sequence.
+
+**Two tests flipped, both asserting the old behaviour by name**, which is the
+honest signal that the behaviour really changed:
+`corridorReconciliation.test.ts` "leaves the trip untouched when the new order
+fails pacing validation" → now commits the reorder and warns; and
+`settings.spec.ts` "editing settings on a trip with a ready plan marks it
+stale" → re-pointed at the end date and retitled "editing a setting the days
+were built on", since it moved the drive-hours slider to assert a rule that
+no longer applies to it.
+
+Verification: lint 0, build 0, frontend 260, functions 642, e2e **130**.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

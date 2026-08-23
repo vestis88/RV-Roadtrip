@@ -503,19 +503,20 @@ export async function runFullGeneration(
   // put. Unlike a replan (which only re-paces the remainder), a fresh
   // generation has no prior plan to preserve — if it fails this, there's
   // nothing to salvage, so this is a hard failure rather than a retry.
-  const violation = validatePacing(
-    days.map((d) => d.day),
-    trip.settings.maxDriveHoursPerDay,
-  )
+  const violation = validatePacing(days.map((d) => d.day))
   if (violation) {
     throw new Error(`Pacing validation failed: ${violation.reason}`)
   }
   // Advisory, not a gate — see pacingWarnings(). The curation is passed in
   // so the sight-load half of it (rule 7) has the timeNeeded estimates to
-  // check against; without them every sight reads as a half-day.
+  // check against; without them every sight reads as a half-day. The
+  // drive-hours limit joins it here rather than in the check above: a day
+  // longer than requested is the traveler's to accept, not a reason to
+  // discard a finished generation (2026-08-23).
   const warnings = pacingWarnings(
     days.map((d) => d.day),
     sightTimeFromHighlights(highlights),
+    trip.settings.maxDriveHoursPerDay,
   )
 
   await writeGeneratedDays(tripRef, days)

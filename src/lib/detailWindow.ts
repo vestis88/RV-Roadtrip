@@ -79,6 +79,46 @@ export const NON_INVALIDATING_SETTINGS = new Set<string>([
   // all — so this also makes the two halves of "what should we look for"
   // agree with each other.
   'interests',
+  /**
+   * Everything below joins them on 2026-08-23, on the same reasoning taken
+   * further: "I don't like that it goes 'stale' and needs full generation.
+   * It should just grow organically."
+   *
+   * Worth knowing what `stale` actually does before deciding how much can
+   * leave it, because it is far less than the name suggests. It has exactly
+   * two effects — the Trip-setup button reads "Rebuild plan" instead of
+   * "Generate full plan", and dateShift.ts gates its shortcut on it.
+   * NOTHING blocks. A stale plan renders, opens, shares and drives exactly
+   * like a ready one. So "stale" was never a broken plan; it was an offer to
+   * pay for a new one.
+   *
+   * Each of these changes what the app should do NEXT, not whether the days
+   * already written are wrong:
+   *
+   * - maxDriveHoursPerDay and restDayFrequency are pacing preferences, and
+   *   pacing is advice now (see pacingValidator's driveLengthWarnings). The
+   *   existing days get measured against the new number and say so; they do
+   *   not become invalid because the traveler moved a slider.
+   * - preferredCountries and interests steer what the next search looks for.
+   * - travelers and vehicle change what is SUITABLE — which overnight fits,
+   *   which activity suits the ages — and so apply to what is chosen from
+   *   here on. Re-deciding sixty already-chosen days is not what someone
+   *   adding a passenger asked for.
+   * - offGridTolerance is the same shape: it filters overnight options at
+   *   the moment they are offered.
+   *
+   * What is NOT here, deliberately: startDate/endDate and
+   * startPoint/endPoint. Those change the ground the days were built on —
+   * the dates they carry, or the route they thread. Dates already have the
+   * cheap answer (the "Move the plan N days later" shortcut); endpoints do
+   * not yet, and get one when days derive from the board.
+   */
+  'maxDriveHoursPerDay',
+  'restDayFrequency',
+  'preferredCountries',
+  'travelers',
+  'vehicle',
+  'offGridTolerance',
 ])
 
 export { DEFAULT_DETAIL_WINDOW_DAYS }
