@@ -2066,6 +2066,77 @@ this change. Same load-flakiness already recorded for `corridor.spec.ts:22`
 and `share-view.spec.ts:32`; `countries.spec.ts:163` is a new member of that
 set. Recorded rather than reported as green.
 
+### 2026-08-23 — the board is the Map tab now (board rework, phase 1 of 8)
+
+Reported: *"the whole locking the trip doesn't work for us… As soon as it
+goes to detailed plan, I feel like it's too restricting and I actually lose
+the overview."* And, on what to do about days: *"keep the generate trip thing
+but make it looser and easier to change / less strict about pace/exact days.
+I don't like that it goes 'stale' and needs full generation. It should just
+grow organically."*
+
+**The overview was lost to one line.** `OverviewMapScreen.tsx:299` read
+`if (planStatus === 'idle') return <ExploreMapScreen …>`. That is the entire
+mode switch: the board existed only while no plan did, and the moment
+`planMeta.status` stopped being `idle` the Map tab rendered a different
+screen. Everything the board offers — lock in, set a priority, rescan the
+area, add a stop — went with the swap, leaving a screen that could show a
+finished plan and ask for it to be regenerated. Nothing was being deleted and
+no layout decision was involved.
+
+So the branch is gone. `OverviewMapScreen` is now a four-line delegator that
+reads the trip out of context and renders the board; what the day-by-day view
+contributed that the board did not is rendered ON the board by a new
+`PlanStrip` — totals, `header-day-count`, pacing advice, "Request changes",
+"Edit route", and a horizontally scrolling **day strip** that opens Day View.
+A plan is something the trip HAS now, rather than somewhere the traveler
+GOES.
+
+Deliberate decisions inside that:
+
+- **`PlanStrip` is its own component**, not more lines in `ExploreMapScreen`.
+  It owns two pieces of state nothing else on the board needs (the
+  change-request form, the pacing dismissal). The reorder panel's open flag
+  is the exception and is held by the board, because a locked unlinked stop's
+  own "Add to route" button opens it — the cards are the board's, the panel's
+  stop lists are PlanStrip's, so the flag has to sit above both.
+- **The status and offline banners moved to the board, not into PlanStrip.**
+  They are facts about the trip and the connection, not about days: a
+  generation in flight is precisely when there are no days to report on.
+- **The day strip scrolls horizontally.** Sixty wrapped chips would push the
+  map off the screen — the same failure the stops list was given a height cap
+  for on 2026-08-19.
+- **The day-specific map layers were not carried over** — per-day overnight
+  pins, the selected day's activity/restaurant markers, and the polyline
+  threaded through each day's best activity. They are in git history at
+  3529d59. The board draws the same route from the locked stops those days
+  are built from, and the per-day places remain on Day View. Recorded as a
+  real loss rather than glossed: seeing every night on the overview map is
+  gone until the phase-4 skeleton commit makes days derive from the board.
+
+**What the e2e caught, which is the reason to write it down.** The first run
+after deleting the branch was 120 passed / 7 failed, and three of those were
+not test bookkeeping — the **generating, error and offline banners** had lived
+only on the deleted screen, so a generation in flight would have reported
+nothing at all. A fourth was worse: `explore-candidate-add-to-route` never
+rendered, because the board never passed `onAddToRoute` — silently undoing
+the 2026-08-19 "give a locked, unlinked stop a real way into the route" work.
+None of that was visible from the diff; all of it came from the suite.
+
+New tests assert the phase's actual claim rather than its plumbing: a planned
+trip still offers "Find more stops", "Rescan this area" and its curated list,
+*and* carries the plan's header and day strip, with a day chip opening
+`/map/day/:id`; a trip with no plan shows the board and no plan chrome at all.
+Asserted through the actions rather than a container testid, because "the
+board is present" means "I can still curate".
+
+Verification: lint 0, build 0, frontend 252, functions 641, e2e **129**.
+
+Phases 2–8 (pace as advice, stop going stale; stay durations and an honest
+day budget; the cheap skeleton commit; manual route order; per-stop overnight;
+position marker and mark-done; live mode) are planned and tracked but not
+started.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

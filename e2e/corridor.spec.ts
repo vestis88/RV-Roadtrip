@@ -2,6 +2,7 @@ import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import { signIn } from './helpers/signIn.js'
 import { MAX_RESCAN_RADIUS_KM } from '../src/lib/rescanRadius'
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
@@ -675,15 +676,18 @@ test('curated stops survive into the plan, with their curation intact', async ({
   await page.getByTestId('nav-map').click()
   await page.getByTestId('map-header').waitFor()
 
-  // The list is back, and the stop is in it.
-  const list = page.getByTestId('considered-stops-list')
+  // The list is back, and the stop is in it. It is the BOARD's list now —
+  // the plan stopped having a separate screen with a separate list on
+  // 2026-08-23, so "survives into the plan" is a weaker claim than it was:
+  // the list never goes away in the first place.
+  const list = page.getByTestId('explore-candidate-list')
   await expect(list).toContainText('Jotunheimen National Park')
 
   // And the map is still there. The first version of this list starved the
   // map to zero height — `flex-1` is a basis of zero, so a tall sibling took
   // all of it — and these tests passed anyway because none of them looked at
   // the map. Reported as "now the map is gone".
-  const canvas = await page.getByTestId('map-canvas').boundingBox()
+  const canvas = await page.getByTestId('explore-map-canvas').boundingBox()
   expect(canvas?.height ?? 0).toBeGreaterThan(200)
 
   // Everything the explore card shows, still shown — the curation did not
@@ -754,12 +758,14 @@ test('a stop turned down in plan mode is remembered, not deleted', async ({
   await expect
     .poll(async () => (await stops.doc(added.id).get()).data()?.status)
     .toBe('rejected')
-  // Still there as a tombstone, and gone from the list — which, with
-  // nothing left to decide about, disappears entirely rather than sitting
-  // there empty.
+  // Still there as a tombstone, and gone from the list. The list itself
+  // stays — it is the board's own, not a plan-mode extra that could vanish —
+  // and says so rather than sitting there blank.
   await expect((await stops.doc(added.id).get()).exists).toBe(true)
-  await expect(page.getByTestId('considered-stops-toggle')).toHaveCount(0)
-  await expect(page.getByTestId('considered-stops-list')).toHaveCount(0)
+  await expect(page.getByTestId('explore-candidate-list')).not.toContainText(
+    'Jotunheimen National Park',
+  )
+  await expect(page.getByTestId('explore-empty-state')).toBeVisible()
 })
 
 /** A curated stop, so the screen actually has a list beside the map. */
@@ -811,8 +817,8 @@ test('iPad landscape puts the map and the stops list side by side', async ({
   await page.getByTestId('nav-map').click()
   await page.getByTestId('map-header').waitFor()
 
-  const map = page.getByTestId('map-canvas')
-  const list = page.getByTestId('considered-stops-toggle')
+  const map = page.getByTestId('explore-map-canvas')
+  const list = page.getByTestId('explore-candidate-list')
   await map.waitFor()
   await list.waitFor()
 
@@ -841,8 +847,8 @@ test('a portrait tablet still stacks them', async ({ page }) => {
   // snapshot had not arrived, so the map still had the screen to itself and
   // was measured mid-layout, against a list that only appeared afterwards.
   // A geometric assertion is only as good as the moment it is taken at.
-  const map = page.getByTestId('map-canvas')
-  const list = page.getByTestId('considered-stops-toggle')
+  const map = page.getByTestId('explore-map-canvas')
+  const list = page.getByTestId('explore-candidate-list')
   await map.waitFor()
   await list.waitFor()
 
@@ -855,4 +861,62 @@ test('a portrait tablet still stacks them', async ({ page }) => {
   // stacked.
   expect(listBox.y).toBeGreaterThanOrEqual(mapBox.y + mapBox.height - 1)
   expect(mapBox.height).toBeGreaterThan(200)
+})
+
+/**
+ * The point of the whole change, asserted directly.
+ *
+ * Reported 2026-08-23: "as soon as it goes to detailed plan, I feel like it's
+ * too restricting and I actually lose the overview." The overview was not
+ * lost to layout, and generation was not deleting it — the Map tab simply
+ * rendered a different screen the moment `planMeta.status` stopped being
+ * `idle`, and every curation action went with it.
+ *
+ * So: a trip WITH a plan must still offer the board. Asserted through the
+ * actions, not through a testid, because "the board is present" means "I can
+ * still curate", and a screen could carry the container without them.
+ */
+test('a planned trip still has the whole board, plus what the plan adds', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  await seedConsideredStop(tripId)
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  // The board's own controls, on a trip that has a finished plan.
+  await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
+  await expect(page.getByTestId('rescan-corridor-button')).toBeVisible()
+  await expect(page.getByTestId('explore-candidate-list')).toContainText(
+    'Jotunheimen National Park',
+  )
+
+  // And the plan's contribution, on the same screen rather than instead of it.
+  await expect(page.getByTestId('map-header')).toBeVisible()
+  await expect(page.getByTestId('header-day-count')).toBeVisible()
+  await expect(page.getByTestId('request-changes-button')).toBeVisible()
+
+  // A way into each day, which is what replaced the screen swap.
+  const strip = page.getByTestId('day-strip')
+  await expect(strip).toBeVisible()
+  const firstDay = strip.getByRole('button').first()
+  await firstDay.click()
+  await expect(page).toHaveURL(/\/map\/day\//)
+})
+
+// The other half: a trip with no plan yet must not show plan chrome for a
+// plan that does not exist.
+test('a trip with no plan yet shows the board and no plan strip', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
+  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('day-strip')).toHaveCount(0)
 })

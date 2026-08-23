@@ -13,6 +13,8 @@ import {
   type Trip,
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
+import { useTripDays } from '../hooks/useTripDays'
+import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import {
   applyRouteOrder,
   isNewRouteOrder,
@@ -50,6 +52,7 @@ import { RescanCorridorButton } from '../components/RescanCorridorButton'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
 import { RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
+import { PlanStrip } from '../components/PlanStrip'
 import {
   DirectionsRoute,
   type RouteTotals,
@@ -75,6 +78,14 @@ interface ExploreMapScreenProps {
  */
 export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const { corridorStops } = useCorridorStops(tripId)
+  // The board renders at every plan status now, so it is the thing that has
+  // to know whether a plan exists — see PlanStrip.
+  const { days } = useTripDays(tripId)
+  const online = useOnlineStatus()
+  const planStatus = trip.planMeta.status
+  // Opened both from PlanStrip's "Edit route" and from a locked, unlinked
+  // stop's own "Add to route" — see PlanStrip's note on why it lives here.
+  const [reorderOpen, setReorderOpen] = useState(false)
   const [zoom, setZoom] = useState(6)
   // The visible map rectangle, so "Rescan this area" can search the area
   // the traveler is actually looking at rather than a fixed circle around
@@ -416,6 +427,59 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       className="flex h-full w-full flex-col"
       data-testid="explore-map-screen"
     >
+      {/* What the day-by-day plan adds, when there is one — on the board
+        * rather than instead of it. See PlanStrip's own note: the overview
+        * was never lost to layout, it was lost to a single branch that made
+        * this screen exist only while no plan did. */}
+      {days.length > 0 && (
+        <PlanStrip
+          tripId={tripId}
+          trip={trip}
+          days={days}
+          corridorStops={corridorStops}
+          reorderOpen={reorderOpen}
+          onReorderOpenChange={setReorderOpen}
+        />
+      )}
+
+      {/* Plan status and connectivity, which belong to the TRIP rather than
+        * to the day-by-day view that used to host them. They render at every
+        * status and whether or not days exist — a generation in flight is
+        * exactly the moment there are no days to report on yet. */}
+      {(planStatus === 'pending' || planStatus === 'generating') && (
+        <p
+          data-testid="map-generating-banner"
+          className="border-b border-neutral-200 bg-white p-3 text-center text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300"
+        >
+          {trip.planMeta.progressTotal
+            ? `${trip.planMeta.progressCurrent ?? 0}/${trip.planMeta.progressTotal} days (${Math.round(
+                ((trip.planMeta.progressCurrent ?? 0) /
+                  trip.planMeta.progressTotal) *
+                  100,
+              )}%)`
+            : (trip.planMeta.progressLabel ?? 'Planning your route…')}
+        </p>
+      )}
+
+      {planStatus === 'error' && (
+        <p
+          data-testid="map-error-banner"
+          className="border-b border-red-300 bg-red-50 p-3 text-center text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+        >
+          {trip.planMeta.error ?? 'Something went wrong generating this plan.'}
+        </p>
+      )}
+
+      {!online && (
+        <p
+          data-testid="offline-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-center text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          You're offline — showing your last synced plan. Map tiles need a
+          connection.
+        </p>
+      )}
+
       <div
         className="surface flex flex-wrap items-center justify-center gap-2 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
         data-testid="explore-header"
@@ -755,6 +819,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                     )
                     if (selectedId === stop.id) setSelectedId(null)
                   }}
+                  // Only where there is a route to add TO. A locked stop with
+                  // no day yet is exactly what reconciliation can slot in —
+                  // see the 2026-08-19 "real way into the route" work, which
+                  // this board inherited when the plan stopped having a
+                  // screen of its own.
+                  onAddToRoute={
+                    days.length > 0 &&
+                    stop.status === 'locked' &&
+                    stop.linkedDayIds.length === 0
+                      ? () => setReorderOpen(true)
+                      : undefined
+                  }
                 />
               ))}
             </div>
