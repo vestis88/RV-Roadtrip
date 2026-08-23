@@ -635,7 +635,59 @@ export const corridorStopSchema = z.object({
    * rather than resurrecting stops nobody asked to keep.
    */
   origin: z.enum(['traveler', 'plan']).optional(),
+  /**
+   * How long the traveler intends to stay (2026-08-23).
+   *
+   * Requested: "I want to be able to state how long we intend to stay at
+   * that activity/stop. This will yield a total duration that we can then
+   * simply curate ourselves by locking/unlocking stops."
+   *
+   * Two shapes rather than a number of hours, because RV travel mixes two
+   * genuinely different things and a total that cannot tell them apart is
+   * useless. A viewpoint is an hour; a lake you park beside is three
+   * NIGHTS, and entering that as 72 hours both reads wrong and packs wrong —
+   * nights consume days without consuming driving budget, hours compete
+   * with the drive for the same day.
+   *
+   * ABSENT MEANS "derive it from `timeNeeded`" (see stayHoursOf), so every
+   * stop curated before this existed already has a sensible answer and
+   * nothing had to be backfilled.
+   */
+  stayDuration: z
+    .union([
+      z.object({ kind: z.literal('hours'), hours: z.number().positive() }),
+      z.object({
+        kind: z.literal('nights'),
+        nights: z.number().int().positive(),
+      }),
+    ])
+    .optional(),
 })
+
+/** Hours a sight needs when nobody has said otherwise — see stayDuration. */
+export const TIME_NEEDED_HOURS: Record<SightTimeNeeded, number> = {
+  'couple-of-hours': 2,
+  'half-day': 4,
+  'full-day': 8,
+}
+
+/**
+ * What a stop costs the trip, in hours of daylight and in nights.
+ *
+ * The single place the "absent means derive it" rule lives, so the budget,
+ * the card and any future caller cannot disagree about what an unset
+ * duration means. A `nights` stay reports zero hours deliberately: its cost
+ * is whole days, counted separately, not daytime competing with the drive.
+ */
+export function stayCostOf(stop: {
+  stayDuration?: CorridorStop['stayDuration']
+  timeNeeded?: SightTimeNeeded
+}): { hours: number; nights: number } {
+  const duration = stop.stayDuration
+  if (duration?.kind === 'nights') return { hours: 0, nights: duration.nights }
+  if (duration?.kind === 'hours') return { hours: duration.hours, nights: 0 }
+  return { hours: TIME_NEEDED_HOURS[stop.timeNeeded ?? 'half-day'], nights: 0 }
+}
 
 // Phase 4a (reorder/date-shift reconciliation, 2026-07-29): one entry per
 // day whose date actually moved when the traveler's proposed new stop order

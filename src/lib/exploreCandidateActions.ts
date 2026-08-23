@@ -2,6 +2,7 @@ import { doc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { sortAlongRoute } from '@rv/shared'
 import type {
+  CorridorStop,
   CorridorStopPriority,
   EmptyCountry,
   LatLng,
@@ -56,6 +57,24 @@ export async function setCandidatePriority(
 ): Promise<void> {
   await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
     priority,
+  })
+}
+
+/**
+ * How long the traveler intends to stay at a stop (2026-08-23).
+ *
+ * Written straight to the stop, like the interest level above and for the
+ * same reason: it is the traveler's own judgement about a place, not
+ * something any generation should overwrite. The board's day budget reads
+ * it back (see tripBudget) and the number moves the moment this lands.
+ */
+export async function setStopStay(
+  tripId: string,
+  stopId: string,
+  stayDuration: CorridorStop['stayDuration'],
+): Promise<void> {
+  await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
+    stayDuration,
   })
 }
 

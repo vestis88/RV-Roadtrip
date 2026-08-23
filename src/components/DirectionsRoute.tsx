@@ -71,10 +71,42 @@ function sumRouteTotals(results: google.maps.DirectionsResult[]): RouteTotals {
   return { distanceKm: meters / 1000, durationMin: seconds / 60 }
 }
 
+/** One hop of the drawn route: point N to point N+1. */
+export interface RouteLeg {
+  distanceKm: number
+  durationMin: number
+}
+
+/**
+ * The same legs `sumRouteTotals` adds up, kept individually.
+ *
+ * They were fetched and thrown away — the totals line said "24 h 15 min
+ * driving · 2107 km" and nothing said what any single hop cost, which is
+ * exactly the number needed to decide whether a stop is worth keeping.
+ * Requested 2026-08-23: "It should be possible to determine the distance and
+ * time between locked in stops."
+ *
+ * Flattened across chunks in request order, so the result is the whole
+ * journey's hops end to end. That correspondence is what lets the caller
+ * pair leg i with the gap between routed point i and i+1 — see
+ * MAX_DIRECTIONS_POINTS_PER_REQUEST for why there is more than one chunk,
+ * and note that chunks overlap by one point (each starts where the last
+ * ended), so no hop is counted twice and none is missed.
+ */
+function routeLegs(results: google.maps.DirectionsResult[]): RouteLeg[] {
+  return results.flatMap((result) =>
+    (result.routes[0]?.legs ?? []).map((leg) => ({
+      distanceKm: (leg.distance?.value ?? 0) / 1000,
+      durationMin: (leg.duration?.value ?? 0) / 60,
+    })),
+  )
+}
+
 export function DirectionsRoute({
   points,
   onError,
   onTotals,
+  onLegs,
   optimizeOrder = false,
   onOrder,
 }: {
@@ -94,6 +126,14 @@ export function DirectionsRoute({
    * total shows as unknown.
    */
   onTotals?: (totals: RouteTotals | null) => void
+  /**
+   * Every hop of the drawn route, in request order — see routeLegs. Must be
+   * a STABLE identity (useCallback), like onTotals: this hook lists it in a
+   * dependency array, so a new function per render re-fires the Directions
+   * request and cancels the one in flight. That circuit is written up in
+   * routeOrder.ts and has been walked into twice.
+   */
+  onLegs?: (legs: RouteLeg[] | null) => void
   /**
    * Let Google choose the order of the intermediate points, rather than
    * driving them in the order given.
@@ -190,6 +230,7 @@ export function DirectionsRoute({
       }
       setRoutedPoints(points)
       onTotals?.(sumRouteTotals(results))
+      onLegs?.(routeLegs(results))
     }
 
     run().catch((error: unknown) => {
@@ -197,6 +238,7 @@ export function DirectionsRoute({
       if (!cancelled) {
         onError(describeDirectionsError(error))
         onTotals?.(null)
+        onLegs?.(null)
       }
     })
 
@@ -204,7 +246,7 @@ export function DirectionsRoute({
       cancelled = true
       for (const renderer of renderers) renderer.setMap(null)
     }
-  }, [map, routesLibrary, points, onError, onTotals, optimizeOrder, onOrder])
+  }, [map, routesLibrary, points, onError, onTotals, onLegs, optimizeOrder, onOrder])
 
   if (routedPoints === points || points.length < 2) return null
   return <Polyline path={points} {...ROUTE_STROKE} />

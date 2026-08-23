@@ -31,6 +31,7 @@ import {
   TIER_LABEL,
   TIER_ORDER,
   candidatePriority,
+  setStopStay,
   describeEmptyCandidateList,
   describeEmptyCountries,
   describeExploreHighlightsError,
@@ -56,11 +57,13 @@ import { PlanStrip } from '../components/PlanStrip'
 import {
   DirectionsRoute,
   type RouteTotals,
+  type RouteLeg,
 } from '../components/DirectionsRoute'
 import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
+import { describeBudget, tripBudget } from '../lib/tripBudget'
 
 interface ExploreMapScreenProps {
   tripId: string
@@ -136,6 +139,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [routeTotals, setRouteTotals] = useState<RouteTotals | null>(null)
   const handleRouteTotals = useCallback(
     (totals: RouteTotals | null) => setRouteTotals(totals),
+    [],
+  )
+  // Every hop of the route, so the list can say what each stop costs to
+  // reach. Same stable-identity discipline as the totals handler above —
+  // DirectionsRoute lists this in a dependency array.
+  const [routeLegs, setRouteLegs] = useState<RouteLeg[] | null>(null)
+  const handleRouteLegs = useCallback(
+    (legs: RouteLeg[] | null) => setRouteLegs(legs),
     [],
   )
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -250,6 +261,47 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     () => applyRouteOrder(guessedOrder, routeOrder, orderKey),
     [guessedOrder, routeOrder, orderKey],
   )
+  // What the kept stops cost in days — the number the traveler trims
+  // against. Legs are the real driving times when Google has answered and
+  // absent before that, which tripBudget handles rather than waiting.
+  const budget = useMemo(
+    () =>
+      tripBudget({
+        stops: routeStops,
+        legs: routeLegs ?? [],
+        startDate: trip.settings.startDate,
+        endDate: trip.settings.endDate,
+        maxDriveHoursPerDay: trip.settings.maxDriveHoursPerDay,
+      }),
+    [
+      routeStops,
+      routeLegs,
+      trip.settings.startDate,
+      trip.settings.endDate,
+      trip.settings.maxDriveHoursPerDay,
+    ],
+  )
+  /**
+   * The drive INTO each kept stop, by stop id.
+   *
+   * The backbone is `[start, ...stops, end]`, and Google returns one leg per
+   * gap in the order actually driven — which is what `routeStops` is, since
+   * that is the guess reordered by the very `waypoint_order` these legs came
+   * back with. So leg[i] is the drive arriving at routeStops[i].
+   *
+   * Attached per stop rather than rendered between cards, because the list
+   * is sorted independently of the driving order: "what it costs to get
+   * here" stays true wherever the card sits. Skipped entirely unless the
+   * counts line up — a partial or chunk-mismatched result would otherwise
+   * label each stop with its neighbour's drive, which is worse than saying
+   * nothing.
+   */
+  const legIntoStop = useMemo(() => {
+    const map = new Map<string, RouteLeg>()
+    if (!routeLegs || routeLegs.length !== routeStops.length + 1) return map
+    routeStops.forEach((stop, index) => map.set(stop.id, routeLegs[index]))
+    return map
+  }, [routeLegs, routeStops])
   const routeStopIds = useMemo(
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
@@ -428,9 +480,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       data-testid="explore-map-screen"
     >
       {/* What the day-by-day plan adds, when there is one — on the board
-        * rather than instead of it. See PlanStrip's own note: the overview
-        * was never lost to layout, it was lost to a single branch that made
-        * this screen exist only while no plan did. */}
+       * rather than instead of it. See PlanStrip's own note: the overview
+       * was never lost to layout, it was lost to a single branch that made
+       * this screen exist only while no plan did. */}
       {days.length > 0 && (
         <PlanStrip
           tripId={tripId}
@@ -443,9 +495,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       )}
 
       {/* Plan status and connectivity, which belong to the TRIP rather than
-        * to the day-by-day view that used to host them. They render at every
-        * status and whether or not days exist — a generation in flight is
-        * exactly the moment there are no days to report on yet. */}
+       * to the day-by-day view that used to host them. They render at every
+       * status and whether or not days exist — a generation in flight is
+       * exactly the moment there are no days to report on yet. */}
       {(planStatus === 'pending' || planStatus === 'generating') && (
         <p
           data-testid="map-generating-banner"
@@ -590,6 +642,31 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         </p>
       )}
 
+      {/* What the kept stops COST, in the unit the traveler curates in.
+       *
+       * Requested 2026-08-23 alongside the per-stop durations: "this will
+       * yield a total duration that we can then simply curate ourselves by
+       * locking/unlocking stops." Days rather than hours, deliberately —
+       * see tripBudget, where the packing and the reason for it live. */}
+      {routeStops.length > 0 && (
+        <p
+          data-testid="explore-trip-budget"
+          className="border-b border-neutral-200 px-3 py-1.5 text-center text-xs dark:border-neutral-800"
+        >
+          <span className="text-neutral-600 dark:text-neutral-300">
+            {describeBudget(budget, routeStops.length)}
+          </span>
+          {budget.spareDays < 0 && budget.daysAvailable > 0 && (
+            <span
+              data-testid="explore-budget-over"
+              className="ml-2 text-amber-700 dark:text-amber-300"
+            >
+              — more than the dates allow
+            </span>
+          )}
+        </p>
+      )}
+
       {routeError && (
         <p
           data-testid="explore-route-error-banner"
@@ -676,6 +753,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 points={askedBackbone}
                 onError={setRouteError}
                 onTotals={handleRouteTotals}
+                onLegs={handleRouteLegs}
                 // Explore mode only. Nobody has committed to this order — it
                 // is our own projection guess — so Google reordering it
                 // against real roads is strictly better information. The
@@ -780,58 +858,81 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           ) : (
             <div className="space-y-2">
               {orderedCandidates.map((stop) => (
-                <ExploreCandidateCard
-                  key={stop.id}
-                  stop={stop}
-                  detourKm={detourByStopId.get(stop.id) ?? null}
-                  onRoute={routeStopIds.has(stop.id)}
-                  highlighted={selectedId === stop.id}
-                  innerRef={(element) => {
-                    if (element) cardRefs.current.set(stop.id, element)
-                    else cardRefs.current.delete(stop.id)
-                  }}
-                  onSelect={() => setSelectedId(stop.id)}
-                  onSetPriority={(priority) => setInterest(stop.id, priority)}
-                  onLock={() =>
-                    runStopAction(
-                      setCorridorStopStatus(tripId, stop.id, 'locked'),
-                      'Could not lock in that stop — please try again.',
-                    )
-                  }
-                  onUnlock={() =>
-                    runStopAction(
-                      // Straight back to 'candidate' — the stop keeps its
-                      // interest level and its place in the list, and only
-                      // stops bending the route. Nothing else about it changes,
-                      // which is the whole difference between this and "Not
-                      // interested".
-                      setCorridorStopStatus(tripId, stop.id, 'candidate'),
-                      'Could not unlock that stop — please try again.',
-                    )
-                  }
-                  onReject={() => {
-                    runStopAction(
-                      // Kept as a tombstone rather than deleted, so the next
-                      // "Find more stops" doesn't hand it straight back —
-                      // see rejectCorridorStop.
-                      rejectCorridorStop(tripId, stop.id),
-                      'Could not remove that stop — please try again.',
-                    )
-                    if (selectedId === stop.id) setSelectedId(null)
-                  }}
-                  // Only where there is a route to add TO. A locked stop with
-                  // no day yet is exactly what reconciliation can slot in —
-                  // see the 2026-08-19 "real way into the route" work, which
-                  // this board inherited when the plan stopped having a
-                  // screen of its own.
-                  onAddToRoute={
-                    days.length > 0 &&
-                    stop.status === 'locked' &&
-                    stop.linkedDayIds.length === 0
-                      ? () => setReorderOpen(true)
+                <div key={stop.id}>
+                  {legIntoStop.has(stop.id) && (
+                    <p
+                      data-testid={`explore-leg-${stop.id}`}
+                      className="px-1 pb-1 text-xs text-neutral-500 dark:text-neutral-400"
+                    >
+                      ↓ {Math.round(legIntoStop.get(stop.id)!.distanceKm)} km ·{' '}
+                      {formatDriveTime(legIntoStop.get(stop.id)!.durationMin)}{' '}
+                      to get here
+                    </p>
+                  )}
+                  <ExploreCandidateCard
+                    stop={stop}
+                    detourKm={detourByStopId.get(stop.id) ?? null}
+                    onRoute={routeStopIds.has(stop.id)}
+                    highlighted={selectedId === stop.id}
+                    innerRef={(element) => {
+                      if (element) cardRefs.current.set(stop.id, element)
+                      else cardRefs.current.delete(stop.id)
+                    }}
+                    onSelect={() => setSelectedId(stop.id)}
+                    onSetPriority={(priority) => setInterest(stop.id, priority)}
+                    onLock={() =>
+                      runStopAction(
+                        setCorridorStopStatus(tripId, stop.id, 'locked'),
+                        'Could not lock in that stop — please try again.',
+                      )
+                    }
+                    onUnlock={() =>
+                      runStopAction(
+                        // Straight back to 'candidate' — the stop keeps its
+                        // interest level and its place in the list, and only
+                        // stops bending the route. Nothing else about it changes,
+                        // which is the whole difference between this and "Not
+                        // interested".
+                        setCorridorStopStatus(tripId, stop.id, 'candidate'),
+                        'Could not unlock that stop — please try again.',
+                      )
+                    }
+                    onReject={() => {
+                      runStopAction(
+                        // Kept as a tombstone rather than deleted, so the next
+                        // "Find more stops" doesn't hand it straight back —
+                        // see rejectCorridorStop.
+                        rejectCorridorStop(tripId, stop.id),
+                        'Could not remove that stop — please try again.',
+                      )
+                      if (selectedId === stop.id) setSelectedId(null)
+                    }}
+                    // Only on a kept stop: how long to stay somewhere you
+                  // have not decided to visit is noise, and the budget
+                  // counts kept stops only.
+                  onSetStay={
+                    routeStopIds.has(stop.id)
+                      ? (stay) =>
+                          runStopAction(
+                            setStopStay(tripId, stop.id, stay),
+                            'Could not save how long you are staying — please try again.',
+                          )
                       : undefined
                   }
-                />
+                  // Only where there is a route to add TO. A locked stop with
+                    // no day yet is exactly what reconciliation can slot in —
+                    // see the 2026-08-19 "real way into the route" work, which
+                    // this board inherited when the plan stopped having a
+                    // screen of its own.
+                    onAddToRoute={
+                      days.length > 0 &&
+                      stop.status === 'locked' &&
+                      stop.linkedDayIds.length === 0
+                        ? () => setReorderOpen(true)
+                        : undefined
+                    }
+                  />
+                </div>
               ))}
             </div>
           )}

@@ -1,7 +1,10 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  evaluateWithRetry,
+} from './helpers/seedFixturePlan.js'
 import { signIn } from './helpers/signIn.js'
 import { MAX_RESCAN_RADIUS_KM } from '../src/lib/rescanRadius'
 
@@ -919,4 +922,89 @@ test('a trip with no plan yet shows the board and no plan strip', async ({
   await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
   await expect(page.getByTestId('map-header')).toHaveCount(0)
   await expect(page.getByTestId('day-strip')).toHaveCount(0)
+})
+
+/**
+ * Phase 3 of the board rework, 2026-08-23: "I want to be able to state how
+ * long we intend to stay at that activity/stop. This will yield a total
+ * duration that we can then simply curate ourselves by locking/unlocking
+ * stops." And: "It should be possible to determine the distance and time
+ * between locked in stops."
+ *
+ * The budget is asserted in DAYS, not hours, which is the design decision the
+ * whole feature rests on — see tripBudget. sum(stay) + sum(drive) is not a
+ * trip length, and "84 h 20 min" cannot be curated against.
+ */
+test('locked stops report what they cost in days, and change when you say how long you are staying', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const kept = await stops.add({
+    name: 'Jotunheimen National Park',
+    lat: 61.5,
+    lng: 8.3,
+    country: 'NO',
+    why: 'Marked day hikes from the road.',
+    status: 'locked',
+    linkedDayIds: [],
+    priority: 'must-see',
+    rank: 0,
+    timeNeeded: 'couple-of-hours',
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  const budget = page.getByTestId('explore-trip-budget')
+  await expect(budget).toBeVisible()
+  await expect(budget).toContainText('1 stop')
+  // Days, not hours. A couple of hours is one day of the calendar.
+  await expect(budget).toContainText('~1 day')
+
+  // Saying you will park there for a week changes the number, which is the
+  // whole point: the traveler curates against it.
+  await page
+    .getByTestId(`explore-candidate-stay-hours-${kept.id}`)
+    .selectOption('nights:7')
+  await expect
+    .poll(async () => (await stops.doc(kept.id).get()).data()?.stayDuration?.nights)
+    .toBe(7)
+  await expect(budget).toContainText('~7 days')
+})
+
+// A stop nobody has kept has nothing to say about how long to stay there.
+test('only kept stops offer a stay length', async ({ page }) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  const candidate = await stops.add({
+    name: 'Jotunheimen National Park',
+    lat: 61.5,
+    lng: 8.3,
+    country: 'NO',
+    why: 'Marked day hikes from the road.',
+    status: 'candidate',
+    linkedDayIds: [],
+    priority: 'worth-a-detour',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+  await expect(
+    page.getByTestId(`explore-candidate-${candidate.id}`),
+  ).toBeVisible()
+
+  await expect(
+    page.getByTestId(`explore-candidate-stay-${candidate.id}`),
+  ).toHaveCount(0)
+  await expect(page.getByTestId('explore-trip-budget')).toHaveCount(0)
 })

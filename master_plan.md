@@ -2211,6 +2211,68 @@ no longer applies to it.
 
 Verification: lint 0, build 0, frontend 260, functions 642, e2e **130**.
 
+### 2026-08-23 — the board became a planning tool (board rework, phase 3 of 8)
+
+*"I want to be able to state how long we intend to stay at that
+activity/stop. This will yield a total duration that we can then simply
+curate ourselves by locking/unlocking stops."* And: *"It should be possible
+to determine the distance and time between locked in stops."*
+
+**The total is in DAYS, and that is the whole design.** `sum(stay) +
+sum(drive)` is not a trip length: you cannot do a full-day sight AND a
+six-hour drive on the same day, which is precisely why `maxDriveHoursPerDay`
+exists as a setting. "84 h 20 min" cannot be curated against — a traveler
+cannot tell whether it fits in a fortnight. So `src/lib/tripBudget.ts`
+**packs** rather than sums, against two ceilings, whichever binds:
+
+- the traveler's own drive-hours limit, which usually decides a long trip;
+- daylight, since drives and sights compete for the same hours — a day of two
+  short drives and a full-day castle is a full day even though the driving
+  alone would have fitted.
+
+Basecamp nights are added rather than packed: three nights at a lake is three
+days whatever else is happening. The header reads `9 stops · ~11 days · 3
+spare`, and an overrun is stated as *"3 days over"* rather than as a negative,
+because the first is actionable and the second is arithmetic.
+
+Deliberately greedy and simple rather than the real pacing algorithm: this
+runs live while stops are locked and unlocked, so it must be instant, pure
+and obvious enough to trust. Same reasoning as `planDrift`'s straight lines —
+it decides what to TELL someone, not what to do.
+
+**Two shapes of duration, not one number.** `corridorStop.stayDuration` is
+`{kind:'hours'}` or `{kind:'nights'}`, because RV travel mixes a one-hour
+viewpoint with a three-night basecamp and a total that cannot tell them apart
+is useless: nights consume days without consuming driving budget, hours
+compete with the drive for the same day. Entering three nights as 72 hours
+both reads wrong and packs wrong. **Absent means derive it from `timeNeeded`**
+(2h/4h/8h) via `stayCostOf`, so every stop curated before this existed already
+has a sensible answer and nothing needed backfilling.
+
+**Per-leg distances were already being fetched and thrown away.**
+`DirectionsRoute` iterated `routes[0].legs` only to sum them; `onLegs` now
+hands them out. Each is attached to the stop it arrives AT rather than
+rendered between cards, because the list is sorted independently of the
+driving order — *"what it costs to get here"* stays true wherever the card
+sits. Skipped entirely unless `legs.length === stops.length + 1`, since a
+chunk-mismatched result would label each stop with its neighbour's drive,
+which is worse than saying nothing.
+
+The correspondence that makes it work is worth recording: the backbone is
+`[start, ...stops, end]` and Google returns one leg per gap **in the order
+actually driven** — which is exactly what `routeStops` is, since that is the
+guess reordered by the very `waypoint_order` those legs came back with. So
+`leg[i]` is the drive arriving at `routeStops[i]`.
+
+**A build trap, for next time.** `tripBudget`'s first test run failed with
+`stayCostOf is not a function` despite a clean `tsc`. The frontend resolves
+`@rv/shared` to `shared/dist`, not `shared/src`, so a new shared export is
+invisible to vitest until `npm run build -w shared` runs. `npm run build`
+does it as its first step, which is why the full gate never sees this and a
+single-file test run does.
+
+Verification: lint 0, build 0, frontend **275**, functions 642, e2e **132**.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

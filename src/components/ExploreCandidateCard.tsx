@@ -1,5 +1,10 @@
 import { estimateDriveMinutes } from '@rv/shared'
-import type { CorridorStopPriority, SightTimeNeeded } from '@rv/shared'
+import { stayCostOf } from '@rv/shared'
+import type {
+  CorridorStop,
+  CorridorStopPriority,
+  SightTimeNeeded,
+} from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { placeDetailsUrl } from '../lib/mapLinks'
@@ -9,6 +14,14 @@ import {
   TIER_ORDER,
   candidatePriority,
 } from '../lib/exploreCandidateActions'
+
+/**
+ * What a stay is offered as. Coarse on purpose: this is an intention, not a
+ * booking, and a minute-precise control would invite precision the estimate
+ * cannot carry. Hours cover a visit; nights cover a basecamp.
+ */
+const STAY_HOUR_CHOICES = [1, 2, 4, 6, 8]
+const STAY_NIGHT_CHOICES = [1, 2, 3, 4, 7]
 
 interface ExploreCandidateCardProps {
   stop: CorridorStopWithId
@@ -24,6 +37,15 @@ interface ExploreCandidateCardProps {
   /** Back to an ordinary candidate — see the Unlock button below. */
   onUnlock: () => void
   onReject: () => void
+  /**
+   * How long the traveler intends to stay, set on the card itself.
+   *
+   * Offered only for a stop that is actually kept — an hours-or-nights
+   * decision about a place you have not decided to visit is noise, and the
+   * board's budget only counts kept stops anyway. Absent means "not on the
+   * route yet", and no control is drawn.
+   */
+  onSetStay?: (stay: CorridorStop['stayDuration']) => void
   /**
    * Offered only where a route already exists to add the stop TO — the plan
    * map. Absent in explore mode, where there is no itinerary yet and locking
@@ -52,7 +74,8 @@ const TIME_NEEDED_LABEL: Record<SightTimeNeeded, string> = {
 
 const TIER_STYLE: Record<CorridorStopPriority, string> = {
   'must-see': 'bg-orange-600 text-white',
-  'worth-a-detour': 'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-50',
+  'worth-a-detour':
+    'bg-amber-200 text-amber-900 dark:bg-amber-700 dark:text-amber-50',
   'nice-if-convenient':
     'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-100',
 }
@@ -87,6 +110,7 @@ export function ExploreCandidateCard({
   onLock,
   onUnlock,
   onReject,
+  onSetStay,
   onAddToRoute,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
@@ -126,30 +150,30 @@ export function ExploreCandidateCard({
       }`}
     >
       {/* Google's own photo of the verified listing (2026-08-17, requested:
-        * "Let's get a picture similar to activities to the overview plan as
-        * well"). Full-bleed at the top of the card, the way PlaceCard draws
-        * one for every activity and restaurant in the day-by-day plan — this
-        * is the screen where the traveler decides whether a place is worth
-        * driving hours for, and it was the one place with nothing to look at.
-        *
-        * No placeholder when there is none. PlaceCard shows a camera glyph
-        * because its cards sit in a grid where a missing image would break
-        * the row; here it would just be a grey band on every stop Places had
-        * no photo for.
-        *
-        * Loaded eagerly, decided rather than defaulted (2026-08-18: "So just
-        * implement full photo loading"). The bytes are a separate Place
-        * Photo request the browser makes per image, on the project's own
-        * key, so lazy loading was the cautious default while the cost was
-        * unknown — but it also means a scrolling traveler watches pictures
-        * arrive a beat after the card, which is the moment they are
-        * comparing places. Whole list up front, with `decoding="async"` so
-        * fetching them never blocks the list itself from painting.
-        *
-        * The URL carries the key in its query string — see the note on
-        * "Photos & details" below. That key needs its HTTP-referrer
-        * restriction set, which is equally true of the day-by-day plan and
-        * has been since PlaceCard existed. */}
+       * "Let's get a picture similar to activities to the overview plan as
+       * well"). Full-bleed at the top of the card, the way PlaceCard draws
+       * one for every activity and restaurant in the day-by-day plan — this
+       * is the screen where the traveler decides whether a place is worth
+       * driving hours for, and it was the one place with nothing to look at.
+       *
+       * No placeholder when there is none. PlaceCard shows a camera glyph
+       * because its cards sit in a grid where a missing image would break
+       * the row; here it would just be a grey band on every stop Places had
+       * no photo for.
+       *
+       * Loaded eagerly, decided rather than defaulted (2026-08-18: "So just
+       * implement full photo loading"). The bytes are a separate Place
+       * Photo request the browser makes per image, on the project's own
+       * key, so lazy loading was the cautious default while the cost was
+       * unknown — but it also means a scrolling traveler watches pictures
+       * arrive a beat after the card, which is the moment they are
+       * comparing places. Whole list up front, with `decoding="async"` so
+       * fetching them never blocks the list itself from painting.
+       *
+       * The URL carries the key in its query string — see the note on
+       * "Photos & details" below. That key needs its HTTP-referrer
+       * restriction set, which is equally true of the day-by-day plan and
+       * has been since PlaceCard existed. */}
       {stop.photoUrl && (
         <img
           src={stop.photoUrl}
@@ -192,17 +216,19 @@ export function ExploreCandidateCard({
             )
           )}
           {stop.status === 'locked' && (
-            <span className="chip chip-accent px-2 py-0.5 text-xs">Locked in</span>
+            <span className="chip chip-accent px-2 py-0.5 text-xs">
+              Locked in
+            </span>
           )}
         </div>
         {/* What this stop actually is, now that a candidate is a sight
-          * rather than a town: where you'd sleep to see it, which of your
-          * own interests it answers, and how much of a day it takes. The
-          * interest in particular is the whole promise of the curation
-          * phase — showing it turns "trust us, this suits you" into
-          * something the traveler can check at a glance. All three are
-          * absent on a stop curated before sights led the route, and on a
-          * pin the traveler dropped themselves, so each stands alone. */}
+         * rather than a town: where you'd sleep to see it, which of your
+         * own interests it answers, and how much of a day it takes. The
+         * interest in particular is the whole promise of the curation
+         * phase — showing it turns "trust us, this suits you" into
+         * something the traveler can check at a glance. All three are
+         * absent on a stop curated before sights led the route, and on a
+         * pin the traveler dropped themselves, so each stands alone. */}
         {(showBaseTown || stop.interest || stop.timeNeeded) && (
           <div
             data-testid={`explore-candidate-facts-${stop.id}`}
@@ -238,10 +264,10 @@ export function ExploreCandidateCard({
           </p>
         )}
         {/* How much the traveler cares, set directly rather than nudged a
-          * step at a time. It sorts nothing and moves nothing — the list is
-          * in route order and only "Lock in" bends the route — it is what
-          * the eventual full generation is told to weigh when deciding what
-          * fits. Claude's own pick is what's selected until it's changed. */}
+         * step at a time. It sorts nothing and moves nothing — the list is
+         * in route order and only "Lock in" bends the route — it is what
+         * the eventual full generation is told to weigh when deciding what
+         * fits. Claude's own pick is what's selected until it's changed. */}
         <div
           role="radiogroup"
           aria-label="How interested are you in this stop?"
@@ -275,15 +301,65 @@ export function ExploreCandidateCard({
           })}
         </div>
 
+        {/* How long we intend to stay (2026-08-23).
+         *
+         * Requested with the trip budget it feeds: "I want to be able to
+         * state how long we intend to stay at that activity/stop." Hours for
+         * a visit, nights for a basecamp — the two cost the trip differently
+         * and a single number cannot express both (see stayDuration).
+         *
+         * Pre-filled from the curation estimate rather than blank, so the
+         * budget is honest before anyone touches this and the control shows
+         * what is already being assumed. */}
+        {onSetStay && (
+          <div
+            data-testid={`explore-candidate-stay-${stop.id}`}
+            className="flex flex-wrap items-center gap-1.5 pt-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              Staying
+            </span>
+            <select
+              data-testid={`explore-candidate-stay-hours-${stop.id}`}
+              className="rounded-full border border-neutral-300 bg-transparent px-2 py-0.5 text-xs dark:border-neutral-700"
+              value={
+                stop.stayDuration?.kind === 'nights'
+                  ? `nights:${stop.stayDuration.nights}`
+                  : `hours:${stayCostOf(stop).hours}`
+              }
+              onChange={(event) => {
+                const [kind, amount] = event.target.value.split(':')
+                onSetStay(
+                  kind === 'nights'
+                    ? { kind: 'nights', nights: Number(amount) }
+                    : { kind: 'hours', hours: Number(amount) },
+                )
+              }}
+            >
+              {STAY_HOUR_CHOICES.map((hours) => (
+                <option key={`hours:${hours}`} value={`hours:${hours}`}>
+                  {hours} {hours === 1 ? 'hour' : 'hours'}
+                </option>
+              ))}
+              {STAY_NIGHT_CHOICES.map((nights) => (
+                <option key={`nights:${nights}`} value={`nights:${nights}`}>
+                  {nights} {nights === 1 ? 'night' : 'nights'}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           {/* Reviews, opening hours and the REST of the photos. The card
-            * now shows one image (above), which was asked for and is worth
-            * the per-load cost; this link is still what reaches everything
-            * a thumbnail cannot — every photo, the reviews, the hours —
-            * without this app mirroring any of it. Which link is best
-            * depends on what the stop carries — see placeDetailsUrl; it
-            * used to be the coordinate unconditionally, which reached none
-            * of the photos or details this link promises. */}
+           * now shows one image (above), which was asked for and is worth
+           * the per-load cost; this link is still what reaches everything
+           * a thumbnail cannot — every photo, the reviews, the hours —
+           * without this app mirroring any of it. Which link is best
+           * depends on what the stop carries — see placeDetailsUrl; it
+           * used to be the coordinate unconditionally, which reached none
+           * of the photos or details this link promises. */}
           <a
             href={placeDetailsUrl(stop)}
             target="_blank"
@@ -295,12 +371,12 @@ export function ExploreCandidateCard({
             Photos &amp; details
           </a>
           {/* Both of the uncommitted statuses. A find from "Rescan this
-            * area" is written `proposed` when a plan already exists and
-            * `candidate` when it does not (see rescanCorridorCallable), and
-            * gating on `candidate` alone left every stop curated in explore
-            * mode with no action but "Not interested" the moment the plan
-            * was generated — reported as "the previously researched thing
-            * just look boring and can only be removed". */}
+           * area" is written `proposed` when a plan already exists and
+           * `candidate` when it does not (see rescanCorridorCallable), and
+           * gating on `candidate` alone left every stop curated in explore
+           * mode with no action but "Not interested" the moment the plan
+           * was generated — reported as "the previously researched thing
+           * just look boring and can only be removed". */}
           {(stop.status === 'candidate' || stop.status === 'proposed') && (
             <button
               type="button"
@@ -328,9 +404,9 @@ export function ExploreCandidateCard({
             </button>
           )}
           {/* The step that turns curation into an actual change to the
-            * itinerary. It used to be the sentence 'Use "Edit route" to add
-            * this stop to your itinerary.' — an instruction where the one
-            * action that matters should have been. */}
+           * itinerary. It used to be the sentence 'Use "Edit route" to add
+           * this stop to your itinerary.' — an instruction where the one
+           * action that matters should have been. */}
           {onAddToRoute && stop.status === 'locked' && (
             <button
               type="button"
@@ -345,8 +421,8 @@ export function ExploreCandidateCard({
             </button>
           )}
           {/* Offered whether or not the stop is locked. Undoing a commitment
-            * and ruling a place out are different intentions, and collapsing
-            * them into one button is what made locking a one-way door. */}
+           * and ruling a place out are different intentions, and collapsing
+           * them into one button is what made locking a one-way door. */}
           <button
             type="button"
             data-testid={`explore-candidate-reject-${stop.id}`}
