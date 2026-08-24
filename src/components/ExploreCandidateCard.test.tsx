@@ -123,6 +123,49 @@ describe('marking a stop done from its card', () => {
     expect(screen.queryByTestId('explore-candidate-done-form-s1')).toBeNull()
   })
 
+  /**
+   * Reported 2026-08-24: "Need a way to undo marked done as well!" — Undo
+   * had shipped, on this card, and was invisible: the link carried no text
+   * colour, so it inherited black onto a dark card (see the color-scheme fix
+   * in index.css). Asserted here as a rendered control so it cannot quietly
+   * stop being offered.
+   */
+  it('mutes a done card so it reads as behind you', () => {
+    const { container } = renderCard({
+      stop: { ...stop, doneAt: '2026-08-19T12:45:00.000Z' },
+      onUndoDone: vi.fn(),
+    })
+    // The board has claimed since 2026-08-23 that a done card "stays in the
+    // list, muted", and nothing muted it.
+    expect(container.querySelector('.opacity-60')).toBeTruthy()
+  })
+
+  it('calls back when Undo is pressed', () => {
+    const onUndoDone = vi.fn()
+    renderCard({
+      stop: { ...stop, doneAt: '2026-08-19T12:45:00.000Z' },
+      onUndoDone,
+    })
+    fireEvent.click(screen.getByTestId('explore-candidate-undo-done-s1'))
+    expect(onUndoDone).toHaveBeenCalled()
+  })
+
+  /**
+   * "It seems I'm not even able to get to the day view without clicking in
+   * the day list above the map?" — true until this, and a poor answer when
+   * the thing you are looking at is the stop rather than the date.
+   */
+  it('offers a way into the day only when the stop has one', () => {
+    const onOpenDay = vi.fn()
+    const { unmount } = renderCard({ onOpenDay })
+    fireEvent.click(screen.getByTestId('explore-candidate-open-day-s1'))
+    expect(onOpenDay).toHaveBeenCalled()
+    unmount()
+
+    renderCard({})
+    expect(screen.queryByTestId('explore-candidate-open-day-s1')).toBeNull()
+  })
+
   // The done card offers undo instead, and must not offer the form again.
   it('offers undo rather than the form once it is done', () => {
     renderCard({

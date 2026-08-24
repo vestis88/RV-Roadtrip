@@ -86,6 +86,14 @@ interface ExploreCandidateCardProps {
    */
   onMarkDone?: (when: Date, note: string) => void
   onUndoDone?: () => void
+  /**
+   * Open the day this stop sits on (2026-08-24). Asked because the day strip
+   * above the map was the ONLY way in: "it seems I'm not even able to get to
+   * the day view without clicking in the day list above the map?" — which
+   * was true, and is a poor answer when the thing you are looking at is the
+   * stop rather than the date. Absent when the stop has no day yet.
+   */
+  onOpenDay?: () => void
   onFindOvernight?: () => void
   /** Set while that search is running, so the button can say so. */
   findingOvernight?: boolean
@@ -160,6 +168,7 @@ export function ExploreCandidateCard({
   onMoveDown,
   onMarkDone,
   onUndoDone,
+  onOpenDay,
   onFindOvernight,
   findingOvernight,
   overnightOptions,
@@ -200,7 +209,13 @@ export function ExploreCandidateCard({
       // "this one is in my route". `onRoute` is the kept (`locked`) set,
       // the same one the route line is drawn through, so the card, the pin
       // and the drawn route always agree about which stops are in.
+      // A done stop is drawn back rather than removed. ExploreMapScreen has
+      // claimed since 2026-08-23 that the card "stays in the list, muted" —
+      // it stayed, and nothing muted it, so a finished stop was
+      // indistinguishable from one still ahead of you.
       className={`card cursor-pointer p-3 text-sm transition ${
+        stop.doneAt ? 'opacity-60' : ''
+      } ${
         highlighted
           ? 'border-orange-600 ring-2 ring-orange-500'
           : onRoute
@@ -595,6 +610,19 @@ export function ExploreCandidateCard({
           >
             Photos &amp; details
           </a>
+          {onOpenDay && (
+            <button
+              type="button"
+              data-testid={`explore-candidate-open-day-${stop.id}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenDay()
+              }}
+              className="link text-xs"
+            >
+              Open its day
+            </button>
+          )}
           {/* Both of the uncommitted statuses. A find from "Rescan this
            * area" is written `proposed` when a plan already exists and
            * `candidate` when it does not (see rescanCorridorCallable), and

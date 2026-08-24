@@ -65,6 +65,20 @@ export function planSkeleton(input: {
     'startDate' | 'endDate' | 'maxDriveHoursPerDay' | 'startPoint' | 'endPoint'
   >
   planMeta: Pick<PlanMeta, 'status'>
+  /**
+   * Rebuild even over days that carry researched detail.
+   *
+   * Never set by the automatic effect — only by the traveler pressing
+   * "Rebuild day list", which says in as many words what it discards.
+   *
+   * Requested 2026-08-24: "My intention was to not have to interact in the
+   * same way with the day view." The `has-detail` guard below is correct for
+   * an effect that fires on its own, and it also meant that once a trip had
+   * been generated AND a day opened, NOTHING recomputed the day list from
+   * the board again — so the strip sat frozen, describing stops that had
+   * since been removed. The guard stays; this is the door beside it.
+   */
+  rebuildOverDetail?: boolean
 }): SkeletonDecision {
   const { stops, legs, existingDays, settings, planMeta } = input
 
@@ -78,7 +92,9 @@ export function planSkeleton(input: {
   // Detail is expensive and was chosen by someone. A trip that has any
   // belongs to runReconcileCorridor, which knows how to move days without
   // discarding what is on them.
-  if (existingDays.some(hasDetail)) return { skipped: 'has-detail' }
+  if (!input.rebuildOverDetail && existingDays.some(hasDetail)) {
+    return { skipped: 'has-detail' }
+  }
 
   // A stop with no country cannot become an overnight — the schema requires
   // a two-letter code — and writing a malformed day would surface a long way
@@ -97,7 +113,9 @@ export function planSkeleton(input: {
   const days = packed.map((day, index) =>
     toTripDay(day, index, settings, usable),
   )
-  if (sameAs(existingDays, days)) return { skipped: 'unchanged' }
+  if (!input.rebuildOverDetail && sameAs(existingDays, days)) {
+    return { skipped: 'unchanged' }
+  }
   return { days }
 }
 

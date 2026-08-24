@@ -6,6 +6,12 @@ import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { ReorderCorridorPanel } from './ReorderCorridorPanel'
+import { applyDayCleanup, planDayCleanup, staleDays } from '../lib/dayCleanup'
+import {
+  planSkeleton,
+  writeSkeletonDays,
+  type SkeletonDecision,
+} from '../lib/skeletonDays'
 
 /**
  * Everything the day-by-day plan adds to the map, as a strip ON the board
@@ -37,6 +43,8 @@ export function PlanStrip({
   trip,
   days,
   corridorStops,
+  routeStops,
+  routeLegs,
   reorderOpen,
   onReorderOpenChange,
 }: {
@@ -44,6 +52,14 @@ export function PlanStrip({
   trip: Trip
   days: TripDayWithId[]
   corridorStops: CorridorStopWithId[]
+  /**
+   * The kept stops in driving order, and the real Google legs between them —
+   * exactly what the board already hands the automatic skeleton writer. Passed
+   * down so "Rebuild day list" derives the same itinerary that writer would,
+   * rather than a second, subtly different one.
+   */
+  routeStops: CorridorStopWithId[]
+  routeLegs: { durationMin: number; distanceKm: number }[]
   /**
    * Held by the board rather than here, for one reason: a locked stop with
    * no day yet gets an "Add to route" button on its own card (2026-08-19,
@@ -118,6 +134,88 @@ export function PlanStrip({
     rememberDismissedPacing(tripId, pacingWarningKey)
   }
 
+  /**
+   * Days whose stop has already left the route.
+   *
+   * Removal cleans up after itself now (see removeStopFromRoute), so this
+   * only ever has anything in it for a trip that was edited BEFORE that
+   * landed — reported 2026-08-24: "I've removed stops previously locked in
+   * … but the items are still in the day list."
+   *
+   * Offered as a button rather than done on sight. These are real day
+   * documents that may carry researched activities and restaurants, and a
+   * screen that silently deleted them on load would be indistinguishable
+   * from a bug — which is exactly what this is here to repair.
+   */
+  const stale = staleDays(corridorStops, days)
+  const [tidying, setTidying] = useState(false)
+  const [tidyError, setTidyError] = useState<string | null>(null)
+
+  async function tidyStaleDays() {
+    setTidyError(null)
+    setTidying(true)
+    try {
+      await applyDayCleanup(
+        tripId,
+        planDayCleanup({
+          removeDayIds: stale.map((day) => day.id),
+          days,
+          stops: corridorStops,
+          startDate: trip.settings.startDate,
+        }),
+        corridorStops,
+      )
+    } catch (error) {
+      console.error('Tidying stale days failed', error)
+      setTidyError('Could not tidy those days — please try again.')
+    } finally {
+      setTidying(false)
+    }
+  }
+
+  /**
+   * Rebuilding the day list from the board.
+   *
+   * Requested 2026-08-24: "My intention was to not have to interact in the
+   * same way with the day view." Everything else on this strip edits the
+   * days; this one throws them away and re-derives them from the stops,
+   * which is the only honest answer when the two have diverged.
+   *
+   * Behind a confirm, because it discards researched activities and
+   * restaurants. Those cost real calls, and the days come back as `pending`
+   * — DayDetailGate refills a day when it is opened, so nothing is lost
+   * permanently, but it is not free either.
+   */
+  const [rebuildOpen, setRebuildOpen] = useState(false)
+  const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildError, setRebuildError] = useState<string | null>(null)
+
+  async function rebuildDays() {
+    setRebuildError(null)
+    setRebuilding(true)
+    try {
+      const decision = planSkeleton({
+        stops: routeStops,
+        legs: routeLegs,
+        existingDays: days,
+        settings: trip.settings,
+        planMeta: trip.planMeta,
+        rebuildOverDetail: true,
+      })
+      if (!decision.days) {
+        setRebuildError(describeSkeletonSkip(decision.skipped))
+        return
+      }
+      await writeSkeletonDays(tripId, decision.days)
+      setRebuildOpen(false)
+    } catch (error) {
+      console.error('Rebuilding the day list failed', error)
+      setRebuildError('Could not rebuild the days — please try again.')
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
       const next = new Set(prev)
@@ -185,6 +283,17 @@ export function PlanStrip({
         >
           {planBusy ? 'Updating…' : 'Request changes'}
         </button>
+        {days.length > 0 && routeStops.length > 0 && (
+          <button
+            type="button"
+            data-testid="rebuild-days-button"
+            className="btn btn-ghost disabled:opacity-40"
+            disabled={planBusy}
+            onClick={() => setRebuildOpen(true)}
+          >
+            Rebuild day list
+          </button>
+        )}
         {(committedCorridorStops.length > 1 ||
           addableCorridorStops.length > 0) && (
           <button
@@ -224,6 +333,33 @@ export function PlanStrip({
         ))}
       </div>
 
+      {stale.length > 0 && (
+        <div
+          data-testid="stale-days-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          <p>
+            {stale.length} day{stale.length === 1 ? '' : 's'} in the list still
+            belong{stale.length === 1 ? 's' : ''} to {stale.length === 1 ? 'a stop' : 'stops'} you
+            removed from the route.
+          </p>
+          <button
+            type="button"
+            data-testid="tidy-stale-days"
+            className="btn btn-sm btn-outline mt-1.5"
+            disabled={tidying}
+            onClick={() => void tidyStaleDays()}
+          >
+            {tidying ? 'Tidying…' : `Remove ${stale.length === 1 ? 'it' : 'them'}`}
+          </button>
+          {tidyError && (
+            <p data-testid="tidy-stale-days-error" className="mt-1 text-red-700 dark:text-red-300">
+              {tidyError}
+            </p>
+          )}
+        </div>
+      )}
+
       {showPacingWarnings && (
         <div
           data-testid="pacing-warning-banner"
@@ -252,6 +388,51 @@ export function PlanStrip({
           onSubmitted={markPlanSubmitted}
           onClose={() => onReorderOpenChange(false)}
         />
+      )}
+
+      {rebuildOpen && (
+        <div
+          data-testid="rebuild-days-panel"
+          className="border-b border-neutral-200 bg-white p-4 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+        >
+          <p>
+            This replaces the day list with one built from your {routeStops.length}{' '}
+            kept stop{routeStops.length === 1 ? '' : 's'}, in their current
+            order.
+          </p>
+          <p className="mt-1 text-neutral-600 dark:text-neutral-300">
+            Researched activities and restaurants on the existing days are
+            discarded. Each new day fills itself in again when you open it.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="rebuild-days-confirm"
+              className="btn btn-primary disabled:opacity-40"
+              disabled={rebuilding}
+              onClick={() => void rebuildDays()}
+            >
+              {rebuilding ? 'Rebuilding…' : 'Rebuild the days'}
+            </button>
+            <button
+              type="button"
+              data-testid="rebuild-days-cancel"
+              className="btn btn-outline"
+              disabled={rebuilding}
+              onClick={() => setRebuildOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+          {rebuildError && (
+            <p
+              data-testid="rebuild-days-error"
+              className="mt-2 text-sm text-red-600 dark:text-red-400"
+            >
+              {rebuildError}
+            </p>
+          )}
+        </div>
       )}
 
       {changeRequestOpen && (
@@ -321,6 +502,29 @@ export function PlanStrip({
  * null in Safari's private mode — and a banner that cannot be dismissed is a
  * far smaller failure than a board that will not render.
  */
+/**
+ * Why a rebuild produced nothing, in words rather than a slug.
+ *
+ * `has-detail` and `unchanged` are deliberately absent: an explicit rebuild
+ * overrides both, so seeing either here would mean the option failed to
+ * reach planSkeleton — worth saying plainly rather than mapping to a
+ * reassuring sentence.
+ */
+function describeSkeletonSkip(skipped: SkeletonDecision['skipped']): string {
+  switch (skipped) {
+    case 'no-dates':
+      return 'Set the trip’s start and end dates first.'
+    case 'no-stops':
+      return 'None of your kept stops has a country yet, so no days can be built from them.'
+    case 'plan-busy':
+      return 'A plan is already being generated — try again when it finishes.'
+    case 'too-many-days':
+      return 'That many stops would need more days than a trip can hold.'
+    default:
+      return 'Could not rebuild the days from the current stops.'
+  }
+}
+
 function readDismissedPacing(tripId: string): string | null {
   try {
     return sessionStorage.getItem(pacingDismissalKey(tripId))

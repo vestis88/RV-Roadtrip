@@ -2502,6 +2502,74 @@ Verification: lint 0, build 0, frontend **308**, e2e **138** (clean —
 `corridor.spec.ts:576`, which failed on ordering in the first run of the
 day, passed in the final full run).
 
+### 2026-08-24 (later) — the day list stops being a frozen artifact
+
+Six reports in one message, and four of them turned out to be the same
+structural gap.
+
+**Why the day strip never updated.** Two mechanisms write days, and between
+them they left a hole:
+
+- `runReconcileCorridor` rewrites days, but only from an explicit "Edit
+  route" submit.
+- `planSkeleton` rewrites days from the board automatically, but refuses any
+  trip where a day carries detail — correct, since that detail was paid for.
+
+So for a trip that has been generated AND had any day opened, **nothing**
+recomputed the day list from the board again. The strip sat frozen,
+describing whatever the last generation said. *"The list of day plans on top
+does not seem to update dynamically… My intention was to not have to interact
+in the same way with the day view."*
+
+The guard stays; there is now a door beside it. `planSkeleton` takes
+`rebuildOverDetail`, set only by a traveler pressing **"Rebuild day list"**,
+which states plainly that researched activities and restaurants are discarded
+and that each new day refills itself when opened. The automatic path cannot
+set it.
+
+**Removing a stop now takes its days with it.** `rejectCorridorStop` and
+unlock wrote `status` and nothing else, leaving both the day and the stop's
+`linkedDayIds` standing. That is cosmetic right up until you try to use
+"Edit route", which hard-throws when the committed stops' linked days do not
+cover every day in the trip — so a removal from the board could quietly make
+the reorder panel unusable. `removeStopFromRoute` is the one entry point for
+both buttons now: status first (a leftover day is recoverable; days deleted
+for a stop still claiming to be in the route is not), then the day, its
+subcollections, the renumbering, and the stale link.
+
+**And the trips already in that state get repaired.** `staleDays` finds days
+whose every owner has left the route, and the board offers to remove them.
+The direction of that check is load-bearing and is the one thing in this
+change that could have been catastrophic: it is NOT "days nothing links to".
+Skeleton days are claimed by nobody at all, so that rule would have deleted
+the itinerary of every trip that never ran a full generation. There is a test
+named after it.
+
+**The other three.** *"Need a way to undo marked done as well!"* — Undo had
+shipped, on the card, and was invisible: the link carried no text colour and
+inherited black onto a dark card, which is the `color-scheme` bug fixed
+earlier the same day. A done card is also drawn back now, at 60% — the board
+had claimed since 2026-08-23 that it "stays in the list, muted", and nothing
+muted it. *"Want to be able to edit diary entries"* — entries were write-once;
+`date` and `note` are now editable and an entry can be deleted, while
+`refPath`, `refType` and `createdAt` stay fixed, since an entry repointed at
+another place is a new entry and `createdAt` is what makes backdating `date`
+safe. *"I'm not even able to get to the day view without clicking in the day
+list?"* — true; a kept stop's card now offers "Open its day".
+
+**A test of mine raced the product again, in a new way.** The cleanup
+assertion clicked, checked the banner had gone, then read through the admin
+SDK — and failed, with the day still present and the stop's links intact. The
+cause was not the write: the Firestore web SDK applies a batch to its local
+cache before the server acknowledges it, so the banner vanishes the moment
+the delete is queued. The assertion passed on that local state, the admin
+read ran immediately, the test failed, and closing the page killed the commit
+in flight. Polling the server for the actual state fixed it, and the product
+code was right all along. Worth recording next to the `oklch` parser: twice
+in one day the ruler was wrong rather than the thing being measured.
+
+Verification: lint 0, build 0, frontend **330**, e2e **141** — clean.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

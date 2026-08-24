@@ -145,3 +145,66 @@ test('marking a stop done from the board files it in the diary on the day given'
     }),
   ).toBeVisible()
 })
+
+/** Requested 2026-08-24: "want to be able to edit diary entries as well." */
+test('a diary entry can be corrected and deleted', async ({ page }) => {
+  const { getFirestore } = await import('firebase-admin/firestore')
+  const { getApps, initializeApp } = await import('firebase-admin/app')
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+  if (getApps().length === 0)
+    initializeApp({ projectId: 'demo-rv-trip-planner' })
+  const adminDb = getFirestore()
+
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () =>
+    localStorage.getItem('tripId'),
+  )
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const stop = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('corridorStops')
+    .add({
+      name: 'Partnach Gorge',
+      lat: 47.47,
+      lng: 11.12,
+      country: 'DE',
+      status: 'locked',
+      linkedDayIds: [],
+      priority: 'must-see',
+      rank: 0,
+    })
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('log')
+    .add({
+      date: '2026-07-11',
+      refType: 'stop',
+      refPath: `trips/${tripId}/corridorStops/${stop.id}`,
+      note: 'Typo hear.',
+      createdAt: '2026-07-11T18:00:00.000Z',
+    })
+
+  await page.getByTestId('nav-diary').click()
+  await page.getByTestId('diary-entry').waitFor()
+
+  await page.getByTestId('diary-entry-edit').click()
+  await page.getByTestId('diary-entry-note-input').fill('Typo here, fixed.')
+  await page.getByTestId('diary-entry-date-input').fill('2026-07-12')
+  await page.getByTestId('diary-entry-save').click()
+
+  await expect(page.getByTestId('diary-entry-note')).toHaveText(
+    'Typo here, fixed.',
+  )
+  await expect(page.getByTestId('diary-entry')).toContainText('2026-07-12')
+
+  // Two taps to delete: this is the only destructive action on the screen.
+  await page.getByTestId('diary-entry-edit').click()
+  await page.getByTestId('diary-entry-delete').click()
+  await page.getByTestId('diary-entry-delete-confirm').click()
+  await expect(page.getByTestId('diary-entry')).toHaveCount(0)
+  await expect(page.getByTestId('diary-empty')).toBeVisible()
+})

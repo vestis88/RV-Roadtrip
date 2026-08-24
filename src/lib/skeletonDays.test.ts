@@ -141,3 +141,95 @@ describe('planSkeleton', () => {
     expect(days![2].date).toBe('2026-07-03')
   })
 })
+
+/**
+ * Reported 2026-08-24: "The list of day plans on top does not seem to update
+ * dynamically… My intention was to not have to interact in the same way with
+ * the day view."
+ *
+ * The automatic writer refuses a trip whose days carry detail, which is
+ * right — that detail was paid for. It also meant nothing recomputed the day
+ * list from the board once a trip had been generated and any day opened, so
+ * the strip sat frozen. `rebuildOverDetail` is the explicit door beside that
+ * guard.
+ */
+describe('rebuilding the day list over researched detail', () => {
+  const base = {
+    stops: [
+      stop({ id: 's1', name: 'Füssen' }),
+      stop({ id: 's2', name: 'Lucerne' }),
+    ],
+    legs: [{ durationMin: 120, distanceKm: 150 }],
+    settings: {
+      startDate: '2026-08-20',
+      endDate: '2026-09-20',
+      maxDriveHoursPerDay: 5,
+      startPoint: { name: 'Munich', lat: 48.14, lng: 11.58 },
+      endPoint: { name: 'Zurich', lat: 47.37, lng: 8.54 },
+    },
+    planMeta: { status: 'ready' as const },
+  }
+  const detailedDays = [
+    {
+      id: 'd1',
+      index: 0,
+      date: '2026-08-20',
+      type: 'drive' as const,
+      overnight: { name: 'Somewhere else', lat: 0, lng: 0, country: 'DE' },
+      summary: '',
+      detailStatus: 'ready' as const,
+    },
+  ]
+
+  it('still refuses by default, so the automatic writer cannot discard detail', () => {
+    const decision = planSkeleton({ ...base, existingDays: detailedDays })
+    expect(decision.skipped).toBe('has-detail')
+    expect(decision.days).toBeUndefined()
+  })
+
+  it('goes ahead when the traveler asks for it explicitly', () => {
+    const decision = planSkeleton({
+      ...base,
+      existingDays: detailedDays,
+      rebuildOverDetail: true,
+    })
+    expect(decision.skipped).toBeUndefined()
+    expect(decision.days?.length).toBeGreaterThan(0)
+    // Rebuilt from the board, so the overnight is a kept stop rather than
+    // whatever the frozen list said.
+    expect(decision.days?.[0].overnight.name).not.toBe('Somewhere else')
+  })
+
+  /**
+   * An explicit rebuild must produce days even when the dates and overnights
+   * happen to match — otherwise pressing the button on a trip whose only
+   * divergence is its DETAIL would silently do nothing.
+   */
+  it('is not short-circuited by the unchanged check', () => {
+    const first = planSkeleton({ ...base, existingDays: [] })
+    const asExisting = (first.days ?? []).map((day, index) => ({
+      ...day,
+      id: `d${index}`,
+      detailStatus: 'ready' as const,
+    }))
+    const again = planSkeleton({
+      ...base,
+      existingDays: asExisting,
+      rebuildOverDetail: true,
+    })
+    expect(again.skipped).toBeUndefined()
+    expect(again.days?.length).toBe(asExisting.length)
+  })
+
+  // The guards that are about the trip being un-plannable still apply — an
+  // explicit request cannot conjure dates.
+  it('still refuses without dates', () => {
+    const decision = planSkeleton({
+      ...base,
+      settings: { ...base.settings, startDate: '', endDate: '' },
+      existingDays: detailedDays,
+      rebuildOverDetail: true,
+    })
+    expect(decision.skipped).toBe('no-dates')
+  })
+})

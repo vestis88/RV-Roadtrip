@@ -25,7 +25,6 @@ import {
   type RouteOrder,
 } from '../lib/routeOrder'
 import {
-  rejectCorridorStop,
   setCorridorStopStatus,
   saveRouteOrder,
 } from '../lib/corridorStopActions'
@@ -71,6 +70,8 @@ import { markStopDone, unmarkStopDone } from '../lib/placeStatus'
 import { describeBudget, tripBudget } from '../lib/tripBudget'
 import { MAX_DIRECTIONS_POINTS_PER_REQUEST } from '../lib/buildOverviewRoute'
 import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
+import { removeStopFromRoute } from '../lib/dayCleanup'
+import { useNavigate } from 'react-router-dom'
 
 interface ExploreMapScreenProps {
   tripId: string
@@ -158,6 +159,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     (legs: RouteLeg[] | null) => setRouteLegs(legs),
     [],
   )
+  const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -600,6 +602,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           trip={trip}
           days={days}
           corridorStops={corridorStops}
+          routeStops={routeStops}
+          routeLegs={routeLegs ?? []}
           reorderOpen={reorderOpen}
           onReorderOpenChange={setReorderOpen}
         />
@@ -1037,7 +1041,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                         // stops bending the route. Nothing else about it changes,
                         // which is the whole difference between this and "Not
                         // interested".
-                        setCorridorStopStatus(tripId, stop.id, 'candidate'),
+                        //
+                        // Its DAY goes with it, though. Writing the status
+                        // alone left the day standing (2026-08-24: "I've
+                        // removed stops previously locked in… but the items
+                        // are still in the day list") — see dayCleanup.
+                        removeStopFromRoute({
+                          tripId,
+                          stop,
+                          stops: corridorStops,
+                          days,
+                          startDate: trip.settings.startDate,
+                          nextStatus: 'candidate',
+                        }),
                         'Could not unlock that stop — please try again.',
                       )
                     }
@@ -1046,7 +1062,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                         // Kept as a tombstone rather than deleted, so the next
                         // "Find more stops" doesn't hand it straight back —
                         // see rejectCorridorStop.
-                        rejectCorridorStop(tripId, stop.id),
+                        removeStopFromRoute({
+                          tripId,
+                          stop,
+                          stops: corridorStops,
+                          days,
+                          startDate: trip.settings.startDate,
+                          nextStatus: 'rejected',
+                        }),
                         'Could not remove that stop — please try again.',
                       )
                       if (selectedId === stop.id) setSelectedId(null)
@@ -1069,6 +1092,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                             )
                         : undefined
                     }
+                    onOpenDay={(() => {
+                      // The first day this stop is on. A stop can span
+                      // several (a basecamp), and the first is the one the
+                      // traveler means by "its day" — the arrival.
+                      const dayId = (stop.linkedDayIds ?? []).find((id) =>
+                        days.some((day) => day.id === id),
+                      )
+                      return dayId
+                        ? () => navigate(`/map/day/${dayId}`)
+                        : undefined
+                    })()}
                     onFindOvernight={
                       routeStopIds.has(stop.id)
                         ? () => findSleep(stop.id)
