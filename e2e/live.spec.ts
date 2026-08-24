@@ -8,30 +8,50 @@ if (getApps().length === 0) initializeApp({ projectId: 'demo-rv-trip-planner' })
 const adminDb = getFirestore()
 
 /**
- * Phase 8 of the board rework, 2026-08-23: "I would like to have a live
- * function, which is basically find things around us now."
+ * "What's near us" moved onto the map on 2026-08-24: "The find nearby
+ * doesn't need to be triggered from a separate tab. Use the map view, so
+ * it's easy to see the location of the results."
  *
- * Geolocation is stubbed, which is the one thing that makes this assertable
- * at all — unlike map pins, which need a live Google map and a key CI does
- * not have.
+ * Geolocation is stubbed, which is what makes the anchor assertable at all
+ * — unlike the find pins themselves, which need a live Google map and a key
+ * CI does not have.
  */
-test('live mode needs a position before it will search', async ({
+async function openSearchPanel(page: import('@playwright/test').Page) {
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+  await page.getByTestId('open-map-search').click()
+  await page.getByTestId('map-search-panel').waitFor()
+}
+
+test('the nearby search lives on the map, not on its own tab', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+
+  // The tab is gone; the search is where the map is.
+  await expect(page.getByTestId('nav-live')).toHaveCount(0)
+  await openSearchPanel(page)
+  await expect(page.getByTestId('live-preset-lunch')).toBeVisible()
+})
+
+test('searching around us needs a position; searching the map does not', async ({
   page,
   context,
 }) => {
   await context.clearPermissions()
   await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
+  await openSearchPanel(page)
 
-  await page.getByTestId('nav-live').click()
-  await page.getByTestId('live-screen').waitFor()
-
-  // Every preset is offered but none can run: "here" is not known yet.
-  await expect(page.getByTestId('live-preset-lunch')).toBeDisabled()
-  await expect(page.getByTestId('live-search-button')).toBeDisabled()
+  // No fix yet, so there is no "here" to search around — and a silently
+  // wrong anchor is worse than a disabled control.
+  await expect(page.getByTestId('search-anchor-position')).toBeDisabled()
+  // The map centre is always known, so the presets still work.
+  await expect(page.getByTestId('live-preset-lunch')).toBeEnabled()
 })
 
-test('live mode offers the meal presets and free text once it knows where we are', async ({
+test('the anchor can be switched to our own position', async ({
   page,
   context,
 }) => {
@@ -39,22 +59,59 @@ test('live mode offers the meal presets and free text once it knows where we are
   await context.setGeolocation({ latitude: 61.77, longitude: 9.54 })
   await signIn(page)
   await page.getByTestId('trip-name-input').waitFor()
+  await openSearchPanel(page)
 
-  await page.getByTestId('nav-live').click()
-  await page.getByTestId('live-screen').waitFor()
+  const here = page.getByTestId('search-anchor-position')
+  await expect(here).toBeEnabled({ timeout: 10_000 })
+  await here.click()
+  await expect(here).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('search-anchor-map')).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+})
 
-  // The same vocabulary the day-by-day plan uses, plus a way to say
-  // something it does not cover.
-  for (const preset of ['breakfast', 'lunch', 'dinner', 'activity', 'sleep']) {
-    await expect(page.getByTestId(`live-preset-${preset}`)).toBeEnabled()
-  }
-  await expect(page.getByTestId('live-free-text')).toBeVisible()
+/**
+ * The reported bug: "currently the results are a bit too far away, so it
+ * needs to be given the option to specify radius of search as well." The
+ * viewport stays the default — that behaviour was confirmed right — and this
+ * is an override beside it.
+ */
+test('a radius can be named instead of pinched', async ({ page }) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  await openSearchPanel(page)
 
-  // Nothing has been written to the trip by opening the screen or by having
-  // a position — the whole point of the mode is that it saves nothing until
-  // asked.
-  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  const radius = page.getByTestId('search-radius')
+  await expect(radius).toHaveValue('viewport')
+  await radius.selectOption('5')
+  await expect(radius).toHaveValue('5')
+
+  // The rescan button searches the circle the panel now names.
+  await page.getByTestId('rescan-corridor-button').click()
+  await expect(page.getByTestId('rescan-corridor-button')).toContainText('5 km')
+})
+
+test('a nearby search writes nothing until a find is added', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () =>
+    localStorage.getItem('tripId'),
+  )
   if (!tripId) throw new Error('tripId missing from localStorage')
+
+  await openSearchPanel(page)
+  await page.getByTestId('live-preset-lunch').click()
+
+  // No CLAUDE_API_KEY in this sandbox — the same credential-less
+  // degradation every Claude-touching spec here exercises. What matters is
+  // the invariant either way: nothing reached the corridor.
+  await expect(
+    page.getByTestId('live-error').or(page.getByTestId('live-finds')),
+  ).toBeVisible({ timeout: 20_000 })
+
   const stops = await adminDb
     .collection('trips')
     .doc(tripId)
@@ -62,18 +119,3 @@ test('live mode offers the meal presets and free text once it knows where we are
     .get()
   expect(stops.size).toBe(0)
 })
-
-/**
- * PHASE 7'S POSITION MARKER IS NOT ASSERTED HERE, deliberately.
- *
- * The first version of this file did assert it, with a comment claiming the
- * marker "renders without a live Google map". That was wrong: it is an
- * `<AdvancedMarker>` child, so it hits exactly the constraint already
- * recorded for every other pin — markers only mount inside a live map, which
- * needs `VITE_GOOGLE_MAPS_API_KEY`, a CI secret. The test failed with 0
- * elements and was right to.
- *
- * So the marker is covered where it can be: `useCurrentPosition` is unit
- * tested against a stubbed geolocation API. Same split as MarkerBadge's pin
- * colours (unit) versus the legend (e2e).
- */

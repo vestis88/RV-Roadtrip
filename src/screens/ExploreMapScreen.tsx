@@ -45,14 +45,21 @@ import {
 import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { countryName } from '../lib/countries'
-import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
+import {
+  CORRIDOR_CANDIDATE_ICON,
+  CORRIDOR_DONE_ICON,
+  LIVE_FIND_ICON,
+} from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
-import { RescanCorridorButton } from '../components/RescanCorridorButton'
+import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
+import { addDoc, collection } from 'firebase/firestore'
+import { db } from '../lib/firebase'
+import type { LiveFind } from '../lib/liveSearch'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
-import { RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
+import { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlanStrip } from '../components/PlanStrip'
 import {
@@ -70,6 +77,8 @@ import { MAX_DIRECTIONS_POINTS_PER_REQUEST } from '../lib/buildOverviewRoute'
 import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 import { removeStopFromRoute } from '../lib/dayCleanup'
 import { canEditRoute } from '../lib/routeEditing'
+import { arrivalEstimates } from '../lib/arrivalEstimates'
+import { quantisePosition, routeOriginFor } from '../lib/routeOrigin'
 import { useNavigate } from 'react-router-dom'
 
 interface ExploreMapScreenProps {
@@ -114,10 +123,30 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // First tap on "Rescan this area" aims, second searches — see
   // RescanCorridorButton. Held here because the circle is drawn here.
   const [aimingSearch, setAimingSearch] = useState(false)
-  const searchArea = useMemo(
-    () => (bounds ? visibleRadiusKm(bounds) : { radiusKm: RESCAN_RADIUS_KM }),
-    [bounds],
-  )
+  /**
+   * An explicit radius, beside the viewport rather than instead of it.
+   *
+   * The viewport default was confirmed right ("No. It was right to limit at
+   * 7 km"), so this adds a way to say a number without taking away
+   * pinch-to-size. null means "follow what I can see", which stays the
+   * default.
+   */
+  const [radiusOverrideKm, setRadiusOverrideKm] = useState<number | null>(null)
+  const [searchAnchor, setSearchAnchor] = useState<SearchAnchor>('map')
+  /** Ephemeral finds — see MapSearchPanel on why these are never written. */
+  const [finds, setFinds] = useState<LiveFind[] | null>(null)
+  const [addedFindNames, setAddedFindNames] = useState<Set<string>>(new Set())
+  const searchArea = useMemo(() => {
+    const fromViewport = bounds
+      ? visibleRadiusKm(bounds)
+      : { radiusKm: RESCAN_RADIUS_KM }
+    if (radiusOverrideKm === null) return fromViewport
+    // The cap still applies to a typed number: it is the callable's, not the
+    // viewport's — see MAX_RESCAN_RADIUS_KM.
+    return radiusOverrideKm > MAX_RESCAN_RADIUS_KM
+      ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: radiusOverrideKm }
+      : { radiusKm: radiusOverrideKm }
+  }, [bounds, radiusOverrideKm])
   // "Rescan this area"/"Add stop" both anchor to wherever the traveler is
   // actually looking, not a fixed point — OverviewMapScreen already tracks
   // this the same way; this screen previously didn't, so both actions
@@ -213,6 +242,36 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         trip.settings.endPoint,
       ),
     [candidates, trip.settings.startPoint, trip.settings.endPoint],
+  )
+  /**
+   * The planning list is what is LEFT.
+   *
+   * Requested 2026-08-24: "done things should be removed from the planning
+   * list, only visible as checked symbols on the map." This reverses the
+   * earlier call to keep them in the list, muted — which was made on the
+   * theory that a trip looking emptier the more you had done was the wrong
+   * feedback, and which is simply worse than this once you are on the road
+   * and the list is a to-do rather than a record.
+   *
+   * Two escape hatches, because Undo lives on the card and removing the card
+   * would remove the undo the traveler asked for in the same breath:
+   *
+   *  - a done stop whose PIN is tapped renders anyway (selectedId), which is
+   *    what makes the checked pin a real control rather than decoration;
+   *  - "Show done" brings them all back, so they are not lost to anyone who
+   *    cannot find the pin.
+   */
+  const [showDone, setShowDone] = useState(false)
+  const doneCount = useMemo(
+    () => candidates.filter((stop) => !!stop.doneAt).length,
+    [candidates],
+  )
+  const listedCandidates = useMemo(
+    () =>
+      orderedCandidates.filter(
+        (stop) => !stop.doneAt || showDone || selectedId === stop.id,
+      ),
+    [orderedCandidates, showDone, selectedId],
   )
 
   // What the route is actually built through: everything explicitly kept
@@ -416,6 +475,30 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     })
   }, [tripId, routeStops, routeLegs, days, trip.settings, trip.planMeta])
 
+  /**
+   * Roughly when each kept stop is reached — see arrivalEstimates for why
+   * the count starts from today once the trip is running, and why a
+   * committed day beats the packing.
+   */
+  const arrivals = useMemo(
+    () =>
+      arrivalEstimates({
+        routeStops,
+        legs: routeLegs ?? [],
+        days,
+        startDate: trip.settings.startDate,
+        maxDriveHoursPerDay: trip.settings.maxDriveHoursPerDay,
+        today: new Date().toISOString().slice(0, 10),
+      }),
+    [
+      routeStops,
+      routeLegs,
+      days,
+      trip.settings.startDate,
+      trip.settings.maxDriveHoursPerDay,
+    ],
+  )
+
   const routeStopIds = useMemo(
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
@@ -429,6 +512,46 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       console.error('Saving the route order failed', error),
     )
   }, [tripId, routeStops])
+  /**
+   * Where the route starts from: the van while the trip is running, the
+   * trip's start point otherwise. See routeOrigin for the two gates and the
+   * quantiser — the last of which is what keeps a watched GPS from firing a
+   * Directions request per fix.
+   *
+   * The previous origin is held in a ref rather than state so that keeping
+   * it costs no render: the whole point is that an unmoved van changes
+   * nothing at all.
+   */
+  // The ROUNDED numbers, deliberately, and kept as two scalars rather than
+  // an object: `here` is a fresh object on every GPS fix, so memoising on it
+  // would recompute the origin — and so re-ask Directions — for a few metres
+  // of drift. Two numbers that only change when the van crosses a grid cell
+  // are exactly the dependency this needs.
+  const cell = here ? quantisePosition(here) : null
+  const cellLat = cell?.lat ?? null
+  const cellLng = cell?.lng ?? null
+  const origin = useMemo(
+    () =>
+      routeOriginFor({
+        startPoint: trip.settings.startPoint,
+        position:
+          cellLat !== null && cellLng !== null
+            ? { lat: cellLat, lng: cellLng }
+            : null,
+        startDate: trip.settings.startDate,
+        endDate: trip.settings.endDate,
+        today: new Date().toISOString().slice(0, 10),
+      }),
+    [
+      trip.settings.startPoint,
+      trip.settings.startDate,
+      trip.settings.endDate,
+      cellLat,
+      cellLng,
+    ],
+  )
+  const originPoint = origin.point
+
   // What is ASKED. Built from the guess and nothing else, so its identity
   // changes only when the locked stops themselves do. DirectionsRoute lists
   // its points in an effect dependency array; handing it the answer to its
@@ -436,11 +559,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const askedBackbone = useMemo(
     () =>
       routeBackboneFrom(
-        trip.settings.startPoint,
+        originPoint,
         guessedOrder.map((s) => ({ lat: s.lat, lng: s.lng })),
         trip.settings.endPoint,
       ),
-    [trip.settings.startPoint, trip.settings.endPoint, guessedOrder],
+    [originPoint, trip.settings.endPoint, guessedOrder],
   )
   // What is TRUE, once Google has answered: the real driving order. Drawn by
   // the Directions renderer from its own optimized result, and used for
@@ -449,11 +572,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const backbone = useMemo(
     () =>
       routeBackboneFrom(
-        trip.settings.startPoint,
+        originPoint,
         routeStops.map((s) => ({ lat: s.lat, lng: s.lng })),
         trip.settings.endPoint,
       ),
-    [trip.settings.startPoint, trip.settings.endPoint, routeStops],
+    [originPoint, trip.settings.endPoint, routeStops],
   )
   // The same corridor the backbone describes, in words — so the search
   // prompt can say "along the route through Helsingør, Hillerød…" instead
@@ -577,6 +700,44 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    * nothing at all and said nothing at all, while the card sat there
    * looking untouched.
    */
+  /**
+   * Saving one ephemeral find as an ordinary candidate.
+   *
+   * The board decides what happens to it next, exactly as it would for a
+   * stop the traveler pinned by hand — which is why this writes `candidate`
+   * and `origin: 'traveler'` rather than anything special. Optimistic, and
+   * rolled back on failure: the button has to answer the tap on a phone at a
+   * lay-by, and a find that silently failed to save would be discovered a
+   * week later.
+   */
+  async function addFindToTrip(find: LiveFind) {
+    setAddedFindNames((held) => new Set(held).add(find.name))
+    try {
+      await addDoc(collection(db, 'trips', tripId, 'corridorStops'), {
+        name: find.name,
+        lat: find.lat,
+        lng: find.lng,
+        country: find.country,
+        why: find.why,
+        ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
+        ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
+        status: 'candidate',
+        linkedDayIds: [],
+        priority: 'worth-a-detour',
+        rank: 0,
+        origin: 'traveler',
+      })
+    } catch (error) {
+      console.error('Adding a find failed', error)
+      setAddedFindNames((held) => {
+        const next = new Set(held)
+        next.delete(find.name)
+        return next
+      })
+      setActionError('Could not add that to the trip — please try again.')
+    }
+  }
+
   function runStopAction(action: Promise<void>, failureMessage: string) {
     setActionError(null)
     action.catch((error: unknown) => {
@@ -841,6 +1002,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               {describeBudget(budget, routeStops.length)}
             </span>
           )}
+          {/* Said out loud, because it silently changes every number on
+            * this row. A single bad fix would otherwise rewrite the driving
+            * total, the budget and the arrival dates with nothing on screen
+            * explaining why — and no way to tell it from a routing bug. */}
+          {origin.fromPosition && (
+            <span
+              data-testid="routing-from-position"
+              className="chip chip-accent"
+              title="Distances and dates are measured from where you are, not from the trip's start point"
+            >
+              from where we are
+            </span>
+          )}
           {days.length > 0 && (
             <span data-testid="header-day-count" className="chip chip-accent">
               {days.length} days
@@ -993,6 +1167,22 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 }}
                 title="Finish"
               />
+              {/* Ephemeral finds, drawn so the answer to "what's near us" is
+                * a place on the map rather than a name in a list — the
+                * whole reason this moved off its own tab (2026-08-24: "use
+                * the map view, so it's easy to see the location of the
+                * results"). Dashed and unnumbered, because nothing here is
+                * part of the trip until it is added. */}
+              {(finds ?? []).map((find) => (
+                <AdvancedMarker
+                  key={`find:${find.name}`}
+                  position={{ lat: find.lat, lng: find.lng }}
+                  title={find.name}
+                  data-testid={`live-find-marker-${find.name}`}
+                >
+                  <MarkerBadge icon={LIVE_FIND_ICON} />
+                </AdvancedMarker>
+              ))}
               {candidates.map((stop) => (
                 <AdvancedMarker
                   key={stop.id}
@@ -1002,7 +1192,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   onClick={() => setSelectedId(stop.id)}
                 >
                   <MarkerBadge
-                    icon={CORRIDOR_CANDIDATE_ICON}
+                    icon={
+                      stop.doneAt
+                        ? CORRIDOR_DONE_ICON
+                        : CORRIDOR_CANDIDATE_ICON
+                    }
+                    // Behind you. Once the card has left the list this pin
+                    // is the only trace of a finished stop, and it has to
+                    // look different from one still ahead — see
+                    // CORRIDOR_DONE_ICON.
+                    done={!!stop.doneAt}
                     // Blue = "this one is in my route" — exactly the kept
                     // (`locked`) stops buildRouteBackbone is drawn through
                     // (routeStopIds), so the pin, the card and the route line
@@ -1033,13 +1232,22 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               backbone={backbone}
               waypointNames={waypointNames}
             />
-            <RescanCorridorButton
+            <MapSearchPanel
               tripId={tripId}
-              center={center}
-              area={searchArea}
+              mapCenter={center}
+              position={here}
               planMeta={trip.planMeta}
+              area={searchArea}
+              anchor={searchAnchor}
+              onAnchorChange={setSearchAnchor}
+              radiusOverrideKm={radiusOverrideKm}
+              onRadiusOverrideChange={setRadiusOverrideKm}
               armed={aimingSearch}
               onArmedChange={setAimingSearch}
+              finds={finds}
+              onFinds={setFinds}
+              addedFindNames={addedFindNames}
+              onAddFind={(find) => void addFindToTrip(find)}
             />
           </div>
         </div>
@@ -1060,7 +1268,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             </p>
           ) : (
             <div className="space-y-2">
-              {orderedCandidates.map((stop) => (
+              {listedCandidates.map((stop) => (
                 <div key={stop.id}>
                   {legIntoStop.has(stop.id) && (
                     <p
@@ -1147,6 +1355,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                             )
                         : undefined
                     }
+                    arrival={arrivals.get(stop.id)}
                     onOpenDay={(() => {
                       // The first day this stop is on. A stop can span
                       // several (a basecamp), and the first is the one the
@@ -1202,6 +1411,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   />
                 </div>
               ))}
+              {doneCount > 0 && (
+                <button
+                  type="button"
+                  data-testid="toggle-show-done"
+                  className="btn btn-sm btn-ghost w-full"
+                  onClick={() => setShowDone((shown) => !shown)}
+                >
+                  {showDone
+                    ? 'Hide done'
+                    : `Show done (${doneCount})`}
+                </button>
+              )}
             </div>
           )}
         </div>

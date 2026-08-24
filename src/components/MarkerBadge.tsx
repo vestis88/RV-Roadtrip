@@ -1,4 +1,8 @@
-import { PRIORITY_PIN_CLASS, type MarkerPriority } from '../lib/mapIcons'
+import {
+  DONE_PIN_CLASS,
+  PRIORITY_PIN_CLASS,
+  type MarkerPriority,
+} from '../lib/mapIcons'
 
 interface MarkerBadgeProps {
   icon: string
@@ -12,6 +16,11 @@ interface MarkerBadgeProps {
    * them a neutral ring is the point.
    */
   priority?: MarkerPriority
+  /**
+   * Already visited. Outranks the interest level — how much you once cared
+   * about a place stops being the useful fact once you have been.
+   */
+  done?: boolean
 }
 
 /**
@@ -28,6 +37,7 @@ export function MarkerBadge({
   selected,
   highlighted,
   priority,
+  done,
 }: MarkerBadgeProps) {
   // Ordered deliberately, and the two transient states still win. Tapping a
   // pin has to visibly answer the tap, and "this one is in my route" is a
@@ -39,12 +49,16 @@ export function MarkerBadge({
     ? 'scale-125 border-orange-600 ring-2 ring-orange-400'
     : selected
       ? 'border-sky-600 ring-2 ring-sky-400'
-      : priority
-        ? PRIORITY_PIN_CLASS[priority]
-        : 'border-neutral-300 dark:border-neutral-700'
+      : done
+        ? DONE_PIN_CLASS
+        : priority
+          ? PRIORITY_PIN_CLASS[priority]
+          : 'border-neutral-300 dark:border-neutral-700'
   return (
     <div
-      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-base shadow-md transition-transform dark:bg-neutral-900 ${ring}`}
+      className={`flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-base shadow-md transition-transform dark:bg-neutral-900 ${
+        done && !highlighted ? 'opacity-70' : ''
+      } ${ring}`}
     >
       {icon}
     </div>

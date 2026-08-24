@@ -40,13 +40,21 @@ export const LIVE_PRESETS = [
   { id: 'sleep', label: 'Somewhere to sleep', query: 'a campsite, stellplatz or motorhome parking nearby' },
 ] as const
 
-/** How far around the van to look. Walking-to-short-drive, not planning. */
+/**
+ * The fallback radius, used only when a caller does not say.
+ *
+ * Was the ONLY radius until 2026-08-24, and reported as the reason results
+ * felt distant: "currently the results are a bit too far away, so it needs to
+ * be given the option to specify radius of search as well." 25 km is a
+ * sensible planning distance and a ridiculous one for finding lunch.
+ */
 export const LIVE_RADIUS_KM = 25
 
 export async function searchAroundUs(
   tripId: string,
   center: LatLng,
   query: string,
+  radiusKm: number = LIVE_RADIUS_KM,
 ): Promise<LiveFind[]> {
   const call = httpsCallable<
     { tripId: string; center: LatLng; radiusKm: number; query: string },
@@ -55,7 +63,7 @@ export async function searchAroundUs(
   const { data } = await call({
     tripId,
     center,
-    radiusKm: LIVE_RADIUS_KM,
+    radiusKm,
     query,
   })
   return data.finds

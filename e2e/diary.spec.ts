@@ -128,8 +128,17 @@ test('marking a stop done from the board files it in the diary on the day given'
     .fill('Soaked by the waterfall.')
   await page.getByTestId(`explore-candidate-done-save-${stop.id}`).click()
 
+  // The card leaves the planning list the moment it is done — requested
+  // 2026-08-24, "done things should be removed from the planning list, only
+  // visible as checked symbols on the map". "Show done" is what brings it
+  // back, and is the reason Undo is still reachable.
+  await expect(page.getByTestId(`explore-candidate-${stop.id}`)).toHaveCount(0)
+  await page.getByTestId('toggle-show-done').click()
   await expect(
     page.getByTestId(`explore-candidate-done-at-${stop.id}`),
+  ).toBeVisible()
+  await expect(
+    page.getByTestId(`explore-candidate-undo-done-${stop.id}`),
   ).toBeVisible()
 
   await page.getByTestId('nav-diary').click()

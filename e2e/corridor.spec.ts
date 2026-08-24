@@ -24,6 +24,19 @@ async function setPlaceInput(locator: import('@playwright/test').Locator, value:
   }, value)
 }
 
+/**
+ * The rescan button moved inside the map's search panel on 2026-08-24, when
+ * the two searches were merged onto one surface ("it's very common to rescan
+ * area, so maybe they should be integrated?"). The panel starts collapsed,
+ * so every spec that reaches for the button has to open it first.
+ */
+async function openMapSearch(page: import('@playwright/test').Page) {
+  const panel = page.getByTestId('map-search-panel')
+  if (await panel.isVisible().catch(() => false)) return
+  await page.getByTestId('open-map-search').click()
+  await panel.waitFor()
+}
+
 test('adding a corridor stop writes a locked, unlinked corridorStops doc', async ({
   page,
 }) => {
@@ -251,6 +264,7 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
   await page.getByTestId('day-strip').waitFor()
 
   // Two taps: the first aims the search circle, the second runs it.
+  await openMapSearch(page)
   await page.getByTestId('rescan-corridor-button').click()
   await page.getByTestId('rescan-corridor-button').click()
   await expect(page.getByTestId('rescan-corridor-error')).toBeVisible({
@@ -266,6 +280,7 @@ test('the search area is only shown while aiming a rescan', async ({ page }) => 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('day-strip').waitFor()
 
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-scope')).toHaveCount(0)
   await expect(page.getByTestId('rescan-corridor-button')).toContainText(
     'Rescan this area',
@@ -311,6 +326,7 @@ test('a scan in progress is still reported after switching tabs and back', async
 
   await page.getByTestId('nav-map').click()
   await page.getByTestId('day-strip').waitFor()
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 
   // Away and back — the round trip that used to lose everything.
@@ -346,6 +362,7 @@ test('a scan the server cannot still be running stops blocking the button', asyn
   await page.getByTestId('nav-map').click()
   await page.getByTestId('day-strip').waitFor()
 
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeEnabled()
   await expect(page.getByTestId('rescan-corridor-button')).toContainText(
     'Rescan this area',
@@ -382,6 +399,7 @@ test('losing the connection to a running scan is not reported as a failure', asy
       'planMeta.rescanStatus': 'generating',
       'planMeta.rescanStatusUpdatedAt': new Date().toISOString(),
     })
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 
   // ...while this device's request dies on the network.
@@ -587,6 +605,7 @@ test('a scan that only just started is left alone', async ({ page }) => {
   await page.getByTestId('nav-map').click()
   await page.getByTestId('day-strip').waitFor()
 
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 })
 
@@ -611,6 +630,7 @@ test('the result of a scan is waiting on return, not lost with the tab', async (
   await expect(page.getByTestId('rescan-corridor-status')).toContainText(
     '3 new stops',
   )
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeEnabled()
 })
 
@@ -890,6 +910,7 @@ test('a planned trip still has the whole board, plus what the plan adds', async 
 
   // The board's own controls, on a trip that has a finished plan.
   await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
+  await openMapSearch(page)
   await expect(page.getByTestId('rescan-corridor-button')).toBeVisible()
   await expect(page.getByTestId('explore-candidate-list')).toContainText(
     'Jotunheimen National Park',

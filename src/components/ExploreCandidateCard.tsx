@@ -94,6 +94,14 @@ interface ExploreCandidateCardProps {
    * stop rather than the date. Absent when the stop has no day yet.
    */
   onOpenDay?: () => void
+  /**
+   * Roughly when we get here (2026-08-24: "Locked in activities should get
+   * an estimated date based on what is on our current route"). Absent for a
+   * stop that is not in the route — an arrival date for somewhere you have
+   * not decided to go is noise. `committed` marks a date the day plan
+   * actually holds, as opposed to one the packing worked out.
+   */
+  arrival?: { date: string; committed: boolean }
   onFindOvernight?: () => void
   /** Set while that search is running, so the button can say so. */
   findingOvernight?: boolean
@@ -169,6 +177,7 @@ export function ExploreCandidateCard({
   onMarkDone,
   onUndoDone,
   onOpenDay,
+  arrival,
   onFindOvernight,
   findingOvernight,
   overnightOptions,
@@ -309,6 +318,23 @@ export function ExploreCandidateCard({
           {stop.status === 'locked' && (
             <span className="chip chip-accent px-2 py-0.5 text-xs">
               Locked in
+            </span>
+          )}
+          {arrival && (
+            <span
+              data-testid={`explore-candidate-arrival-${stop.id}`}
+              className="chip chip-neutral px-2 py-0.5 text-xs"
+              title={
+                arrival.committed
+                  ? 'The date this stop has in your day plan'
+                  : 'Estimated from your kept stops, their stay times and the real driving between them'
+              }
+            >
+              {/* "~" only on the estimate. A committed date is the plan's
+                * answer and hedging it would invite a second guess at
+                * something already decided. */}
+              {arrival.committed ? '' : '~'}
+              {arrival.date}
             </span>
           )}
         </div>

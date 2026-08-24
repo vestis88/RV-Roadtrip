@@ -38,8 +38,6 @@ function ExecutionModeGate({ tripId, trip }: { tripId: string; trip: Trip }) {
 const NAV_ITEMS = [
   { to: '/', testId: 'nav-setup', label: 'Trip setup' },
   { to: '/map', testId: 'nav-map', label: 'Map' },
-  // On the road rather than at the table — see LiveScreen.
-  { to: '/live', testId: 'nav-live', label: 'Near us' },
   { to: '/diary', testId: 'nav-diary', label: 'Diary' },
   { to: '/countries', testId: 'nav-countries', label: 'Countries' },
 ] as const

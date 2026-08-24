@@ -2570,6 +2570,87 @@ in one day the ruler was wrong rather than the thing being measured.
 
 Verification: lint 0, build 0, frontend **330**, e2e **141** — clean.
 
+### 2026-08-24 (evening) — the board becomes something you use on the road
+
+A batch of reports, and the theme running through them is that the board was
+built for planning at a table and is now being used from a moving van.
+
+**Search merged onto the map — surface only.** *"The find nearby doesn't need
+to be triggered from a separate tab. Use the map view, so it's easy to see
+the location of the results… it's very common to rescan area, so maybe they
+should be integrated?"*
+
+Merged: one panel, one anchor control (map centre / where we are), one radius,
+and finds drawn as pins instead of listed on another tab. The `/live` tab is
+gone.
+
+**Not** merged: whether a search WRITES. Rescan writing is the point — it is
+how a scan becomes stops you can curate, and the reject tombstone that stops
+the next scan handing back what you turned down only works because results
+are written. "Near us" not writing is equally the point: looking for lunch
+three times a day would fill the corridor with pins nobody chose. One button
+with a "save these?" flag would make a boolean decide whether an action
+mutates the trip, which is the same shape as the mistake `searchNearby` was
+split out to avoid. Two buttons, unchanged semantics, everything around them
+shared.
+
+The radius is an override **beside** the viewport, not instead of it — the
+viewport default was confirmed right ("No. It was right to limit at 7 km").
+The fixed 25 km floor on "near us" was the reported cause of distant results.
+
+**Two regressions the collapsible panel introduced, both caught by the
+suite and both fixed in the product rather than the test.** A scan runs for
+minutes and its result outlives the panel that started it, so collapsing over
+one hid the elapsed counter, the stale-scan recovery and the durable error —
+undoing the whole reason `rescanError` is written to the trip. A running scan
+now keeps its own button on the map, and a finished one keeps its status
+line, whether the panel is open or not.
+
+**Routing from where we are.** Gated on `isTripActiveToday` and on having a
+fix, because planning a German trip from a sofa in Sweden would otherwise
+route it from Sweden and every number on the board comes off that first leg.
+Said out loud on the totals row, because a single bad fix would otherwise
+rewrite the driving total, the budget and the arrival dates with nothing
+explaining why.
+
+The quantiser is the interesting part. `useCurrentPosition` watches rather
+than samples, so it emits a fresh object per fix, and `DirectionsRoute` lists
+its points in an effect dependency — a new origin per fix is a Directions
+request per fix, which is the self-sustaining loop that once made this map
+impossible to pan. The first version remembered the last origin and measured
+against it, which needed a ref written during render; React forbids that and
+lint caught it. Snapping to a ~1 km grid is pure: the same fix always yields
+the same cell, so a `useMemo` on two rounded numbers gives stability with
+nothing remembered anywhere.
+
+**Estimated arrival dates**, from the packing that already exists, counted
+from TODAY once the trip is running — an estimate confidently behind the
+traveler is worse than none — and overridden by a real day's date wherever
+one exists, because two things claiming to say "when" is how the header and
+the itinerary came to disagree before. Writing the test caught a wrong
+assumption of mine: `packStopsIntoDays` does not drop done stops, `tripBudget`
+does that before calling it, so a function promising "what is left" had to do
+its own filtering rather than trust every caller.
+
+**Done stops leave the planning list**, checked and greyed on the map. This
+reverses the earlier call to keep them muted in the list, and the reversal is
+right: on the road the list is a to-do, not a record. Undo lives on the card,
+so removing the card would have removed the undo requested in the same
+breath — a done stop's pin therefore renders its card when tapped, and "Show
+done (N)" brings them all back. Worth noting that nothing had actually marked
+a done stop on the map before this: they drew the same lightbulb as
+everything else, and the dimmed card was the only signal.
+
+**Also**: spaces and Enter reaching a card's own fields; the diary ordered by
+when things happened rather than when they were typed; the diary carrying the
+place's photo for free; and the header down from six stacked rows to three,
+dropping the generation-time km/avg figures that disagreed with the live ones
+beside them.
+
+Verification: lint 0, build 0, frontend **350**, e2e **142**
+(`dayview.spec.ts:140` flaked in the full run and passes in isolation — the
+known ordering flakiness).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

@@ -75,3 +75,33 @@ describe('MarkerBadge — interest level as colour', () => {
     }
   })
 })
+
+/**
+ * Requested 2026-08-24: "done things should be removed from the planning
+ * list, only visible as checked symbols on the map." Once the card leaves
+ * the list this pin is the ONLY trace of a finished stop, so it has to look
+ * unlike one still ahead of you.
+ */
+describe('a stop already visited', () => {
+  it('sits back in grey rather than wearing its interest colour', () => {
+    const { container } = render(
+      <MarkerBadge icon="✅" done priority="must-see" />,
+    )
+    const classes = classesOf(container)
+    // Grey wins over the level: how much you once cared about a place stops
+    // being the useful fact once you have been.
+    expect(classes).toContain('border-neutral-400')
+    expect(classes).not.toContain('border-emerald-600')
+    expect(classes).toContain('opacity-70')
+  })
+
+  // Tapping a pin has to visibly answer the tap — that is what makes the
+  // checked pin a control rather than decoration, and it is the only way
+  // back to Undo now the card has left the list.
+  it('still answers a tap', () => {
+    const { container } = render(<MarkerBadge icon="✅" done highlighted />)
+    const classes = classesOf(container)
+    expect(classes).toContain('border-orange-600')
+    expect(classes).not.toContain('opacity-70')
+  })
+})

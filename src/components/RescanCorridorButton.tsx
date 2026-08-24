@@ -30,6 +30,17 @@ interface RescanCorridorButtonProps {
    */
   armed: boolean
   onArmedChange: (armed: boolean) => void
+  /**
+   * Render only what the scan has to SAY — its elapsed counter, its result,
+   * its durable error — and none of the controls.
+   *
+   * Added 2026-08-24 when the search moved into a collapsible panel. A scan
+   * runs for minutes and its result outlives the panel, so hiding either
+   * behind a disclosure would undo the durable-status work: these failures
+   * used to arrive with no cause attached, which is the whole reason
+   * `rescanError` is written to the trip at all.
+   */
+  statusOnly?: boolean
 }
 
 /**
@@ -95,6 +106,7 @@ export function RescanCorridorButton({
   planMeta,
   armed,
   onArmedChange,
+  statusOnly,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -222,6 +234,35 @@ export function RescanCorridorButton({
     }
   }
 
+  const statusLines = (
+    <>
+      {status && (
+        <p
+          data-testid="rescan-corridor-status"
+          className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
+        >
+          {status}
+        </p>
+      )}
+      {/* The local rejection when there is one, the trip's own record of the
+          failure otherwise — the latter is what survives a phone that stopped
+          following the call, which is how these failures kept arriving with
+          no cause attached. */}
+      {(error ?? serverError) && (
+        <p
+          data-testid="rescan-corridor-error"
+          className="rounded bg-white/95 px-2 py-1 text-xs text-red-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-red-400"
+        >
+          {error ?? `That scan failed: ${serverError}`}
+        </p>
+      )}
+    </>
+  )
+
+  if (statusOnly) {
+    return <div className="flex flex-col items-end gap-1">{statusLines}</div>
+  }
+
   return (
     <div className="flex flex-col items-end gap-1">
       <button
@@ -267,26 +308,7 @@ export function RescanCorridorButton({
             : 'Zoom and pan to aim, then search the circle.'}
         </p>
       )}
-      {status && (
-        <p
-          data-testid="rescan-corridor-status"
-          className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
-        >
-          {status}
-        </p>
-      )}
-      {/* The local rejection when there is one, the trip's own record of the
-          failure otherwise — the latter is what survives a phone that stopped
-          following the call, which is how these failures kept arriving with
-          no cause attached. */}
-      {(error ?? serverError) && (
-        <p
-          data-testid="rescan-corridor-error"
-          className="rounded bg-white/95 px-2 py-1 text-xs text-red-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-red-400"
-        >
-          {error ?? `That scan failed: ${serverError}`}
-        </p>
-      )}
+      {statusLines}
     </div>
   )
 }
