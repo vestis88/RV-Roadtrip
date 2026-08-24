@@ -108,7 +108,7 @@ export function AccountBackupMenu() {
               {linking ? 'Linking…' : 'Back up with Google'}
             </button>
             {errorMessage && (
-              <p className="text-sm text-red-600" data-testid="account-backup-error">
+              <p className="text-sm text-red-600 dark:text-red-400" data-testid="account-backup-error">
                 {errorMessage}
               </p>
             )}

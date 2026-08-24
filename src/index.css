@@ -12,7 +12,31 @@
 @layer base {
   html,
   body {
-    @apply bg-neutral-100 dark:bg-neutral-950;
+    @apply bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100;
+  }
+
+  /* Reported 2026-08-24 on an iPad: "Dark mode is not great here."
+   *
+   * The cause was not any component's colours — it was that the document
+   * never declared which schemes it supports. Without `color-scheme`, a
+   * browser keeps its LIGHT defaults no matter what `prefers-color-scheme`
+   * says, so:
+   *
+   *  - the initial `color` stays black. Every element that sets no text
+   *    colour of its own inherits it, which on a `dark:bg-neutral-900` card
+   *    is black on near-black. That is exactly what the new stay/order/
+   *    sleep/done controls did.
+   *  - `<select>` popups, the caret, form-control chrome, scrollbars and the
+   *    overscroll gutter all render in their light UA styling on top of a
+   *    dark app.
+   *
+   * `light dark` rather than `dark`: the app follows the system setting in
+   * both directions and has full light-mode styling, so this states what is
+   * supported and lets the media query pick. The `text-*` pair above then
+   * makes the inherited colour explicit rather than leaving it to a UA
+   * default that varies by browser. */
+  html {
+    color-scheme: light dark;
   }
 }
 
@@ -77,6 +101,20 @@
     @apply bg-neutral-200 text-neutral-900 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-white dark:hover:bg-neutral-700;
   }
 
+  /* Outlined pill — a secondary action that must stay legible ON a card
+   * rather than beside it. `.btn-secondary`'s filled neutral competes with
+   * the card's own surface when several sit in a row (the stay/order/sleep/
+   * done controls on a corridor-stop card); an outline reads as one of
+   * several small options instead of as the action.
+   *
+   * Added 2026-08-24 because those controls were each hand-rolled as
+   * `border border-neutral-300 … dark:border-neutral-700` with NO text
+   * colour at all — which is a light-mode-only rule wearing a `dark:`
+   * variant, and rendered as good as invisible on a dark card. */
+  .btn-outline {
+    @apply border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+  }
+
   /* Text-only action that still reads as tappable. */
   .btn-ghost {
     @apply text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950;
@@ -107,6 +145,18 @@
    * minimum that avoids triggering it. */
   .field-sm {
     @apply px-2.5 py-1.5 text-base;
+  }
+
+  /* A `<select>` that sits inline among chips rather than in a form column,
+   * so it takes `.field`'s colours without its `w-full`.
+   *
+   * text-base for the same reason `.field-sm` carries it: iOS Safari zooms
+   * the page in on focusing any form control under 16px and never zooms
+   * back out. It makes this control taller than the chips beside it, and
+   * that is the right trade — the alternative is a stuck zoom on the iPad
+   * this is mostly used from. */
+  .select-pill {
+    @apply cursor-pointer rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-base text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-white;
   }
 
   .field-label {

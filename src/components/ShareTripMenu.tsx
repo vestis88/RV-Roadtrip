@@ -126,7 +126,7 @@ export function ShareTripMenu({ tripId, trip }: { tripId: string; trip: Trip }) 
               {copyError && (
                 <p
                   data-testid="share-link-copy-error"
-                  className="text-xs text-red-600"
+                  className="text-xs text-red-600 dark:text-red-400"
                 >
                   Couldn't copy automatically — copy this link: {copyError}
                 </p>
@@ -220,7 +220,7 @@ export function ShareTripMenu({ tripId, trip }: { tripId: string; trip: Trip }) 
           )}
 
           {viewLinkError && (
-            <p data-testid="view-link-error" className="text-xs text-red-600">
+            <p data-testid="view-link-error" className="text-xs text-red-600 dark:text-red-400">
               {viewLinkError}
             </p>
           )}

@@ -126,7 +126,7 @@ export function TripSwitcher({
           </ul>
         )}
         {deleteError && (
-          <p data-testid="trip-delete-error" className="px-2 py-1 text-sm text-red-600">
+          <p data-testid="trip-delete-error" className="px-2 py-1 text-sm text-red-600 dark:text-red-400">
             {deleteError}
           </p>
         )}

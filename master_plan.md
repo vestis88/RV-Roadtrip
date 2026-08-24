@@ -2419,6 +2419,89 @@ Verification: lint 0, build 0, frontend **299**, functions **644**, e2e
 
 All eight phases of the board rework are shipped.
 
+### 2026-08-24 — dark mode, and the way into the diary
+
+Two reports from the same iPad screenshot: *"Dark mode is not great here. How
+do I add to dairy?"*
+
+**The dark-mode cause was not any component's colours.** The document never
+declared `color-scheme`, so the browser kept its LIGHT defaults regardless of
+`prefers-color-scheme`. The inherited `color` stayed black — which every
+element that sets no text colour of its own then inherits, and on a
+`dark:bg-neutral-900` card that is black on near-black. The stay / order /
+where-to-sleep / done controls shipped the day before were exactly that:
+`border border-neutral-300 … dark:border-neutral-700` and no text colour at
+all, which is a light-mode-only rule wearing a `dark:` variant. Native
+`<select>` popups, the caret, scrollbars and the overscroll gutter were light
+for the same reason.
+
+Fixed at the root — `color-scheme: light dark` on `html`, plus an explicit
+`text-neutral-900 dark:text-neutral-100` on `html, body` so the inherited
+colour is stated rather than left to a UA default — and then at the leaves,
+by giving those hand-rolled controls the design system tokens they should
+have had: a new `.btn-outline` (outlined pill for a secondary action that
+sits ON a card, where `.btn-secondary`'s fill competes with the card itself)
+and `.select-pill`. Error text app-wide gained the `dark:text-red-400` half
+it was missing in twelve places.
+
+**A second bug fell out of `.select-pill`:** the stay control was `text-xs`.
+iOS Safari zooms the page in on focusing any form control under 16px and
+never zooms back out — a hazard this codebase already knew about and had
+documented on `.field-sm`, and then reintroduced. It is `text-base` now, and
+taller than the chips beside it, which is the right trade on the iPad this is
+mostly used from.
+
+**The diary question was a real gap, not a misunderstanding.** Entries came
+from two places — Done on a place inside a day, and "We've done this" on a
+kept stop — and the second committed silently on one tap. The editable moment
+was in the original request (*"defaulting to 'now' but possible to change if
+we are lazy with marking done"*), reached `markStopDone` as a parameter, and
+then had **no UI**. It does now, in the same two-step shape Day View already
+used: the button opens a form with the moment pre-filled and a note field,
+and nothing is written until it is confirmed. The Diary's empty state names
+both paths rather than saying "mark a card Done".
+
+Three things worth recording from building it:
+
+- **`doneAt.slice(0, 10)` was the wrong diary key.** The diary groups by
+  `date`, and that has to be the traveler's calendar day; the UTC one files a
+  21:00 CEST stop under tomorrow. Now derived from the local parts of `when`.
+- **The datetime input is local by specification**, so pre-filling it from
+  `toISOString()` would have shown a CEST traveler a time two hours early and
+  invited them to "correct" it the wrong way. `localInputValue` builds it
+  from local parts.
+- **An emptied date field parses to Invalid Date**, and `.toISOString()` on
+  one throws — which would have lost the entry at the moment of saving it.
+  Falls back to now.
+
+**And a test of mine was wrong before the app was.** The dark-mode e2e
+assertion parsed `getComputedStyle().color` as `rgb(…)`, but Tailwind v4
+emits `oklch(…)`, so it read `oklch(0.97 0 0)` as three 0–255 channels and
+reported a contrast of 1.0 for what is in fact near-white on dark grey. The
+colours were correct; the ruler was not. It now paints each computed colour
+onto a 1×1 canvas and reads back sRGB, so it measures what the screen shows
+rather than what the declaration said — and it asserts contrast rather than
+class names, because what broke here was a computed value that any
+"does it have a `dark:` variant" check would have passed.
+
+**And the pacing banner stopped nagging.** *"Remove this top banner from
+being recurring as well. It's ok on app launch, but not every time."* The
+dismissal was already keyed on the warning text rather than a boolean — so
+a genuinely different set of warnings could still speak — but it was held in
+component state, and `PlanStrip` unmounts on every hop to Diary, Countries or
+a day. "Got it" therefore bought silence until the next tap back, which is
+not what dismissing something means. It lives in `sessionStorage` now, per
+trip: the banner gets one say per app launch and every navigation after that
+respects the answer. Not `localStorage` — a dismissal that outlived the app
+would mean someone who once said "Got it" never hears about a real pacing
+problem a month later. Both accesses are wrapped, since storage throws
+outright in Safari's private mode, and a banner that cannot be dismissed is a
+far smaller failure than a board that will not render.
+
+Verification: lint 0, build 0, frontend **308**, e2e **138** (clean —
+`corridor.spec.ts:576`, which failed on ordering in the first run of the
+day, passed in the final full run).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

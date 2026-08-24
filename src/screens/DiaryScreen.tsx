@@ -90,7 +90,9 @@ export function DiaryScreen() {
           className="text-neutral-500 dark:text-neutral-400"
           data-testid="diary-empty"
         >
-          Nothing logged yet — mark a card Done to add it here.
+          Nothing logged yet. Press &ldquo;We&rsquo;ve done this&rdquo; on a
+          stop on the Map, or Done on a place inside a day, and it lands here
+          with the date you give it.
         </p>
       ) : (
         <ul className="space-y-2" data-testid="diary-list">

@@ -105,7 +105,7 @@ export function AddRestDay({
         </button>
       </div>
       {error && (
-        <p data-testid="add-rest-day-error" className="text-sm text-red-600">
+        <p data-testid="add-rest-day-error" className="text-sm text-red-600 dark:text-red-400">
           {error}
         </p>
       )}

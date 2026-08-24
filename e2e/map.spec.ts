@@ -142,4 +142,30 @@ test('map tab flags a back-loaded trip, and lets the notice be dismissed', async
 
   await page.getByTestId('dismiss-pacing-warning').click()
   await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
+
+  // Reported 2026-08-24: "Remove this top banner from being recurring as
+  // well. It's ok on app launch, but not every time." PlanStrip unmounts on
+  // every hop off the Map tab, so a dismissal held in component state bought
+  // silence only until the next tap back.
+  await page.getByTestId('nav-diary').click()
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+  await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
+
+  // A reload is the SAME session — sessionStorage survives it — so the
+  // answer still holds. Asserted because "dismissed" surviving a refresh is
+  // the behaviour, not an accident of it.
+  await page.reload()
+  await page.getByTestId('map-header').waitFor()
+  await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
+
+  // A new tab is a new session with the same signed-in trip (auth and tripId
+  // live in localStorage, the dismissal does not) — which is the "ok on app
+  // launch" half of the report. The banner is entitled to one more say.
+  const relaunched = await page.context().newPage()
+  await relaunched.goto('/')
+  await relaunched.getByTestId('nav-map').click()
+  await relaunched.getByTestId('map-header').waitFor()
+  await expect(relaunched.getByTestId('pacing-warning-banner')).toBeVisible()
+  await relaunched.close()
 })

@@ -146,7 +146,7 @@ export function LiveScreen() {
         </p>
       )}
       {error && (
-        <p data-testid="live-error" className="p-3 text-sm text-red-600">
+        <p data-testid="live-error" className="p-3 text-sm text-red-600 dark:text-red-400">
           {error}
         </p>
       )}

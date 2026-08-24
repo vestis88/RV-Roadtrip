@@ -63,6 +63,45 @@ describe('marking a corridor stop done', () => {
     expect(new Date(written.doneAt).getTime()).toBeGreaterThanOrEqual(before)
   })
 
+  /**
+   * The diary groups by `date`, and `date` must be the traveler's calendar
+   * day rather than the UTC one. This was written as `doneAt.slice(0, 10)`,
+   * which files a 23:30 stop under tomorrow west of Greenwich and a 00:30 one
+   * under yesterday east of it.
+   *
+   * Both ends are asserted because only one of them can fail in any given
+   * zone — and in a UTC runner neither does, which is correct: in UTC there
+   * is no discrepancy to have.
+   */
+  it('files the entry under the local calendar day, not the UTC one', async () => {
+    for (const [hour, minute] of [
+      [23, 30],
+      [0, 30],
+    ]) {
+      addDocMock.mockClear()
+      const when = new Date(2026, 7, 20, hour, minute)
+      await markStopDone('trip1', 'stopA', when)
+      const [, entry] = addDocMock.mock.calls[0]
+      expect(entry.date).toBe('2026-08-20')
+    }
+  })
+
+  it('records the note the traveler typed', async () => {
+    addDocMock.mockClear()
+    await markStopDone('trip1', 'stopA', new Date(), 'Rained the whole time.')
+    const [, entry] = addDocMock.mock.calls[0]
+    expect(entry.note).toBe('Rained the whole time.')
+  })
+
+  // An absent note must stay absent rather than becoming an empty string —
+  // DiaryScreen renders the note block on truthiness.
+  it('omits the note entirely when there is none', async () => {
+    addDocMock.mockClear()
+    await markStopDone('trip1', 'stopA')
+    const [, entry] = addDocMock.mock.calls[0]
+    expect(entry).not.toHaveProperty('note')
+  })
+
   // One tap, and it will be mistapped. Deleting the field rather than
   // writing a falsy one keeps "absent means not done" the only rule.
   it('undoes by removing the field entirely', async () => {

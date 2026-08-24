@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { estimateDriveMinutes } from '@rv/shared'
 import { stayCostOf } from '@rv/shared'
 import type {
@@ -22,6 +23,24 @@ import {
  */
 const STAY_HOUR_CHOICES = [1, 2, 4, 6, 8]
 const STAY_NIGHT_CHOICES = [1, 2, 3, 4, 7]
+
+/**
+ * A Date as `<input type="datetime-local">` wants it — YYYY-MM-DDTHH:mm in
+ * LOCAL time.
+ *
+ * Not `toISOString().slice(0, 16)`, which is the tempting one-liner and is
+ * wrong: that is UTC, so a traveler in CEST marking something done at 21:00
+ * would be shown 19:00 and "correct" it to a time two hours later than the
+ * one they meant. The control is local-time by specification; only the value
+ * stored is UTC.
+ */
+function localInputValue(when: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return (
+    `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` +
+    `T${pad(when.getHours())}:${pad(when.getMinutes())}`
+  )
+}
 
 interface ExploreCandidateCardProps {
   stop: CorridorStopWithId
@@ -65,7 +84,7 @@ interface ExploreCandidateCardProps {
    * read as different actions on a card where one of them is destructive to
    * the route.
    */
-  onMarkDone?: () => void
+  onMarkDone?: (when: Date, note: string) => void
   onUndoDone?: () => void
   onFindOvernight?: () => void
   /** Set while that search is running, so the button can say so. */
@@ -146,6 +165,13 @@ export function ExploreCandidateCard({
   overnightOptions,
   onAddToRoute,
 }: ExploreCandidateCardProps) {
+  // The diary form, opened by "We've done this" rather than shown always:
+  // marking done is a two-line form, and drawing it on every kept card would
+  // bury the actions that are used far more often.
+  const [doneFormOpen, setDoneFormOpen] = useState(false)
+  const [doneWhen, setDoneWhen] = useState('')
+  const [doneNote, setDoneNote] = useState('')
+
   const priority = candidatePriority(stop)
   // A sight whose base town is its own name is a place that IS the stop (a
   // town curated before sights led the route, or a pin dropped by hand) —
@@ -350,15 +376,75 @@ export function ExploreCandidateCard({
             className="pt-1"
             onClick={(event) => event.stopPropagation()}
           >
-            {onMarkDone && (
+            {onMarkDone && !doneFormOpen && (
               <button
                 type="button"
                 data-testid={`explore-candidate-mark-done-${stop.id}`}
-                className="rounded-full border border-neutral-300 px-2.5 py-1 text-xs dark:border-neutral-700"
-                onClick={onMarkDone}
+                className="btn btn-sm btn-outline"
+                onClick={() => {
+                  // Defaulted at the moment of opening, not at render: a card
+                  // sitting on screen all afternoon would otherwise offer a
+                  // "now" from whenever the list last re-rendered.
+                  setDoneWhen(localInputValue(new Date()))
+                  setDoneNote('')
+                  setDoneFormOpen(true)
+                }}
               >
                 We&rsquo;ve done this
               </button>
+            )}
+            {onMarkDone && doneFormOpen && (
+              <div
+                data-testid={`explore-candidate-done-form-${stop.id}`}
+                className="space-y-1.5"
+              >
+                <input
+                  type="datetime-local"
+                  data-testid={`explore-candidate-done-when-${stop.id}`}
+                  className="field field-sm"
+                  aria-label="When did you do this?"
+                  value={doneWhen}
+                  onChange={(event) => setDoneWhen(event.target.value)}
+                />
+                <textarea
+                  data-testid={`explore-candidate-done-note-${stop.id}`}
+                  className="field field-sm"
+                  rows={2}
+                  aria-label="Diary note"
+                  placeholder="Anything worth remembering? (optional)"
+                  value={doneNote}
+                  onChange={(event) => setDoneNote(event.target.value)}
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    data-testid={`explore-candidate-done-save-${stop.id}`}
+                    className="btn btn-sm btn-primary"
+                    onClick={() => {
+                      // An emptied field parses to Invalid Date, which would
+                      // reach Firestore as "Invalid Date".toISOString() and
+                      // throw. Falling back to now keeps one tap from losing
+                      // the entry.
+                      const parsed = new Date(doneWhen)
+                      onMarkDone(
+                        Number.isFinite(parsed.getTime()) ? parsed : new Date(),
+                        doneNote.trim(),
+                      )
+                      setDoneFormOpen(false)
+                    }}
+                  >
+                    Add to diary
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`explore-candidate-done-cancel-${stop.id}`}
+                    className="btn btn-sm btn-outline"
+                    onClick={() => setDoneFormOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             )}
             {onUndoDone && (
               <span className="flex items-center gap-2">
@@ -371,7 +457,7 @@ export function ExploreCandidateCard({
                 <button
                   type="button"
                   data-testid={`explore-candidate-undo-done-${stop.id}`}
-                  className="text-xs underline"
+                  className="link text-xs"
                   onClick={onUndoDone}
                 >
                   Undo
@@ -390,7 +476,7 @@ export function ExploreCandidateCard({
             <button
               type="button"
               data-testid={`explore-candidate-find-sleep-${stop.id}`}
-              className="rounded-full border border-neutral-300 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-neutral-700"
+              className="btn btn-sm btn-outline"
               disabled={findingOvernight}
               onClick={onFindOvernight}
             >
@@ -434,7 +520,7 @@ export function ExploreCandidateCard({
             <button
               type="button"
               data-testid={`explore-candidate-move-up-${stop.id}`}
-              className="rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700"
+              className="btn btn-sm btn-outline px-2.5"
               onClick={onMoveUp}
             >
               ↑
@@ -442,7 +528,7 @@ export function ExploreCandidateCard({
             <button
               type="button"
               data-testid={`explore-candidate-move-down-${stop.id}`}
-              className="rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700"
+              className="btn btn-sm btn-outline px-2.5"
               onClick={onMoveDown}
             >
               ↓
@@ -461,7 +547,7 @@ export function ExploreCandidateCard({
             </span>
             <select
               data-testid={`explore-candidate-stay-hours-${stop.id}`}
-              className="rounded-full border border-neutral-300 bg-transparent px-2 py-0.5 text-xs dark:border-neutral-700"
+              className="select-pill"
               value={
                 stop.stayDuration?.kind === 'nights'
                   ? `nights:${stop.stayDuration.nights}`

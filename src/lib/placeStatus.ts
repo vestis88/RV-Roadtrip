@@ -119,7 +119,11 @@ export async function markStopDone(
   await updateDoc(doc(db, refPath), { doneAt })
 
   await addDoc(collection(db, 'trips', tripId, 'log'), {
-    date: doneAt.slice(0, 10),
+    // The traveler's own calendar day, not the UTC one. `doneAt.slice(0, 10)`
+    // was the obvious version and is off by a day for anything marked done
+    // late in the evening east of Greenwich — the diary groups by this field,
+    // so a 21:00 stop in CEST would have filed itself under tomorrow.
+    date: localDate(when),
     refType: 'stop',
     refPath,
     ...(note ? { note } : {}),
@@ -132,6 +136,12 @@ export async function markStopDone(
  * come back to the route when it is — hence deleteField rather than a
  * falsy value, so `absent means not done` stays the only rule.
  */
+/** The calendar date `when` fell on where the traveler is, as YYYY-MM-DD. */
+function localDate(when: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`
+}
+
 export async function unmarkStopDone(tripId: string, stopId: string) {
   await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
     doneAt: deleteField(),

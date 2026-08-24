@@ -114,7 +114,7 @@ export function RequestChangesForDay({
       {error && (
         <p
           data-testid="request-changes-for-day-error"
-          className="text-sm text-red-600"
+          className="text-sm text-red-600 dark:text-red-400"
         >
           {error}
         </p>

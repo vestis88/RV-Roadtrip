@@ -97,13 +97,26 @@ export function PlanStrip({
   // on the warnings themselves rather than a boolean: the plan is perfectly
   // usable with them, so this must not nag forever — but a different set has
   // something new to say and gets to say it.
+  //
+  // Held in sessionStorage rather than component state, reported 2026-08-24:
+  // "It's ok on app launch, but not every time." Component state dies with
+  // the component, and this one unmounts on every hop to Diary, Countries or
+  // a day and back — so "Got it" bought silence until the next tap, which is
+  // not what dismissing something means. A session is the right unit: the
+  // banner gets one say per app launch, and every navigation after that
+  // respects the answer.
   const pacingWarnings = trip.planMeta.pacingWarnings ?? []
   const pacingWarningKey = pacingWarnings.join('\n')
   const [dismissedPacingKey, setDismissedPacingKey] = useState<string | null>(
-    null,
+    () => readDismissedPacing(tripId),
   )
   const showPacingWarnings =
     pacingWarnings.length > 0 && pacingWarningKey !== dismissedPacingKey
+
+  function dismissPacingWarnings() {
+    setDismissedPacingKey(pacingWarningKey)
+    rememberDismissedPacing(tripId, pacingWarningKey)
+  }
 
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
@@ -223,7 +236,7 @@ export function PlanStrip({
             type="button"
             data-testid="dismiss-pacing-warning"
             className="mt-1 underline"
-            onClick={() => setDismissedPacingKey(pacingWarningKey)}
+            onClick={dismissPacingWarnings}
           >
             Got it
           </button>
@@ -286,7 +299,7 @@ export function PlanStrip({
             </button>
           </div>
           {changeRequestError && (
-            <p data-testid="change-request-error" className="mt-2 text-sm text-red-600">
+            <p data-testid="change-request-error" className="mt-2 text-sm text-red-600 dark:text-red-400">
               {changeRequestError}
             </p>
           )}
@@ -294,6 +307,38 @@ export function PlanStrip({
       )}
     </>
   )
+}
+
+/**
+ * Which set of pacing warnings this session has already been told about.
+ *
+ * sessionStorage, not localStorage: a dismissal that outlived the app would
+ * mean a traveler who once said "Got it" never hears about a genuinely
+ * different pacing problem in a month's time. Per trip, since the warnings
+ * are.
+ *
+ * Both wrapped, because storage access throws outright rather than returning
+ * null in Safari's private mode — and a banner that cannot be dismissed is a
+ * far smaller failure than a board that will not render.
+ */
+function readDismissedPacing(tripId: string): string | null {
+  try {
+    return sessionStorage.getItem(pacingDismissalKey(tripId))
+  } catch {
+    return null
+  }
+}
+
+function rememberDismissedPacing(tripId: string, warningKey: string): void {
+  try {
+    sessionStorage.setItem(pacingDismissalKey(tripId), warningKey)
+  } catch {
+    // Dismissal lasts as long as this mount, which is what it did before.
+  }
+}
+
+function pacingDismissalKey(tripId: string): string {
+  return `pacing-dismissed:${tripId}`
 }
 
 export default PlanStrip

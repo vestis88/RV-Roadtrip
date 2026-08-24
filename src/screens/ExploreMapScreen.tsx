@@ -663,7 +663,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         {genError && (
           <p
             data-testid="explore-find-stops-error"
-            className="text-sm text-red-600"
+            className="text-sm text-red-600 dark:text-red-400"
           >
             {genError}
           </p>
@@ -673,7 +673,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             data-testid="explore-find-stops-error"
             className={
               genNotice.tone === 'error'
-                ? 'text-sm text-red-600'
+                ? 'text-sm text-red-600 dark:text-red-400'
                 : 'text-sm text-neutral-600 dark:text-neutral-300'
             }
           >
@@ -691,7 +691,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         {actionError && (
           <p
             data-testid="explore-action-error"
-            className="text-sm text-red-600"
+            className="text-sm text-red-600 dark:text-red-400"
           >
             {actionError}
           </p>
@@ -1053,9 +1053,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                     }}
                     onMarkDone={
                       stop.status === 'locked' && !stop.doneAt
-                        ? () =>
+                        ? (when, note) =>
                             runStopAction(
-                              markStopDone(tripId, stop.id),
+                              markStopDone(tripId, stop.id, when, note),
                               'Could not mark that done — please try again.',
                             )
                         : undefined
