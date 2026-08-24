@@ -118,7 +118,13 @@ describe('updateTripSettings — what actually invalidates a plan', () => {
   it('lists the settings that do not invalidate a plan', () => {
     expect(NON_INVALIDATING_SETTINGS.has('detailWindowDays')).toBe(true)
     expect(NON_INVALIDATING_SETTINGS.has('interests')).toBe(true)
-    expect(NON_INVALIDATING_SETTINGS.has('endPoint')).toBe(false)
+    // endPoint used to be the counter-example here and moved into the set
+    // in phase 4, once the day skeleton started following the board's route.
+    // The dates are what is left: they are gated on by the date-shift
+    // shortcut, which is the cheap answer for them.
+    expect(NON_INVALIDATING_SETTINGS.has('endPoint')).toBe(true)
+    expect(NON_INVALIDATING_SETTINGS.has('startDate')).toBe(false)
+    expect(NON_INVALIDATING_SETTINGS.has('endDate')).toBe(false)
   })
 
   // Requested 2026-08-19: "I'd also like for adding an interest to not flag
@@ -173,7 +179,14 @@ describe('settings that no longer offer to rebuild the plan', () => {
     expect(written).toMatchObject({ 'planMeta.status': 'stale' })
   })
 
-  it('still marks stale when an endpoint moves', async () => {
+  /**
+   * Flipped in phase 4. This was the last setting with no incremental
+   * answer — moving the start point changed the route the days were
+   * threaded along, and only a regeneration could re-thread it. The board
+   * rebuilds its route from the endpoints on the spot now, and the day
+   * skeleton follows it.
+   */
+  it('no longer marks stale when an endpoint moves', async () => {
     updateDocMock.mockClear()
     await updateTripSettings(
       'trip1',
@@ -181,7 +194,7 @@ describe('settings that no longer offer to rebuild the plan', () => {
       'ready',
     )
     const [, written] = updateDocMock.mock.calls[0]
-    expect(written).toMatchObject({ 'planMeta.status': 'stale' })
+    expect(written).not.toHaveProperty('planMeta.status')
   })
 
   /**

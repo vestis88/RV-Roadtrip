@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeBudget, tripBudget } from './tripBudget'
+import { describeBudget, packStopsIntoDays, tripBudget } from './tripBudget'
 
 const BASE = {
   startDate: '2026-07-01',
@@ -43,9 +43,18 @@ describe('tripBudget', () => {
     expect(budget.daysNeeded).toBe(3)
   })
 
-  // The reason duration is not just a number of hours: a basecamp costs
-  // whole days and nothing else can be scheduled into them.
-  it('counts basecamp nights as days on top of the moving days', () => {
+  /**
+   * The reason duration is not just a number of hours: a basecamp costs
+   * whole days and nothing else can be scheduled into them.
+   *
+   * This asserted FOUR when it was written a few hours before
+   * packStopsIntoDays existed — "one day of driving, plus three parked" —
+   * and that was an off-by-one from semantics nobody had pinned down. Three
+   * nights means three nights slept there, so three days; the drive that
+   * got you there happens on the first of them. Otherwise every basecamp
+   * would quietly cost the trip a day it never spends.
+   */
+  it('counts basecamp nights as the days they are, arrival drive included', () => {
     const budget = tripBudget({
       ...BASE,
       stops: [{ stayDuration: { kind: 'nights', nights: 3 } }],
@@ -53,8 +62,53 @@ describe('tripBudget', () => {
     })
     expect(budget.nightsAtStops).toBe(3)
     expect(budget.stayHours).toBe(0)
-    // One day of driving, plus three parked.
-    expect(budget.daysNeeded).toBe(4)
+    expect(budget.daysNeeded).toBe(3)
+  })
+
+  // A basecamp never shares a day with another stop: the point of saying
+  // "three nights at the lake" is that those days are for the lake.
+  it('gives a basecamp its own days', () => {
+    const days = packStopsIntoDays({
+      stops: [
+        { timeNeeded: 'couple-of-hours' },
+        { stayDuration: { kind: 'nights', nights: 2 } },
+      ],
+      legs: [{ durationMin: 60 }, { durationMin: 60 }],
+      maxDriveHoursPerDay: 5,
+    })
+    expect(days).toHaveLength(3)
+    expect(days[0].stops).toHaveLength(1)
+    expect(days[2].parkedAt).toBeDefined()
+  })
+
+  // The failure "one day per stop" would have hidden.
+  it('splits a leg longer than a day’s driving into several days', () => {
+    const days = packStopsIntoDays({
+      stops: [{ timeNeeded: 'couple-of-hours' }],
+      legs: [{ durationMin: 18 * 60 }],
+      maxDriveHoursPerDay: 5,
+    })
+    expect(days.length).toBeGreaterThan(1)
+    expect(days.every((day) => day.driveMinutes <= 5 * 60 + 1)).toBe(true)
+  })
+
+  // The header and the itinerary read from one function, so they cannot
+  // disagree — which is the whole reason the packing was extracted.
+  it('reports exactly the number of days it lays out', () => {
+    const stops = [
+      { timeNeeded: 'full-day' as const },
+      { stayDuration: { kind: 'nights' as const, nights: 2 } },
+      { timeNeeded: 'half-day' as const },
+    ]
+    const legs = [
+      { durationMin: 3 * 60 },
+      { durationMin: 9 * 60 },
+      { durationMin: 60 },
+    ]
+    const budget = tripBudget({ ...BASE, stops, legs })
+    expect(budget.daysNeeded).toBe(
+      packStopsIntoDays({ stops, legs, maxDriveHoursPerDay: 5 }).length,
+    )
   })
 
   it('takes an explicit hours override over the timeNeeded estimate', () => {

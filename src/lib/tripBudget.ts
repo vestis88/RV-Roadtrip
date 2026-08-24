@@ -35,6 +35,27 @@ export interface BudgetStop {
   doneAt?: string
 }
 
+/**
+ * One day of the packed itinerary.
+ *
+ * Generic in the stop so a caller that needs the whole corridor stop — the
+ * skeleton writer needs its name, coordinates and country — gets it back
+ * rather than the duration fields this file happens to read.
+ */
+export interface PackedDay<T extends BudgetStop = BudgetStop> {
+  /** Stops reached on this day, in route order. Empty on a pure driving day. */
+  stops: T[]
+  /** Real driving minutes done on this day. */
+  driveMinutes: number
+  /** Daylight the stops on this day ask for. */
+  stayMinutes: number
+  /**
+   * Parked at the stop rather than travelling to it — the second and later
+   * nights of a basecamp. Maps to a `rest` day when this is written out.
+   */
+  parkedAt?: T
+}
+
 export interface TripBudget {
   /** Real driving minutes across the legs supplied, or 0 when none are. */
   driveMinutes: number
@@ -78,12 +99,14 @@ export function tripBudget(input: {
   }
 
   const daysAvailable = daysBetweenInclusive(startDate, endDate)
-  const daysNeeded = packIntoDays({
-    stayHours,
-    driveHours: driveMinutes / 60,
-    nightsAtStops,
+  // The COUNT comes from the same function that does the assignment. Two
+  // implementations would drift, and the traveler would read "~11 days" in
+  // the header above an itinerary of nine.
+  const daysNeeded = packStopsIntoDays({
+    stops,
+    legs,
     maxDriveHoursPerDay,
-  })
+  }).length
 
   return {
     driveMinutes,
@@ -96,40 +119,108 @@ export function tripBudget(input: {
 }
 
 /**
- * Days needed for a given amount of driving and sightseeing.
+ * The stops laid out day by day.
  *
- * Two ceilings, and the answer is whichever binds:
+ * Two ceilings decide when a day is full, and whichever binds wins:
  *
- *  - **Driving.** The traveler's own `maxDriveHoursPerDay`. This is the one
- *    that usually decides a long trip, and ignoring it is what would make a
- *    naive sum lie the most.
- *  - **Daylight.** Drives and sights compete for the same hours, so the
- *    combined total is spread across days at USABLE_HOURS_PER_DAY. A day of
- *    two short drives and a full-day castle is a full day even though the
- *    driving alone would have fitted easily.
+ *  - **Driving.** The traveler's own `maxDriveHoursPerDay`. A leg longer
+ *    than that becomes several days on its own — two stops 1,500 km apart is
+ *    four days, not two, and "one day per stop" would have quietly lost that.
+ *  - **Daylight.** Drives and sights compete for the same hours, so their
+ *    sum is capped at USABLE_HOURS_PER_DAY. A day of two short drives and a
+ *    full-day castle is a full day even though the driving alone would fit.
  *
- * Basecamp nights are added rather than packed: three nights at a lake is
- * three days whatever else is happening, and nothing else can be scheduled
- * into them.
+ * A basecamp stop takes its own days: `nights: 3` means three nights slept
+ * there, so three days, with the drive that got you there riding on the
+ * first. It never shares a day with another stop — the point of saying
+ * "three nights at the lake" is that the lake is what those days are for.
  *
- * Rounded UP, and floored at one day for any trip with anything in it at
- * all: half a day of driving still consumes a day of the calendar.
+ * `legs[i]` is the drive INTO `stops[i]`, and `legs[stops.length]` is the
+ * run to the trip's end point, which still costs a day even though no stop
+ * sits on it.
  */
-function packIntoDays(input: {
-  stayHours: number
-  driveHours: number
-  nightsAtStops: number
+export function packStopsIntoDays<T extends BudgetStop>(input: {
+  stops: T[]
+  legs?: { durationMin: number }[]
   maxDriveHoursPerDay: number
-}): number {
-  const { stayHours, driveHours, nightsAtStops, maxDriveHoursPerDay } = input
-  if (stayHours <= 0 && driveHours <= 0 && nightsAtStops <= 0) return 0
+}): PackedDay<T>[] {
+  const { stops, legs = [], maxDriveHoursPerDay } = input
+  const maxDriveMin = Math.max(1, maxDriveHoursPerDay) * 60
+  const usableMin = USABLE_HOURS_PER_DAY * 60
 
-  const byDriving =
-    maxDriveHoursPerDay > 0 ? driveHours / maxDriveHoursPerDay : 0
-  const byDaylight = (stayHours + driveHours) / USABLE_HOURS_PER_DAY
-  const moving = Math.ceil(Math.max(byDriving, byDaylight))
+  const days: PackedDay<T>[] = []
+  let current = emptyDay<T>()
 
-  return Math.max(1, moving + nightsAtStops)
+  const closeIfUsed = () => {
+    if (current.stops.length > 0 || current.driveMinutes > 0) {
+      days.push(current)
+      current = emptyDay<T>()
+    }
+  }
+
+  /** Splits a drive too long for one day, returning what is left of it. */
+  const spendLongDrive = (minutes: number): number => {
+    let remaining = minutes
+    while (remaining > maxDriveMin) {
+      const room = maxDriveMin - current.driveMinutes
+      current.driveMinutes += room
+      days.push(current)
+      current = emptyDay<T>()
+      remaining -= room
+    }
+    return remaining
+  }
+
+  stops.forEach((stop, index) => {
+    const legMinutes = legs[index]?.durationMin ?? 0
+    const cost = stayCostOf(stop)
+    const remaining = spendLongDrive(legMinutes)
+
+    if (cost.nights > 0) {
+      // Its own block of days, arrival drive on the first.
+      closeIfUsed()
+      for (let night = 0; night < cost.nights; night++) {
+        days.push({
+          stops: night === 0 ? [stop] : [],
+          driveMinutes: night === 0 ? remaining : 0,
+          stayMinutes: 0,
+          ...(night === 0 ? {} : { parkedAt: stop }),
+        })
+      }
+      return
+    }
+
+    const stayMinutes = cost.hours * 60
+    const overDrive = current.driveMinutes + remaining > maxDriveMin
+    const overDaylight =
+      current.driveMinutes + current.stayMinutes + remaining + stayMinutes >
+      usableMin
+    if (current.stops.length > 0 && (overDrive || overDaylight)) {
+      days.push(current)
+      current = emptyDay<T>()
+    }
+    current.driveMinutes += remaining
+    current.stayMinutes += stayMinutes
+    current.stops.push(stop)
+  })
+
+  // The run home. It has no stop on it but still costs days.
+  const finalLeg = legs[stops.length]?.durationMin ?? 0
+  if (finalLeg > 0) {
+    const remaining = spendLongDrive(finalLeg)
+    if (current.driveMinutes + remaining > maxDriveMin) {
+      days.push(current)
+      current = emptyDay<T>()
+    }
+    current.driveMinutes += remaining
+  }
+
+  closeIfUsed()
+  return days
+}
+
+function emptyDay<T extends BudgetStop>(): PackedDay<T> {
+  return { stops: [], driveMinutes: 0, stayMinutes: 0 }
 }
 
 /** Inclusive, so a trip that starts and ends on the same date is one day. */

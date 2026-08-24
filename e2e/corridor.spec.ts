@@ -1008,3 +1008,95 @@ test('only kept stops offer a stay length', async ({ page }) => {
   ).toHaveCount(0)
   await expect(page.getByTestId('explore-trip-budget')).toHaveCount(0)
 })
+
+/**
+ * Phase 4 of the board rework, 2026-08-23. The traveler wants sharing and the
+ * diary without being pushed through a full generation to get them — both
+ * read the `days` collection, so both need days to EXIST, not to be detailed.
+ *
+ * Nothing is pressed in this test. That is the assertion: locking a stop is
+ * enough, and no Claude call, no callable and no button is involved.
+ */
+test('locking stops creates the day-by-day outline on its own, with no generation', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () => localStorage.getItem('tripId'))
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  const tripRef = adminDb.collection('trips').doc(tripId)
+  await tripRef.collection('corridorStops').add({
+    name: 'Otta',
+    lat: 61.77,
+    lng: 9.54,
+    country: 'NO',
+    why: 'A good place to break the drive north.',
+    status: 'locked',
+    linkedDayIds: [],
+    priority: 'must-see',
+    rank: 0,
+    timeNeeded: 'couple-of-hours',
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  // Days appear by themselves.
+  await expect
+    .poll(async () => (await tripRef.collection('days').get()).size, {
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0)
+
+  const days = await tripRef.collection('days').get()
+  const day = days.docs[0].data()
+  expect(day.overnight.name).toBe('Otta')
+  // Cheap now, detailed when opened — DayDetailGate reads exactly this.
+  expect(day.detailStatus).toBe('pending')
+  // Nothing was generated: no activities were bought on anyone's behalf.
+  const activities = await days.docs[0].ref.collection('activities').get()
+  expect(activities.size).toBe(0)
+
+  // And the plan strip appears on the same screen, without replacing it.
+  await expect(page.getByTestId('map-header')).toBeVisible()
+  await expect(page.getByTestId('day-strip')).toBeVisible()
+  await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
+})
+
+// The guard that matters most: a trip with real detail belongs to
+// reconciliation, which moves days without discarding what is on them.
+test('the outline refuses to overwrite days that already have detail', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const tripRef = adminDb.collection('trips').doc(tripId)
+
+  const daysBefore = await tripRef.collection('days').get()
+  const idsBefore = daysBefore.docs.map((d) => d.id).sort()
+  await Promise.all(
+    daysBefore.docs.map((d) => d.ref.update({ detailStatus: 'ready' })),
+  )
+
+  await tripRef.collection('corridorStops').add({
+    name: 'Jotunheimen National Park',
+    lat: 61.5,
+    lng: 8.3,
+    country: 'NO',
+    why: 'Marked day hikes.',
+    status: 'locked',
+    linkedDayIds: [],
+    priority: 'must-see',
+    rank: 0,
+  })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('map-header').waitFor()
+  await expect(page.getByTestId('explore-candidate-list')).toContainText(
+    'Jotunheimen',
+  )
+
+  // The same day documents, untouched.
+  const daysAfter = await tripRef.collection('days').get()
+  expect(daysAfter.docs.map((d) => d.id).sort()).toEqual(idsBefore)
+})

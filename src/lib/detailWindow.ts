@@ -107,11 +107,9 @@ export const NON_INVALIDATING_SETTINGS = new Set<string>([
    * - offGridTolerance is the same shape: it filters overnight options at
    *   the moment they are offered.
    *
-   * What is NOT here, deliberately: startDate/endDate and
-   * startPoint/endPoint. Those change the ground the days were built on —
-   * the dates they carry, or the route they thread. Dates already have the
-   * cheap answer (the "Move the plan N days later" shortcut); endpoints do
-   * not yet, and get one when days derive from the board.
+   * What is NOT here, deliberately: startDate and endDate. Those change the
+   * dates the days carry, and they already have the cheap answer — the
+   * "Move the plan N days later" shortcut, which is gated on them.
    */
   'maxDriveHoursPerDay',
   'restDayFrequency',
@@ -119,6 +117,19 @@ export const NON_INVALIDATING_SETTINGS = new Set<string>([
   'travelers',
   'vehicle',
   'offGridTolerance',
+  /**
+   * The trip's endpoints, added once days derived from the board
+   * (2026-08-23, phase 4).
+   *
+   * These were the last settings with no incremental answer: moving the
+   * start point changed the route the days were threaded along, and only a
+   * regeneration could re-thread it. That is no longer true. The board's
+   * route is rebuilt from the endpoints on the spot, and the day skeleton
+   * follows it — see skeletonDays — so a moved endpoint re-dates and
+   * re-routes the itinerary without asking anyone to pay for anything.
+   */
+  'startPoint',
+  'endPoint',
 ])
 
 export { DEFAULT_DETAIL_WINDOW_DAYS }

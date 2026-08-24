@@ -2273,6 +2273,72 @@ single-file test run does.
 
 Verification: lint 0, build 0, frontend **275**, functions 642, e2e **132**.
 
+### 2026-08-23 — days that write themselves, for free (board rework, phase 4 of 8)
+
+Sharing and the diary both read the `days` collection, so both need days to
+**exist** — not to be detailed. Until now the only way to get them was a full
+generation, which is what made "I'd still like to keep the option of sharing
+the trip, diary etc. But that requires me to generate full plan?" a fair
+complaint.
+
+Four things checked before writing anything, and all four made this smaller
+than it looked:
+
+1. **The client may write days.** `firestore.rules` grants members read and
+   write on `days/{dayId}`. No callable, no cold start, nothing to wait for.
+2. **The board already holds everything a skeleton needs** — locked stops
+   with coordinates and country, the trip's dates, and `routeLegs` carrying
+   REAL Google driving times from the Directions call the map is already
+   making. That last point is why the legs written here carry no `estimated`
+   flag: they are measured, not haversine guesses.
+3. **`DayDetailGate` already existed and already does the rest.** Open a day
+   whose `detailStatus` is `pending` and it asks for that day and the two
+   after it. So a skeleton day is not a dead end — it fills itself in when
+   someone looks at it, and costs nothing until then.
+4. **A day needs very little**: index, date, type, overnight, summary.
+
+**The one real design problem was which stop lands on which date**, and the
+answer shaped the code: the day COUNT must come from the same function that
+does the assignment, or the header says "~11 days" above an itinerary of
+nine. So `tripBudget`'s packing became a shared `packStopsIntoDays`, and
+`tripBudget` now reports `days.length` rather than computing its own number —
+one function, two consumers, no way to disagree. A test asserts exactly that
+equality.
+
+Packing inserts **drive-only days** where a leg exceeds the daily limit (two
+stops 1,500 km apart is four days, not two) and gives a basecamp **its own
+days**. "One day per stop" was the tempting simplification and is wrong for
+both.
+
+**An off-by-one in my own phase-3 test, found by making the semantics
+explicit.** It asserted that `nights: 3` plus a five-hour drive needed FOUR
+days — "one day of driving, plus three parked". Nobody had pinned down what a
+night meant. Three nights means three nights slept there, so three days, with
+the drive that got you there happening on the first. Otherwise every basecamp
+would quietly cost the trip a day it never spends. The test now asserts three
+and says why it changed.
+
+Guards, all in a pure `planSkeleton` so the effect that calls it has no
+judgement of its own:
+
+- **Never clobber detail.** A day with `detailStatus: 'ready'` or
+  `'generating'` means someone paid for it; that trip belongs to
+  `runReconcileCorridor`, which moves days without discarding what is on them.
+- **Never race a generation** (`pending`/`generating` stands aside).
+- **A stop with no country is skipped**, since `overnightStopSchema` requires
+  a two-letter code and a malformed day would surface far from here.
+- **Idempotent**: compared on the fields the skeleton actually decides —
+  date, type, overnight name — so a day that later gains an overnight choice
+  is not rewritten over a difference this never made.
+
+**And `startPoint`/`endPoint` left the invalidating set.** They were the last
+settings with no incremental answer: moving the start point changed the route
+the days were threaded along, and only a regeneration could re-thread it.
+Not any more. Only the trip's dates still mark a plan stale, and they have
+their own cheap answer in the date-shift shortcut.
+
+Verification: lint 0, build 0, frontend **285**, functions 642, e2e **134**.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

@@ -64,6 +64,7 @@ import { usePlanBusy } from '../lib/planBusy'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
 import { describeBudget, tripBudget } from '../lib/tripBudget'
+import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 
 interface ExploreMapScreenProps {
   tripId: string
@@ -302,6 +303,44 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     routeStops.forEach((stop, index) => map.set(stop.id, routeLegs[index]))
     return map
   }, [routeLegs, routeStops])
+  /**
+   * Days, kept in step with the board, for free.
+   *
+   * Requested alongside keeping the overview: sharing and the diary both
+   * read the `days` collection, so both need days to EXIST — not to be
+   * detailed. Everything a skeleton needs is already on this screen, so it
+   * is written here rather than asked of a callable: no cold start, no
+   * Claude, nothing to wait for. See skeletonDays for the guards, all of
+   * which live in a pure function so this effect has no judgement of its
+   * own.
+   *
+   * A ref keyed on what was written, not state: writing must not re-render,
+   * and the snapshot that comes back from the write would otherwise re-enter
+   * this effect and write again.
+   */
+  const skeletonWritten = useRef<string | null>(null)
+  useEffect(() => {
+    const decision = planSkeleton({
+      stops: routeStops,
+      legs: routeLegs ?? [],
+      existingDays: days,
+      settings: trip.settings,
+      planMeta: trip.planMeta,
+    })
+    if (!decision.days) return
+    const signature = decision.days
+      .map((day) => `${day.date}:${day.overnight.name}:${day.type}`)
+      .join('|')
+    if (skeletonWritten.current === signature) return
+    skeletonWritten.current = signature
+    void writeSkeletonDays(tripId, decision.days).catch((error: unknown) => {
+      console.error('Writing the day skeleton failed', error)
+      // Cleared so a transient failure is retried on the next change rather
+      // than leaving the trip permanently dayless.
+      skeletonWritten.current = null
+    })
+  }, [tripId, routeStops, routeLegs, days, trip.settings, trip.planMeta])
+
   const routeStopIds = useMemo(
     () => new Set(routeStops.map((s) => s.id)),
     [routeStops],
