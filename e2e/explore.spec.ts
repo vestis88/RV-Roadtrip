@@ -381,30 +381,6 @@ test('a candidate with a listing photo shows it, and one without shows no gap', 
 // are covered by src/components/MarkerBadge.test.tsx; what belongs here is
 // the key that tells the traveler what the colours mean, which renders with
 // or without a map.
-test('the map carries a key explaining what the pin colours mean', async ({
-  page,
-}) => {
-  const tripId = await getTripId(page)
-  await seedCandidate(tripId, { name: 'Otta', rank: 0 })
-
-  await page.getByTestId('nav-map').click()
-  await page.getByTestId('explore-map-screen').waitFor()
-
-  const legend = page.getByTestId('explore-pin-legend')
-  await expect(legend).toContainText('Must see')
-  await expect(legend).toContainText('Worth a detour')
-  await expect(legend).toContainText('If convenient')
-})
-
-// Shown only once there are pins to explain.
-test('no colour key before anything has been found', async ({ page }) => {
-  await getTripId(page)
-  await page.getByTestId('nav-map').click()
-  await page.getByTestId('explore-map-screen').waitFor()
-
-  await expect(page.getByTestId('explore-pin-legend')).toHaveCount(0)
-})
-
 // Locking used to be a one-way door: a locked stop offered only "Remove",
 // which rejected it outright, so changing your mind about committing to a
 // place cost you the place — and because a rejection is remembered as a
@@ -556,7 +532,9 @@ test('route totals appear only once a stop is kept', async ({ page }) => {
 
   const totals = page.getByTestId('explore-route-totals')
   await expect(totals).toBeVisible()
-  await expect(totals).toContainText('1 kept stop')
+  // The stop count comes from the budget half of the merged row now — the
+  // totals no longer repeat it, which is the point of combining them.
+  await expect(totals).toContainText('1 stop')
 })
 
 test('keeping a stop turns it blue too, from any category', async ({ page }) => {

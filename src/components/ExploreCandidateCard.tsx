@@ -199,6 +199,23 @@ export function ExploreCandidateCard({
       data-testid={`explore-candidate-${stop.id}`}
       onClick={onSelect}
       onKeyDown={(event) => {
+        // Only keys aimed at the CARD, never ones on their way out of a
+        // control inside it.
+        //
+        // Reported 2026-08-24: a diary note typed as "Lunchbythe". This card
+        // is `role="button"`, so it claims Enter and Space to activate
+        // itself — and `preventDefault` on a space that started life in the
+        // note textarea below eats the space before the field ever sees it.
+        // Enter went the same way, so a note could hold no line breaks
+        // either.
+        //
+        // Fixed here rather than with `stopPropagation` on each field,
+        // because the bug belongs to the card: it also holds a
+        // `datetime-local` input and a `<select>`, and every control added
+        // to it in future would have inherited the same fault. A composed
+        // `role="button"` has no business acting on keystrokes it did not
+        // receive.
+        if (event.target !== event.currentTarget) return
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           onSelect()

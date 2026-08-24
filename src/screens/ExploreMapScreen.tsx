@@ -30,8 +30,6 @@ import {
 } from '../lib/corridorStopActions'
 import {
   GENERIC_STOPS_ERROR,
-  TIER_LABEL,
-  TIER_ORDER,
   candidatePriority,
   findStopOvernightOptions,
   setStopStay,
@@ -47,7 +45,7 @@ import {
 import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
 import { countryName } from '../lib/countries'
-import { CORRIDOR_CANDIDATE_ICON, PRIORITY_PIN_CLASS } from '../lib/mapIcons'
+import { CORRIDOR_CANDIDATE_ICON } from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
@@ -71,6 +69,7 @@ import { describeBudget, tripBudget } from '../lib/tripBudget'
 import { MAX_DIRECTIONS_POINTS_PER_REQUEST } from '../lib/buildOverviewRoute'
 import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 import { removeStopFromRoute } from '../lib/dayCleanup'
+import { canEditRoute } from '../lib/routeEditing'
 import { useNavigate } from 'react-router-dom'
 
 interface ExploreMapScreenProps {
@@ -160,6 +159,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     [],
   )
   const navigate = useNavigate()
+  const [changeRequestOpen, setChangeRequestOpen] = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -605,6 +606,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           routeStops={routeStops}
           routeLegs={routeLegs ?? []}
           reorderOpen={reorderOpen}
+          changeRequestOpen={changeRequestOpen}
+          onChangeRequestOpenChange={setChangeRequestOpen}
+          rebuildOpen={rebuildOpen}
+          onRebuildOpenChange={setRebuildOpen}
           onReorderOpenChange={setReorderOpen}
         />
       )}
@@ -647,6 +652,24 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         </p>
       )}
 
+      {/* Every action the board offers, on ONE row.
+        *
+        * Requested 2026-08-24 on an annotated screenshot — "put on same
+        * row", "I need the top part of the page to be more compact". The
+        * five actions used to be split across this screen's header and
+        * PlanStrip's, which is precisely why they could never share a line;
+        * PlanStrip has no header of its own now and the board owns which of
+        * its panels is open.
+        *
+        * These keep the full 44px `btn` height rather than `btn-sm`. The
+        * first version shrank them and broke the tap-target floor the e2e
+        * suite asserts on — compactness here comes from deleting three rows,
+        * not from making the targets harder to hit on the iPad this is used
+        * from.
+        *
+        * The notices moved OUT of this row and onto their own line below:
+        * they are sentences, and a sentence in a row of pill buttons wraps
+        * the row and undoes the compaction it was put there for. */}
       <div
         className="surface flex flex-wrap items-center justify-center gap-2 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
         data-testid="explore-header"
@@ -664,42 +687,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               ? 'Find more stops'
               : 'Find great stops'}
         </button>
-        {genError && (
-          <p
-            data-testid="explore-find-stops-error"
-            className="text-sm text-red-600 dark:text-red-400"
-          >
-            {genError}
-          </p>
-        )}
-        {!genError && genNotice && (
-          <p
-            data-testid="explore-find-stops-error"
-            className={
-              genNotice.tone === 'error'
-                ? 'text-sm text-red-600 dark:text-red-400'
-                : 'text-sm text-neutral-600 dark:text-neutral-300'
-            }
-          >
-            {genNotice.message}
-          </p>
-        )}
-        {genSummary && !genError && !genNotice && (
-          <p
-            data-testid="explore-find-stops-summary"
-            className="text-sm text-neutral-600 dark:text-neutral-300"
-          >
-            {genSummary}
-          </p>
-        )}
-        {actionError && (
-          <p
-            data-testid="explore-action-error"
-            className="text-sm text-red-600 dark:text-red-400"
-          >
-            {actionError}
-          </p>
-        )}
         <button
           type="button"
           data-testid="explore-generate-plan-button"
@@ -711,7 +698,86 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             ? 'Starting the full plan…'
             : `Generate full plan (${candidates.length} stop${candidates.length === 1 ? '' : 's'})`}
         </button>
+        {days.length > 0 && (
+          <>
+            <button
+              type="button"
+              data-testid="request-changes-button"
+              className="btn btn-ghost disabled:opacity-40"
+              disabled={planBusy}
+              onClick={() => setChangeRequestOpen(true)}
+            >
+              {planBusy ? 'Updating…' : 'Request changes'}
+            </button>
+            {routeStops.length > 0 && (
+              <button
+                type="button"
+                data-testid="rebuild-days-button"
+                className="btn btn-ghost disabled:opacity-40"
+                disabled={planBusy}
+                onClick={() => setRebuildOpen(true)}
+              >
+                Rebuild day list
+              </button>
+            )}
+            {canEditRoute(days, corridorStops) && (
+              <button
+                type="button"
+                data-testid="reorder-stops-button"
+                className="btn btn-ghost disabled:opacity-40"
+                disabled={planBusy}
+                onClick={() => setReorderOpen(true)}
+              >
+                {planBusy ? 'Updating the plan…' : 'Edit route'}
+              </button>
+            )}
+          </>
+        )}
       </div>
+
+      {(genError || genNotice || genSummary || actionError) && (
+        <div
+          className="surface border-b border-neutral-200 px-3 pb-1.5 text-center text-sm dark:border-neutral-800"
+          data-testid="explore-notices"
+        >
+          {genError && (
+            <p
+              data-testid="explore-find-stops-error"
+              className="text-red-600 dark:text-red-400"
+            >
+              {genError}
+            </p>
+          )}
+          {!genError && genNotice && (
+            <p
+              data-testid="explore-find-stops-error"
+              className={
+                genNotice.tone === 'error'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-neutral-600 dark:text-neutral-300'
+              }
+            >
+              {genNotice.message}
+            </p>
+          )}
+          {genSummary && !genError && !genNotice && (
+            <p
+              data-testid="explore-find-stops-summary"
+              className="text-neutral-600 dark:text-neutral-300"
+            >
+              {genSummary}
+            </p>
+          )}
+          {actionError && (
+            <p
+              data-testid="explore-action-error"
+              className="text-red-600 dark:text-red-400"
+            >
+              {actionError}
+            </p>
+          )}
+        </div>
+      )}
 
       {confirmOpen && (
         <ConfirmGenerateDialog
@@ -724,58 +790,67 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         />
       )}
 
-      {/* The drive the traveler has actually committed to so far: start →
-       * every kept stop → finish. Real Directions figures, not the
-       * straight-line estimate the per-candidate badges use, because the
-       * Directions results were already being fetched to draw the route
-       * line and every field except the geometry was being discarded — so
-       * this costs no extra request.
-       *
-       * Hidden entirely rather than shown as zero when no stop is kept
-       * yet: "0 h" would read as a finding about the route rather than the
-       * absence of one. Shown as unknown when the requests failed, since a
-       * partial sum is indistinguishable on screen from a real one. */}
-      {routeStops.length > 0 && (
+      {/* Every number about the trip, on ONE row.
+        *
+        * Requested 2026-08-24 on an annotated screenshot — "combine" drawn
+        * around the header chips and the route totals, which sat three rows
+        * apart with the day strip and two rows of buttons between them.
+        *
+        * WHAT WAS DROPPED, and why it is a fix rather than a trim.
+        * `planMeta.totalKm` and `planMeta.avgDriveMinutesPerDay` were
+        * written by the last full GENERATION. The driving time and distance
+        * here are live, from the Directions call the map is already making.
+        * Putting them side by side made the divergence unmissable — "3223 km
+        * … 2281 km", "31 days … ~9 days" — because the generated pair goes
+        * out of date the moment a stop is locked or unlocked, which is the
+        * whole point of the board. Two numbers claiming to be the trip's
+        * length is the same failure the packing note in tripBudget warns
+        * about; the live ones are the ones that are true.
+        *
+        * The day COUNT survives, because it says something the budget does
+        * not: how many days the itinerary currently HAS, against how many
+        * the kept stops need.
+        *
+        * Hidden entirely rather than shown as zero when nothing is kept
+        * yet: "0 h" reads as a finding about the route rather than the
+        * absence of one. Shown as unknown when the requests failed, since a
+        * partial sum is indistinguishable on screen from a real one. */}
+      {(routeStops.length > 0 || days.length > 0) && (
         <p
           data-testid="explore-route-totals"
-          className="border-b border-neutral-200 px-3 py-1.5 text-center text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+          className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-1.5 text-center text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
         >
-          {routeTotals ? (
-            <>
-              <span className="font-medium text-neutral-900 dark:text-white">
-                {formatDriveTime(routeTotals.durationMin)}
-              </span>{' '}
-              driving · {Math.round(routeTotals.distanceKm)} km
-            </>
-          ) : (
-            <span className="text-neutral-500 dark:text-neutral-400">
-              Driving time unavailable
+          {routeStops.length > 0 && (
+            <span>
+              {routeTotals ? (
+                <>
+                  <span className="font-medium text-neutral-900 dark:text-white">
+                    {formatDriveTime(routeTotals.durationMin)}
+                  </span>{' '}
+                  driving · {Math.round(routeTotals.distanceKm)} km
+                </>
+              ) : (
+                <span className="text-neutral-500 dark:text-neutral-400">
+                  Driving time unavailable
+                </span>
+              )}
             </span>
-          )}{' '}
-          through {routeStops.length} kept stop
-          {routeStops.length === 1 ? '' : 's'}
-        </p>
-      )}
-
-      {/* What the kept stops COST, in the unit the traveler curates in.
-       *
-       * Requested 2026-08-23 alongside the per-stop durations: "this will
-       * yield a total duration that we can then simply curate ourselves by
-       * locking/unlocking stops." Days rather than hours, deliberately —
-       * see tripBudget, where the packing and the reason for it live. */}
-      {routeStops.length > 0 && (
-        <p
-          data-testid="explore-trip-budget"
-          className="border-b border-neutral-200 px-3 py-1.5 text-center text-xs dark:border-neutral-800"
-        >
-          <span className="text-neutral-600 dark:text-neutral-300">
-            {describeBudget(budget, routeStops.length)}
-          </span>
+          )}
+          {routeStops.length > 0 && (
+            <span data-testid="explore-trip-budget">
+              {describeBudget(budget, routeStops.length)}
+            </span>
+          )}
+          {days.length > 0 && (
+            <span data-testid="header-day-count" className="chip chip-accent">
+              {days.length} days
+            </span>
+          )}
           {routeOrder?.manual && (
             <button
               type="button"
               data-testid="reset-route-order"
-              className="ml-2 underline"
+              className="link"
               onClick={resetOrder}
             >
               Your order — reset to Google&rsquo;s
@@ -788,17 +863,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
              * nothing on screen saying so — see DirectionsRoute. */
             <span
               data-testid="too-many-to-optimise"
-              className="ml-2 text-neutral-500 dark:text-neutral-400"
+              className="text-neutral-500 dark:text-neutral-400"
             >
-              — too many stops for Google to optimise; using your order
+              too many stops for Google to optimise; using your order
             </span>
           )}
           {budget.spareDays < 0 && budget.daysAvailable > 0 && (
             <span
               data-testid="explore-budget-over"
-              className="ml-2 text-amber-700 dark:text-amber-300"
+              className="text-amber-700 dark:text-amber-300"
             >
-              — more than the dates allow
+              more than the dates allow
             </span>
           )}
         </p>
@@ -811,26 +886,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         >
           Showing a straight line instead of the real route — the driving
           directions request failed ({routeError}).
-        </p>
-      )}
-
-      {/* Colour is only information if the reader is told what it means, and
-       * the list is below the fold on a phone — so the key sits with the
-       * map rather than with the cards. Only shown once there are pins to
-       * explain. */}
-      {candidates.length > 0 && (
-        <p
-          data-testid="explore-pin-legend"
-          className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-2 pb-1 text-xs text-neutral-500 dark:text-neutral-400"
-        >
-          {TIER_ORDER.map((tier) => (
-            <span key={tier} className="flex items-center gap-1">
-              <span
-                className={`inline-block h-2.5 w-2.5 rounded-full border-2 ${PRIORITY_PIN_CLASS[tier]}`}
-              />
-              {TIER_LABEL[tier]}
-            </span>
-          ))}
         </p>
       )}
 

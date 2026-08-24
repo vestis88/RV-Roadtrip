@@ -29,7 +29,7 @@ test('adding a corridor stop writes a locked, unlinked corridorStops doc', async
 }) => {
   const tripId = await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('add-corridor-stop-toggle').click()
   await page.getByTestId('corridor-stop-name').fill('Rondane viewpoint')
@@ -56,7 +56,7 @@ test('adding a corridor stop writes a locked, unlinked corridorStops doc', async
 test('add-corridor-stop form requires a name', async ({ page }) => {
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('add-corridor-stop-toggle').click()
   await page.getByTestId('corridor-stop-submit').click()
@@ -69,7 +69,7 @@ test('reordering committed stops previews and commits a date/drive-leg swap', as
 }) => {
   const tripId = await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('reorder-stops-button').click()
   const panel = page.getByTestId('reorder-corridor-panel')
@@ -131,7 +131,7 @@ test('removing a stop deletes its day and requires accepting the end-date change
 }) => {
   const tripId = await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('reorder-stops-button').click()
   const panel = page.getByTestId('reorder-corridor-panel')
@@ -216,7 +216,7 @@ test('adding a locked stop degrades to an error banner without Claude/Places acc
 }) => {
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('add-corridor-stop-toggle').click()
   await page.getByTestId('corridor-stop-name').fill('Vinstra viewpoint')
@@ -248,7 +248,7 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
   // as an error rather than silently doing nothing.
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   // Two taps: the first aims the search circle, the second runs it.
   await page.getByTestId('rescan-corridor-button').click()
@@ -264,7 +264,7 @@ test('rescanning this area degrades to an error banner without Claude/Places acc
 test('the search area is only shown while aiming a rescan', async ({ page }) => {
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-scope')).toHaveCount(0)
   await expect(page.getByTestId('rescan-corridor-button')).toContainText(
@@ -310,13 +310,13 @@ test('a scan in progress is still reported after switching tabs and back', async
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 
   // Away and back — the round trip that used to lose everything.
   await page.getByTestId('nav-diary').click()
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
   await expect(page.getByTestId('rescan-corridor-button')).toContainText('Scanning')
@@ -344,7 +344,7 @@ test('a scan the server cannot still be running stops blocking the button', asyn
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-button')).toBeEnabled()
   await expect(page.getByTestId('rescan-corridor-button')).toContainText(
@@ -372,7 +372,7 @@ test('losing the connection to a running scan is not reported as a failure', asy
 }) => {
   const tripId = await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   // The server takes the job and is still working on it...
   await adminDb
@@ -418,7 +418,7 @@ test('a failure the phone never saw is still reported afterwards', async ({
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-error')).toContainText(
     'ran out of output length',
@@ -444,7 +444,7 @@ test('a later successful scan retires the last failure', async ({ page }) => {
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-status')).toContainText(
     'Found 2 new stops',
@@ -473,7 +473,7 @@ test('a scan that found places outside the area says so, not "nothing"', async (
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   const status = page.getByTestId('rescan-corridor-status')
   await expect(status).toContainText('4 places')
@@ -511,7 +511,7 @@ test('a scan whose circle came from the viewport says to zoom OUT', async ({
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   const status = page.getByTestId('rescan-corridor-status')
   await expect(status).toContainText('4 places')
@@ -541,7 +541,7 @@ test('a scan whose finds could not be located says that, not "nothing"', async (
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   const status = page.getByTestId('rescan-corridor-status')
   await expect(status).toContainText(
@@ -566,7 +566,7 @@ test('a scan that truly found nothing still says nothing', async ({ page }) => {
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-status')).toContainText(
     'Nothing new found nearby',
@@ -585,7 +585,7 @@ test('a scan that only just started is left alone', async ({ page }) => {
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-button')).toBeDisabled()
 })
@@ -606,7 +606,7 @@ test('the result of a scan is waiting on return, not lost with the tab', async (
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('rescan-corridor-status')).toContainText(
     '3 new stops',
@@ -619,7 +619,7 @@ test('"Describe it" mode requires a description, then degrades to an error banne
 }) => {
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('add-corridor-stop-toggle').click()
   await page.getByTestId('add-corridor-stop-mode-search').click()
@@ -677,7 +677,7 @@ test('curated stops survive into the plan, with their curation intact', async ({
   })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   // The list is back, and the stop is in it. It is the BOARD's list now —
   // the plan stopped having a separate screen with a separate list on
@@ -755,7 +755,7 @@ test('a stop turned down in plan mode is remembered, not deleted', async ({
   })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await page.getByTestId(`explore-candidate-reject-${added.id}`).click()
 
   await expect
@@ -818,7 +818,7 @@ test('iPad landscape puts the map and the stops list side by side', async ({
   await seedConsideredStop(tripId)
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   const map = page.getByTestId('explore-map-canvas')
   const list = page.getByTestId('explore-candidate-list')
@@ -843,7 +843,7 @@ test('a portrait tablet still stacks them', async ({ page }) => {
   await seedConsideredStop(tripId)
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   // Both waited for BEFORE either is measured. Measuring the map first made
   // this fail at a height of 1248 rather than 1021: the corridorStops
@@ -896,7 +896,7 @@ test('a planned trip still has the whole board, plus what the plan adds', async 
   )
 
   // And the plan's contribution, on the same screen rather than instead of it.
-  await expect(page.getByTestId('map-header')).toBeVisible()
+  await expect(page.getByTestId('day-strip')).toBeVisible()
   await expect(page.getByTestId('header-day-count')).toBeVisible()
   await expect(page.getByTestId('request-changes-button')).toBeVisible()
 
@@ -920,7 +920,7 @@ test('a trip with no plan yet shows the board and no plan strip', async ({
   await page.getByTestId('explore-map-screen').waitFor()
 
   await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
-  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('day-strip')).toHaveCount(0)
   await expect(page.getByTestId('day-strip')).toHaveCount(0)
 })
 
@@ -1059,7 +1059,7 @@ test('locking stops creates the day-by-day outline on its own, with no generatio
   expect(activities.size).toBe(0)
 
   // And the plan strip appears on the same screen, without replacing it.
-  await expect(page.getByTestId('map-header')).toBeVisible()
+  await expect(page.getByTestId('day-strip')).toBeVisible()
   await expect(page.getByTestId('day-strip')).toBeVisible()
   await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
 })
@@ -1091,7 +1091,7 @@ test('the outline refuses to overwrite days that already have detail', async ({
   })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await expect(page.getByTestId('explore-candidate-list')).toContainText(
     'Jotunheimen',
   )

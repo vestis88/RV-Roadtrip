@@ -59,7 +59,7 @@ test('map screen shows an offline banner and keeps cached header data when offli
   await createTripWithPlan(page)
   await evaluateWithRetry(page, () => navigator.serviceWorker.ready)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await expect(page.getByTestId('header-day-count')).toHaveText('3 days')
   await expect(page.getByTestId('offline-banner')).toHaveCount(0)
 

@@ -166,6 +166,30 @@ describe('marking a stop done from its card', () => {
     expect(screen.queryByTestId('explore-candidate-open-day-s1')).toBeNull()
   })
 
+  /**
+   * Reported 2026-08-24: a note typed into the diary form arrived as
+   * "Lunchbythe". The card is `role="button"` and claims Enter and Space to
+   * activate itself, so `preventDefault` on a space that started in the
+   * textarea ate it before the field saw it.
+   */
+  it('lets a space through to the note field', () => {
+    renderCard({ onMarkDone: vi.fn() })
+    fireEvent.click(screen.getByTestId('explore-candidate-mark-done-s1'))
+
+    const note = screen.getByTestId('explore-candidate-done-note-s1')
+    const spaceInField = fireEvent.keyDown(note, { key: ' ', code: 'Space' })
+    // fireEvent returns false when a handler called preventDefault, which is
+    // precisely what stopped the character being typed.
+    expect(spaceInField).toBe(true)
+  })
+
+  it('still activates on a space aimed at the card itself', () => {
+    const onSelect = vi.fn()
+    renderCard({ onSelect })
+    fireEvent.keyDown(screen.getByTestId('explore-candidate-s1'), { key: ' ' })
+    expect(onSelect).toHaveBeenCalled()
+  })
+
   // The done card offers undo instead, and must not offer the form again.
   it('offers undo rather than the form once it is done', () => {
     renderCard({

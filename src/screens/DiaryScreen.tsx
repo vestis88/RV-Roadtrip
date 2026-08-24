@@ -21,6 +21,7 @@ function DiaryEntryRow({
   entry: LogEntryWithId
 }) {
   const [name, setName] = useState<string | null>(null)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [date, setDate] = useState(entry.date)
   const [note, setNote] = useState(entry.note ?? '')
@@ -65,7 +66,16 @@ function DiaryEntryRow({
     let cancelled = false
     getDoc(doc(db, entry.refPath))
       .then((snap) => {
-        if (!cancelled) setName((snap.data()?.name as string) ?? entry.refPath)
+        if (cancelled) return
+        const data = snap.data()
+        setName((data?.name as string) ?? entry.refPath)
+        // Free, which is why it is here: this row already fetches the place
+        // to read its name, and `photoUrl` is on the same document. All three
+        // things an entry can point at — corridorStop, activity, restaurant
+        // — carry the field, so there is no extra read and no Places call.
+        // Requested 2026-08-24: "Pass the picture from the activity to the
+        // dairy if possible/no cost."
+        setPhotoUrl((data?.photoUrl as string) ?? null)
       })
       .catch((error: unknown) => {
         console.error('[DiaryEntryRow] failed to resolve place', error)
@@ -77,7 +87,19 @@ function DiaryEntryRow({
   }, [entry.refPath])
 
   return (
-    <li className="card p-3" data-testid="diary-entry">
+    <li className="card overflow-hidden p-3" data-testid="diary-entry">
+      {/* No placeholder when a place has no photo — same call PlaceCard's
+        * grid makes in reverse. These rows stack rather than sitting in a
+        * row, so a missing image costs nothing but its absence. */}
+      {photoUrl && (
+        <img
+          src={photoUrl}
+          alt=""
+          decoding="async"
+          data-testid="diary-entry-photo"
+          className="-mx-3 -mt-3 mb-2 h-32 w-[calc(100%+1.5rem)] max-w-none object-cover"
+        />
+      )}
       <p className="text-sm font-semibold text-neutral-900 dark:text-white">
         {name ?? '…'}
       </p>

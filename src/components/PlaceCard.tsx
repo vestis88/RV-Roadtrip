@@ -88,6 +88,11 @@ export function PlaceCard({
       aria-pressed={onTap ? (selected ?? false) : undefined}
       onClick={onTap}
       onKeyDown={(event) => {
+        // Same guard as ExploreCandidateCard, for the same reason. This card
+        // holds no fields today, so nothing is broken — but it is the same
+        // `role="button"` wrapper, and the day it gains one, a space typed
+        // into it would toggle the card's selection instead.
+        if (event.target !== event.currentTarget) return
         if (onTap && (event.key === 'Enter' || event.key === ' ')) onTap()
       }}
       className={`flex w-56 shrink-0 flex-col overflow-hidden rounded-xl border bg-white text-left shadow-sm transition hover:shadow-md dark:bg-neutral-900 ${

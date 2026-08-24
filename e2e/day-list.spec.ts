@@ -49,7 +49,7 @@ test('the day list can be rebuilt from the board without going through the day v
     })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('rebuild-days-button').click()
@@ -84,7 +84,7 @@ test('days orphaned by a removed stop are offered for cleanup, and go', async ({
   await victim.ref.update({ status: 'rejected' })
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   const banner = page.getByTestId('stale-days-banner')
   await expect(banner).toBeVisible({ timeout: 10_000 })

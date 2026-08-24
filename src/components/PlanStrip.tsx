@@ -6,6 +6,10 @@ import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { ReorderCorridorPanel } from './ReorderCorridorPanel'
+import {
+  committedStopsInRouteOrder,
+  stopsAddableToRoute,
+} from '../lib/routeEditing'
 import { applyDayCleanup, planDayCleanup, staleDays } from '../lib/dayCleanup'
 import {
   planSkeleton,
@@ -47,6 +51,10 @@ export function PlanStrip({
   routeLegs,
   reorderOpen,
   onReorderOpenChange,
+  changeRequestOpen,
+  onChangeRequestOpenChange,
+  rebuildOpen,
+  onRebuildOpenChange,
 }: {
   tripId: string
   trip: Trip
@@ -69,9 +77,23 @@ export function PlanStrip({
    */
   reorderOpen: boolean
   onReorderOpenChange: (open: boolean) => void
+  /**
+   * The other two panels, lifted for the same reason `reorderOpen` was and
+   * then one more.
+   *
+   * Reported 2026-08-24 with an annotated screenshot — "put on same row",
+   * "I need the top part of the page to be more compact". The five actions
+   * were split across two components' own header rows, which is why they
+   * could never share one. The board now renders a single actions row and
+   * owns which panel is open; this component keeps the panels themselves,
+   * since the work each one does is the plan's, not the board's.
+   */
+  changeRequestOpen: boolean
+  onChangeRequestOpenChange: (open: boolean) => void
+  rebuildOpen: boolean
+  onRebuildOpenChange: (open: boolean) => void
 }) {
   const navigate = useNavigate()
-  const [changeRequestOpen, setChangeRequestOpen] = useState(false)
   const [changeText, setChangeText] = useState('')
   const [lockedDayIds, setLockedDayIds] = useState<Set<string>>(new Set())
   const [changeRequestError, setChangeRequestError] = useState<string | null>(
@@ -84,30 +106,6 @@ export function PlanStrip({
   // request meaningless, and this button was tappable throughout one.
   const { busy: planBusy, markSubmitted: markPlanSubmitted } =
     usePlanBusy(planStatus)
-
-  // Ordered by their days, since corridorStops carries no sequence field of
-  // its own — linkedDayIds already ties each stop back to real, ordered days.
-  // An empty `days` cannot produce an order at all (every stop ties on
-  // Infinity), which was reported as an intermittent wrong first stop in the
-  // reorder panel, so it yields nothing rather than a guess.
-  const dayIndexById = new Map(days.map((day) => [day.id, day.index]))
-  const committedCorridorStops = (days.length === 0 ? [] : corridorStops)
-    .filter((stop) => stop.status === 'committed')
-    .map((stop) => ({
-      id: stop.id,
-      name: stop.name,
-      earliestIndex: stop.linkedDayIds.reduce(
-        (min, dayId) => Math.min(min, dayIndexById.get(dayId) ?? Infinity),
-        Infinity,
-      ),
-    }))
-    .sort((a, b) => a.earliestIndex - b.earliestIndex)
-
-  // Locked stops with no linked day yet — a traveler-placed pin or a locked
-  // rescan find. These are what reconciliation can add into the route.
-  const addableCorridorStops = corridorStops
-    .filter((stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0)
-    .map((stop) => ({ id: stop.id, name: stop.name }))
 
   // Advice about a trip that has back-loaded its driving. Dismissal is keyed
   // on the warnings themselves rather than a boolean: the plan is perfectly
@@ -186,7 +184,6 @@ export function PlanStrip({
    * — DayDetailGate refills a day when it is opened, so nothing is lost
    * permanently, but it is not free either.
    */
-  const [rebuildOpen, setRebuildOpen] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildError, setRebuildError] = useState<string | null>(null)
 
@@ -207,7 +204,7 @@ export function PlanStrip({
         return
       }
       await writeSkeletonDays(tripId, decision.days)
-      setRebuildOpen(false)
+      onRebuildOpenChange(false)
     } catch (error) {
       console.error('Rebuilding the day list failed', error)
       setRebuildError('Could not rebuild the days — please try again.')
@@ -241,7 +238,7 @@ export function PlanStrip({
         Array.from(lockedDayIds),
       )
       markPlanSubmitted()
-      setChangeRequestOpen(false)
+      onChangeRequestOpenChange(false)
     } catch (error) {
       console.error('Failed to submit change request', error)
       setChangeRequestError('Could not send that request — please try again.')
@@ -252,62 +249,6 @@ export function PlanStrip({
 
   return (
     <>
-      <div
-        className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
-        data-testid="map-header"
-      >
-        <span
-          data-testid="header-total-km"
-          className="chip chip-neutral px-3 py-1"
-        >
-          {(trip.planMeta.totalKm ?? 0).toFixed(0)} km
-        </span>
-        <span
-          data-testid="header-avg-drive-minutes"
-          className="chip chip-neutral px-3 py-1"
-        >
-          {(trip.planMeta.avgDriveMinutesPerDay ?? 0).toFixed(0)} min/day avg
-        </span>
-        <span
-          data-testid="header-day-count"
-          className="chip chip-accent px-3 py-1"
-        >
-          {days.length} days
-        </span>
-        <button
-          type="button"
-          data-testid="request-changes-button"
-          className="btn btn-ghost disabled:opacity-40"
-          disabled={planBusy}
-          onClick={() => setChangeRequestOpen(true)}
-        >
-          {planBusy ? 'Updating…' : 'Request changes'}
-        </button>
-        {days.length > 0 && routeStops.length > 0 && (
-          <button
-            type="button"
-            data-testid="rebuild-days-button"
-            className="btn btn-ghost disabled:opacity-40"
-            disabled={planBusy}
-            onClick={() => setRebuildOpen(true)}
-          >
-            Rebuild day list
-          </button>
-        )}
-        {(committedCorridorStops.length > 1 ||
-          addableCorridorStops.length > 0) && (
-          <button
-            type="button"
-            data-testid="reorder-stops-button"
-            className="btn btn-ghost disabled:opacity-40"
-            disabled={planBusy}
-            onClick={() => onReorderOpenChange(true)}
-          >
-            {planBusy ? 'Updating the plan…' : 'Edit route'}
-          </button>
-        )}
-      </div>
-
       {/* The way into a day, now that opening one no longer costs the map.
         * Horizontally scrollable rather than wrapped: a two-month trip is
         * sixty of these, and sixty wrapped chips would push the map off the
@@ -382,8 +323,8 @@ export function PlanStrip({
       {reorderOpen && (
         <ReorderCorridorPanel
           tripId={tripId}
-          stops={committedCorridorStops}
-          addableStops={addableCorridorStops}
+          stops={committedStopsInRouteOrder(days, corridorStops)}
+          addableStops={stopsAddableToRoute(corridorStops)}
           planBusy={planBusy}
           onSubmitted={markPlanSubmitted}
           onClose={() => onReorderOpenChange(false)}
@@ -419,7 +360,7 @@ export function PlanStrip({
               data-testid="rebuild-days-cancel"
               className="btn btn-outline"
               disabled={rebuilding}
-              onClick={() => setRebuildOpen(false)}
+              onClick={() => onRebuildOpenChange(false)}
             >
               Cancel
             </button>
@@ -474,7 +415,7 @@ export function PlanStrip({
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setChangeRequestOpen(false)}
+              onClick={() => onChangeRequestOpenChange(false)}
             >
               Cancel
             </button>

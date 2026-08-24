@@ -21,17 +21,31 @@ async function getTripId(page: import('@playwright/test').Page): Promise<string>
   return tripId
 }
 
+/**
+ * The generation-time chips (`header-total-km`, `header-avg-drive-minutes`)
+ * were removed on 2026-08-24 when the two number rows were combined. They
+ * came from `planMeta`, written by the last full generation, while the
+ * driving figures beside them are live from Directions — so the merged row
+ * showed both and they disagreed ("3223 km … 2281 km"). The live ones are
+ * the ones that are true; the day COUNT survives, because it says what the
+ * budget does not: how many days the itinerary HAS.
+ */
 test('overview map header summarizes the plan (route/km/day count)', async ({
   page,
 }) => {
   await createTripWithPlan(page)
 
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await expect(page.getByTestId('header-day-count')).toHaveText('3 days')
-  await expect(page.getByTestId('header-total-km')).toBeVisible()
-  await expect(page.getByTestId('header-avg-drive-minutes')).toBeVisible()
+  await expect(page.getByTestId('header-total-km')).toHaveCount(0)
+  await expect(page.getByTestId('header-avg-drive-minutes')).toHaveCount(0)
+
+  // Everything the traveler curates against, on one row.
+  const totals = page.getByTestId('explore-route-totals')
+  await expect(totals).toBeVisible()
+  await expect(totals).toContainText('days')
 })
 
 // The day-badge tap itself (T-21) is wired via AdvancedMarker's onClick to
@@ -58,7 +72,7 @@ test('request changes flow submits a replan with locked days preserved', async (
 }) => {
   await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('request-changes-button').click()
   await page.getByTestId('change-request-text').fill('more beaches, skip big cities')
@@ -79,7 +93,7 @@ test('map tab shows explore mode and no header stats before a plan exists', asyn
   await page.getByTestId('explore-map-screen').waitFor()
   await expect(page.getByTestId('explore-find-stops-button')).toBeVisible()
 
-  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('day-strip')).toHaveCount(0)
   await expect(page.getByTestId('request-changes-button')).toHaveCount(0)
 })
 
@@ -97,7 +111,7 @@ test('map tab shows a generating banner with progress and no header stats', asyn
   await page.getByTestId('map-generating-banner').waitFor()
 
   await expect(page.getByTestId('map-generating-banner')).toContainText('2/8 days')
-  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('day-strip')).toHaveCount(0)
 })
 
 test('map tab shows the plan error and no header stats when generation failed', async ({
@@ -115,7 +129,7 @@ test('map tab shows the plan error and no header stats when generation failed', 
   await expect(page.getByTestId('map-error-banner')).toContainText(
     'Could not resolve the start point.',
   )
-  await expect(page.getByTestId('map-header')).toHaveCount(0)
+  await expect(page.getByTestId('day-strip')).toHaveCount(0)
 })
 
 test('map tab flags a back-loaded trip, and lets the notice be dismissed', async ({
@@ -138,7 +152,7 @@ test('map tab flags a back-loaded trip, and lets the notice be dismissed', async
     'km a day left to drive',
   )
   // Advice, not an error — the plan itself is still fully usable behind it.
-  await expect(page.getByTestId('map-header')).toBeVisible()
+  await expect(page.getByTestId('day-strip')).toBeVisible()
 
   await page.getByTestId('dismiss-pacing-warning').click()
   await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
@@ -149,14 +163,14 @@ test('map tab flags a back-loaded trip, and lets the notice be dismissed', async
   // silence only until the next tap back.
   await page.getByTestId('nav-diary').click()
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
 
   // A reload is the SAME session — sessionStorage survives it — so the
   // answer still holds. Asserted because "dismissed" surviving a refresh is
   // the behaviour, not an accident of it.
   await page.reload()
-  await page.getByTestId('map-header').waitFor()
+  await page.getByTestId('day-strip').waitFor()
   await expect(page.getByTestId('pacing-warning-banner')).toHaveCount(0)
 
   // A new tab is a new session with the same signed-in trip (auth and tripId
@@ -165,7 +179,7 @@ test('map tab flags a back-loaded trip, and lets the notice be dismissed', async
   const relaunched = await page.context().newPage()
   await relaunched.goto('/')
   await relaunched.getByTestId('nav-map').click()
-  await relaunched.getByTestId('map-header').waitFor()
+  await relaunched.getByTestId('day-strip').waitFor()
   await expect(relaunched.getByTestId('pacing-warning-banner')).toBeVisible()
   await relaunched.close()
 })
