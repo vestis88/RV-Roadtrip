@@ -1,4 +1,11 @@
-import { addDoc, collection, doc, getDocs, updateDoc } from 'firebase/firestore'
+import {
+  addDoc,
+  collection,
+  deleteField,
+  doc,
+  getDocs,
+  updateDoc,
+} from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import type { Activity, ActivityTimeOfDay, Meal, Restaurant } from '@rv/shared'
 import { db, functions } from './firebase'
@@ -84,6 +91,50 @@ export async function markDone(
     refPath,
     ...(note ? { note } : {}),
     createdAt: now,
+  })
+}
+
+/**
+ * A corridor stop marked done, and recorded in the diary (2026-08-23).
+ *
+ * Beside markDone rather than folded into it: that one updates a place
+ * inside a DAY (`days/{id}/activities/{id}`), this one updates the stop
+ * itself, and the only thing they truly share is the log entry's shape.
+ *
+ * `when` is the traveler's answer to "when did we do this", defaulting to
+ * now and editable — requested precisely because things get marked done
+ * late: "possible to change if we are lazy with marking done". `createdAt`
+ * stays the immutable record of when it was typed, which is the same split
+ * markDone already used.
+ */
+export async function markStopDone(
+  tripId: string,
+  stopId: string,
+  when: Date = new Date(),
+  note = '',
+) {
+  const doneAt = when.toISOString()
+  const refPath = `trips/${tripId}/corridorStops/${stopId}`
+
+  await updateDoc(doc(db, refPath), { doneAt })
+
+  await addDoc(collection(db, 'trips', tripId, 'log'), {
+    date: doneAt.slice(0, 10),
+    refType: 'stop',
+    refPath,
+    ...(note ? { note } : {}),
+    createdAt: new Date().toISOString(),
+  })
+}
+
+/**
+ * Undo. Marking done is one tap and will be mistapped, and the stop has to
+ * come back to the route when it is — hence deleteField rather than a
+ * falsy value, so `absent means not done` stays the only rule.
+ */
+export async function unmarkStopDone(tripId: string, stopId: string) {
+  await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
+    doneAt: deleteField(),
   })
 }
 

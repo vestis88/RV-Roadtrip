@@ -662,6 +662,28 @@ export const corridorStopSchema = z.object({
       }),
     ])
     .optional(),
+  /**
+   * When the traveler marked this stop done (2026-08-23).
+   *
+   * Requested: "when things are marked done, they can be removed from the
+   * map, creating more room for the 25 max that Google can auto optimize.
+   * When marking things done, they are moved to the diary."
+   *
+   * A done stop leaves the ROUTE — so it stops consuming one of Google's 25
+   * optimisable waypoints, and the budget becomes what is LEFT rather than
+   * what was planned. It stays on the map, muted, because a trip that looks
+   * emptier the more of it you have actually done is the wrong feedback.
+   *
+   * Deliberately a field rather than a new `status` value: a done stop was
+   * locked, that history is worth keeping, and a new status would ripple
+   * through every switch in corridorReconciliation. ABSENT MEANS NOT DONE,
+   * the same shape `origin` and `detailStatus` already use.
+   *
+   * The moment itself is editable and defaults to now — "as we might be a
+   * bit loose with the planning going forward", stops get marked done a day
+   * late — so this is the traveler's answer to "when", not a write timestamp.
+   */
+  doneAt: isoDateTime.optional(),
 })
 
 /** Hours a sight needs when nobody has said otherwise — see stayDuration. */
@@ -874,7 +896,10 @@ export const countryGuideSectionSchema = z.object({
 
 export const logEntrySchema = z.object({
   date: isoDate,
-  refType: z.enum(['activity', 'restaurant']),
+  // 'stop' added 2026-08-23: a corridor stop marked done lands in the diary
+  // beside the activities and restaurants. DiaryScreen needed no change to
+  // show them — it resolves refPath and reads `.name`, which a stop has.
+  refType: z.enum(['activity', 'restaurant', 'stop']),
   refPath: z.string(),
   note: z.string().optional(),
   createdAt: isoDateTime,
@@ -937,7 +962,12 @@ export const sharedTripStopSchema = z.object({
 export const sharedTripDiaryEntrySchema = z.object({
   id: z.string(),
   date: isoDate,
-  refType: z.enum(['activity', 'restaurant']),
+  // 'stop' added with the log's own 2026-08-23. Widened here deliberately
+  // rather than by spreading the entry: this payload crosses the trust
+  // boundary to someone who is not a member, so every field a viewer gets is
+  // written out by hand — which is exactly why the compiler stopped here
+  // when the log grew a new kind.
+  refType: z.enum(['activity', 'restaurant', 'stop']),
   placeName: z.string(),
   note: z.string().optional(),
   createdAt: isoDateTime,

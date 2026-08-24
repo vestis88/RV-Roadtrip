@@ -25,9 +25,15 @@ export { mergeTrips } from './mergeTrips.js'
 export { deleteTrip } from './deleteTrip.js'
 export { generatePlan } from './generatePlan.js'
 export { researchCountrySections } from './countrySectionsCallable.js'
-export { getOvernightCandidates } from './overnightCandidatesCallable.js'
+export {
+  getOvernightCandidates,
+  getStopOvernightCandidates,
+} from './overnightCandidatesCallable.js'
 export { refreshOvernightOptions } from './refreshOvernightOptionsCallable.js'
-export { rescanCorridor } from './rescanCorridorCallable.js'
+export {
+  rescanCorridor,
+  searchNearby,
+} from './rescanCorridorCallable.js'
 export { detailDays } from './detailDaysCallable.js'
 export { generateExploreHighlights } from './exploreHighlightsCallable.js'
 export { previewReconcileCorridor } from './previewReconcileCorridorCallable.js'

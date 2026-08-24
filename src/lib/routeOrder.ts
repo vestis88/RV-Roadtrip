@@ -28,6 +28,19 @@
 export interface RouteOrder {
   key: string
   order: number[]
+  /**
+   * The traveler arranged this, not Google (2026-08-23).
+   *
+   * Requested: "Google should still optimize the route by default, but there
+   * should be some manual override possible, that can then also be reset."
+   *
+   * It has to be recorded rather than inferred, because the two orders are
+   * indistinguishable once stored — a hand-made order and an optimised one
+   * are both just a list of positions. Without this flag the next Directions
+   * reply would silently overwrite the traveler's arrangement with Google's,
+   * and the override would appear to work until the map next refreshed.
+   */
+  manual?: boolean
 }
 
 /** Identifies the set of stops an order describes. */
@@ -67,4 +80,26 @@ export function isNewRouteOrder(
   if (!held || held.key !== key) return true
   if (held.order.length !== order.length) return true
   return held.order.some((position, index) => position !== order[index])
+}
+
+/**
+ * A hand-made order, for the stops as they currently stand.
+ *
+ * `positions` is the new arrangement expressed as indices INTO the guess —
+ * the same shape Google's `waypoint_order` uses — so `applyRouteOrder` needs
+ * to know nothing about where an order came from.
+ */
+export function manualRouteOrder(key: string, positions: number[]): RouteOrder {
+  return { key, order: positions, manual: true }
+}
+
+/**
+ * Whether Google may reorder this route.
+ *
+ * False once the traveler has arranged it themselves: the whole point of an
+ * override is that the next reply does not undo it. Resetting is simply
+ * dropping the stored order, after which this is true again.
+ */
+export function mayOptimize(held: RouteOrder | null): boolean {
+  return !held?.manual
 }

@@ -47,6 +47,32 @@ interface ExploreCandidateCardProps {
    */
   onSetStay?: (stay: CorridorStop['stayDuration']) => void
   /**
+   * Move this stop one place earlier or later in the driving order
+   * (2026-08-23). Offered only on a kept stop, since only kept stops are in
+   * the route at all. Using them marks the order as the traveler's, after
+   * which Google stops rearranging it until they reset — see routeOrder.
+   */
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  /**
+   * Find somewhere to sleep near this stop (2026-08-23). Offered on a kept
+   * stop only, and resolved when pressed — it costs Places, Overpass and
+   * sometimes Claude, which is why it is not done for every stop up front.
+   */
+  /**
+   * Marking a stop done, which moves it to the diary and takes it out of the
+   * route (2026-08-23). Undo is a sibling rather than a toggle, so the two
+   * read as different actions on a card where one of them is destructive to
+   * the route.
+   */
+  onMarkDone?: () => void
+  onUndoDone?: () => void
+  onFindOvernight?: () => void
+  /** Set while that search is running, so the button can say so. */
+  findingOvernight?: boolean
+  /** What it found, once it has. */
+  overnightOptions?: { name: string; kind: string; why?: string }[]
+  /**
    * Offered only where a route already exists to add the stop TO — the plan
    * map. Absent in explore mode, where there is no itinerary yet and locking
    * in is the whole commitment.
@@ -111,6 +137,13 @@ export function ExploreCandidateCard({
   onUnlock,
   onReject,
   onSetStay,
+  onMoveUp,
+  onMoveDown,
+  onMarkDone,
+  onUndoDone,
+  onFindOvernight,
+  findingOvernight,
+  overnightOptions,
   onAddToRoute,
 }: ExploreCandidateCardProps) {
   const priority = candidatePriority(stop)
@@ -311,6 +344,112 @@ export function ExploreCandidateCard({
          * Pre-filled from the curation estimate rather than blank, so the
          * budget is honest before anyone touches this and the control shows
          * what is already being assumed. */}
+        {(onMarkDone || onUndoDone) && (
+          <div
+            data-testid={`explore-candidate-done-${stop.id}`}
+            className="pt-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {onMarkDone && (
+              <button
+                type="button"
+                data-testid={`explore-candidate-mark-done-${stop.id}`}
+                className="rounded-full border border-neutral-300 px-2.5 py-1 text-xs dark:border-neutral-700"
+                onClick={onMarkDone}
+              >
+                We&rsquo;ve done this
+              </button>
+            )}
+            {onUndoDone && (
+              <span className="flex items-center gap-2">
+                <span
+                  data-testid={`explore-candidate-done-at-${stop.id}`}
+                  className="text-xs text-neutral-500 dark:text-neutral-400"
+                >
+                  Done {stop.doneAt?.slice(0, 10)}
+                </span>
+                <button
+                  type="button"
+                  data-testid={`explore-candidate-undo-done-${stop.id}`}
+                  className="text-xs underline"
+                  onClick={onUndoDone}
+                >
+                  Undo
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
+        {onFindOvernight && (
+          <div
+            data-testid={`explore-candidate-sleep-${stop.id}`}
+            className="pt-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              data-testid={`explore-candidate-find-sleep-${stop.id}`}
+              className="rounded-full border border-neutral-300 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-neutral-700"
+              disabled={findingOvernight}
+              onClick={onFindOvernight}
+            >
+              {findingOvernight ? 'Looking…' : 'Where to sleep'}
+            </button>
+            {overnightOptions && overnightOptions.length > 0 && (
+              <ul
+                data-testid={`explore-candidate-sleep-list-${stop.id}`}
+                className="mt-1.5 space-y-0.5 text-xs text-neutral-600 dark:text-neutral-300"
+              >
+                {overnightOptions.map((option) => (
+                  <li key={`${option.kind}:${option.name}`}>
+                    <span className="chip chip-neutral mr-1 px-1.5 py-0.5 text-[10px]">
+                      {option.kind}
+                    </span>
+                    {option.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {overnightOptions && overnightOptions.length === 0 && (
+              <p
+                data-testid={`explore-candidate-sleep-none-${stop.id}`}
+                className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                Nothing found near here — try a nearby stop.
+              </p>
+            )}
+          </div>
+        )}
+
+        {(onMoveUp || onMoveDown) && (
+          <div
+            data-testid={`explore-candidate-move-${stop.id}`}
+            className="flex items-center gap-1 pt-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              Order
+            </span>
+            <button
+              type="button"
+              data-testid={`explore-candidate-move-up-${stop.id}`}
+              className="rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700"
+              onClick={onMoveUp}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              data-testid={`explore-candidate-move-down-${stop.id}`}
+              className="rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700"
+              onClick={onMoveDown}
+            >
+              ↓
+            </button>
+          </div>
+        )}
+
         {onSetStay && (
           <div
             data-testid={`explore-candidate-stay-${stop.id}`}

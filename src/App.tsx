@@ -6,6 +6,7 @@ import { CountryDetailScreen } from './screens/CountryDetailScreen'
 import { DayViewScreen } from './screens/DayViewScreen'
 import { DiaryScreen } from './screens/DiaryScreen'
 import { OverviewMapScreen } from './screens/OverviewMapScreen'
+import { LiveScreen } from './screens/LiveScreen'
 import { SetupScreen } from './screens/SetupScreen'
 import { SharedTripScreen } from './screens/SharedTripScreen'
 
@@ -38,6 +39,7 @@ function App() {
             <Route path="/" element={<SetupScreen />} />
             <Route path="/map" element={<OverviewMapScreen />} />
             <Route path="/map/day/:dayId" element={<DayViewScreen />} />
+            <Route path="/live" element={<LiveScreen />} />
             <Route path="/diary" element={<DiaryScreen />} />
             <Route path="/countries" element={<CountriesScreen />} />
             <Route path="/countries/:code" element={<CountryDetailScreen />} />

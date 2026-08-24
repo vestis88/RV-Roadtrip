@@ -15,9 +15,12 @@ import {
 import { useCorridorStops } from '../hooks/useCorridorStops'
 import { useTripDays } from '../hooks/useTripDays'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { useCurrentPosition } from '../hooks/useCurrentPosition'
 import {
   applyRouteOrder,
   isNewRouteOrder,
+  manualRouteOrder,
+  mayOptimize,
   routeOrderKey,
   type RouteOrder,
 } from '../lib/routeOrder'
@@ -31,6 +34,7 @@ import {
   TIER_LABEL,
   TIER_ORDER,
   candidatePriority,
+  findStopOvernightOptions,
   setStopStay,
   describeEmptyCandidateList,
   describeEmptyCountries,
@@ -63,7 +67,9 @@ import { submitPlanRequest } from '../lib/submitPlanRequest'
 import { usePlanBusy } from '../lib/planBusy'
 import { hasRoute } from '../lib/validateRoute'
 import { formatDriveTime } from '../lib/formatDuration'
+import { markStopDone, unmarkStopDone } from '../lib/placeStatus'
 import { describeBudget, tripBudget } from '../lib/tripBudget'
+import { MAX_DIRECTIONS_POINTS_PER_REQUEST } from '../lib/buildOverviewRoute'
 import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 
 interface ExploreMapScreenProps {
@@ -86,6 +92,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // to know whether a plan exists — see PlanStrip.
   const { days } = useTripDays(tripId)
   const online = useOnlineStatus()
+  // Where we are, drawn rather than only measured — see useCurrentPosition.
+  const { position: here } = useCurrentPosition()
   const planStatus = trip.planMeta.status
   // Opened both from PlanStrip's "Edit route" and from a locked, unlinked
   // stop's own "Add to route" — see PlanStrip's note on why it lives here.
@@ -220,8 +228,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // and it is the only thing that moves the route. The order they were kept
   // in never matters: the route order is worked out below, and by Google
   // rather than by us.
+  // A stop marked done leaves the ROUTE — see corridorStop.doneAt. That is
+  // what makes the totals and the day budget read as what is LEFT rather
+  // than what was planned, and it hands one of Google's 25 optimisable
+  // waypoints back as the trip is travelled. The card stays in the list,
+  // muted, because a trip that looks emptier the more of it you have done is
+  // the wrong feedback.
   const lockedStops = useMemo(
-    () => candidates.filter((c) => c.status === 'locked'),
+    () => candidates.filter((c) => c.status === 'locked' && !c.doneAt),
     [candidates],
   )
   // The starting guess: each stop's position projected onto the straight
@@ -251,12 +265,70 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       // order it was given is the steady state, and storing that agreement
       // would re-render, rebuild the arrays and ask again — see routeOrder.ts.
       setRouteOrder((held) =>
-        isNewRouteOrder(held, orderKey, order)
-          ? { key: orderKey, order }
-          : held,
+        // A hand-made order is never overwritten by a reply. Without this
+        // the override would appear to work until the map next refreshed.
+        held?.manual || !isNewRouteOrder(held, orderKey, order)
+          ? held
+          : { key: orderKey, order },
       )
     },
     [orderKey],
+  )
+  /** Moves one stop by one place, and marks the order as the traveler's. */
+  const moveStop = useCallback(
+    (stopId: string, delta: -1 | 1) => {
+      setRouteOrder((held) => {
+        const applied = applyRouteOrder(guessedOrder, held, orderKey)
+        const from = applied.findIndex((stop) => stop.id === stopId)
+        const to = from + delta
+        if (from < 0 || to < 0 || to >= applied.length) return held
+        const next = [...applied]
+        ;[next[from], next[to]] = [next[to], next[from]]
+        // Expressed as positions in the GUESS, which is what applyRouteOrder
+        // indexes into — not positions in the currently-shown order.
+        const positions = next.map((stop) =>
+          guessedOrder.findIndex((g) => g.id === stop.id),
+        )
+        return manualRouteOrder(orderKey, positions)
+      })
+    },
+    [guessedOrder, orderKey],
+  )
+  /** Back to whatever Google makes of it. */
+  const resetOrder = useCallback(() => setRouteOrder(null), [])
+
+  // Beds found per stop, held here rather than written to the trip: they are
+  // a lookup the traveler asked for, not a decision they made, and caching
+  // them on the stop would go stale silently as sites open and close.
+  const [sleepBusy, setSleepBusy] = useState<string | null>(null)
+  const [sleepByStop, setSleepByStop] = useState<
+    Record<string, { name: string; kind: string; why?: string }[]>
+  >({})
+  const findSleep = useCallback(
+    (stopId: string) => {
+      setSleepBusy(stopId)
+      findStopOvernightOptions(tripId, stopId)
+        .then((candidates) => {
+          setSleepByStop((held) => ({
+            ...held,
+            [stopId]: candidates.map((candidate) => ({
+              name: candidate.name,
+              kind: candidate.type,
+              why: candidate.description,
+            })),
+          }))
+        })
+        .catch((error: unknown) => {
+          console.error('Finding somewhere to sleep failed', error)
+          setActionError(
+            describeExploreHighlightsError(error) === GENERIC_STOPS_ERROR
+              ? 'Could not look for somewhere to sleep — please try again.'
+              : describeExploreHighlightsError(error),
+          )
+        })
+        .finally(() => setSleepBusy(null))
+    },
+    [tripId],
   )
   const routeStops = useMemo(
     () => applyRouteOrder(guessedOrder, routeOrder, orderKey),
@@ -695,6 +767,28 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           <span className="text-neutral-600 dark:text-neutral-300">
             {describeBudget(budget, routeStops.length)}
           </span>
+          {routeOrder?.manual && (
+            <button
+              type="button"
+              data-testid="reset-route-order"
+              className="ml-2 underline"
+              onClick={resetOrder}
+            >
+              Your order — reset to Google&rsquo;s
+            </button>
+          )}
+          {!mayOptimize(routeOrder) ||
+          askedBackbone.length <= MAX_DIRECTIONS_POINTS_PER_REQUEST ? null : (
+            /* Google optimises only when the whole route fits one request.
+             * Past that it silently drove them in the order given, with
+             * nothing on screen saying so — see DirectionsRoute. */
+            <span
+              data-testid="too-many-to-optimise"
+              className="ml-2 text-neutral-500 dark:text-neutral-400"
+            >
+              — too many stops for Google to optimise; using your order
+            </span>
+          )}
           {budget.spareDays < 0 && budget.daysAvailable > 0 && (
             <span
               data-testid="explore-budget-over"
@@ -798,7 +892,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 // against real roads is strictly better information. The
                 // generated plan's route is NOT optimized: those points are
                 // days with dates on them.
-                optimizeOrder
+                optimizeOrder={mayOptimize(routeOrder)}
                 onOrder={handleOrder}
               />
               {/* Only while aiming. Drawn on every map all the time, it
@@ -809,6 +903,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   radiusKm={searchArea.radiusKm}
                   capped={searchArea.cappedFrom !== undefined}
                 />
+              )}
+              {here && (
+                <AdvancedMarker
+                  position={{ lat: here.lat, lng: here.lng }}
+                  title="You are here"
+                >
+                  <div
+                    data-testid="current-position-marker"
+                    className="h-4 w-4 rounded-full border-2 border-white bg-sky-600 shadow-md dark:border-neutral-900"
+                  />
+                </AdvancedMarker>
               )}
               <MapPanner
                 target={
@@ -946,19 +1051,54 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                       )
                       if (selectedId === stop.id) setSelectedId(null)
                     }}
+                    onMarkDone={
+                      stop.status === 'locked' && !stop.doneAt
+                        ? () =>
+                            runStopAction(
+                              markStopDone(tripId, stop.id),
+                              'Could not mark that done — please try again.',
+                            )
+                        : undefined
+                    }
+                    onUndoDone={
+                      stop.doneAt
+                        ? () =>
+                            runStopAction(
+                              unmarkStopDone(tripId, stop.id),
+                              'Could not undo that — please try again.',
+                            )
+                        : undefined
+                    }
+                    onFindOvernight={
+                      routeStopIds.has(stop.id)
+                        ? () => findSleep(stop.id)
+                        : undefined
+                    }
+                    findingOvernight={sleepBusy === stop.id}
+                    overnightOptions={sleepByStop[stop.id]}
+                    onMoveUp={
+                      routeStopIds.has(stop.id)
+                        ? () => moveStop(stop.id, -1)
+                        : undefined
+                    }
+                    onMoveDown={
+                      routeStopIds.has(stop.id)
+                        ? () => moveStop(stop.id, 1)
+                        : undefined
+                    }
                     // Only on a kept stop: how long to stay somewhere you
-                  // have not decided to visit is noise, and the budget
-                  // counts kept stops only.
-                  onSetStay={
-                    routeStopIds.has(stop.id)
-                      ? (stay) =>
-                          runStopAction(
-                            setStopStay(tripId, stop.id, stay),
-                            'Could not save how long you are staying — please try again.',
-                          )
-                      : undefined
-                  }
-                  // Only where there is a route to add TO. A locked stop with
+                    // have not decided to visit is noise, and the budget
+                    // counts kept stops only.
+                    onSetStay={
+                      routeStopIds.has(stop.id)
+                        ? (stay) =>
+                            runStopAction(
+                              setStopStay(tripId, stop.id, stay),
+                              'Could not save how long you are staying — please try again.',
+                            )
+                        : undefined
+                    }
+                    // Only where there is a route to add TO. A locked stop with
                     // no day yet is exactly what reconciliation can slot in —
                     // see the 2026-08-19 "real way into the route" work, which
                     // this board inherited when the plan stopped having a

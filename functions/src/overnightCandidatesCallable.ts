@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import type { OvernightStopCandidate, TripDay } from '@rv/shared'
+import type { LatLng, OvernightStopCandidate, TripDay } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
 import { loadFreeCampingRulesByCountry } from './countryGuideSections.js'
@@ -108,9 +108,32 @@ export async function fetchOvernightCandidates(
     throw new HttpsError('not-found', 'Day not found')
   }
 
-  const near = { lat: day.overnight.lat, lng: day.overnight.lng }
-  const country = day.overnight.country
+  return overnightCandidatesNear(
+    { lat: day.overnight.lat, lng: day.overnight.lng },
+    day.overnight.country,
+    tripId,
+  )
+}
 
+/**
+ * The same three kinds of bed, around any point at all.
+ *
+ * Requested 2026-08-23: "Every activity should get a suggested
+ * camping/stellplatz/free camping at the push of a button." Which is how the
+ * decision is actually made on an RV trip — you pick the sight, then find
+ * somewhere to sleep near it — and the reverse of how this code was shaped,
+ * which resolved beds per DAY because days were the only thing that existed.
+ *
+ * Almost nothing had to change: everything below already worked from a
+ * coordinate and a country, and reading them off a day was the only part
+ * that did not. So the day path above is now one caller of this, and a
+ * corridor stop is another.
+ */
+export async function overnightCandidatesNear(
+  near: LatLng,
+  country: string,
+  tripId: string,
+): Promise<OvernightStopCandidate[]> {
   // The wild-camping prompt is meaningfully better with the country's own
   // free-camping rules in hand, and degrades to generic advice without them
   // rather than failing. Shares the overnight pass's loader (which swallows
@@ -165,6 +188,62 @@ export async function fetchOvernightCandidates(
 
   return [...campsites, ...stellplatz, ...wild.slice(0, WILD_CANDIDATE_COUNT)]
 }
+
+/**
+ * Somewhere to sleep near a corridor stop, rather than near a day.
+ *
+ * Separate from the day callable rather than folded into it: the two take
+ * different ids, resolve different documents, and a single callable taking
+ * "one of these two" would have to validate that anyway. They share the part
+ * that matters — overnightCandidatesNear — which is where all the cost and
+ * all the judgement live.
+ */
+export const getStopOvernightCandidates = onCall(
+  {
+    secrets: [claudeApiKey, googlePlacesApiKey],
+    timeoutSeconds: 180,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be signed in')
+    }
+    requireAccess(request.auth)
+    const tripId = request.data?.tripId
+    const stopId = request.data?.stopId
+    if (typeof tripId !== 'string' || typeof stopId !== 'string') {
+      throw new HttpsError('invalid-argument', 'tripId and stopId are required')
+    }
+    await requireTripMember(tripId, request.auth.uid)
+
+    const stopSnap = await getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .doc(stopId)
+      .get()
+    const stop = stopSnap.data() as
+      | { lat?: number; lng?: number; country?: string }
+      | undefined
+    if (!stop || typeof stop.lat !== 'number' || typeof stop.lng !== 'number') {
+      throw new HttpsError('not-found', 'Stop not found')
+    }
+    // Without a country there are no free-camping rules to reason with, and
+    // the wild-camping half would be answering about nowhere in particular.
+    if (stop.country?.length !== 2) {
+      throw new HttpsError(
+        'failed-precondition',
+        'This stop has no country, so there is nothing to check the local camping rules against.',
+      )
+    }
+
+    const candidates = await overnightCandidatesNear(
+      { lat: stop.lat, lng: stop.lng },
+      stop.country,
+      tripId,
+    )
+    return { candidates }
+  },
+)
 
 export const getOvernightCandidates = onCall(
   {

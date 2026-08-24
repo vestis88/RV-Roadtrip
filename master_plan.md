@@ -2339,6 +2339,86 @@ their own cheap answer in the date-shift shortcut.
 
 Verification: lint 0, build 0, frontend **285**, functions 642, e2e **134**.
 
+### 2026-08-23 — the last four phases (board rework, 5–8 of 8)
+
+Shipped together at the traveler's request ("Continue all the way if there
+are no questions!!"). Each is small on its own; what they have in common is
+that almost every part already existed and was keyed to the wrong thing.
+
+**5 — Route order: Google by default, yours on request.** *"Google should
+still optimize the route by default, but there should be some manual override
+possible, that can then also be reset."* `RouteOrder` gains `manual`, and it
+has to be RECORDED rather than inferred: a hand-made order and an optimised
+one are both just lists of positions, so without the flag the next Directions
+reply silently overwrites the traveler's arrangement — the override would
+appear to work until the map next refreshed. `mayOptimize()` turns Google off
+while it holds, ↑/↓ on each kept card writes it, and resetting is simply
+dropping it. Also fixed here: `DirectionsRoute` optimises only when the whole
+route fits one 25-point request, and past that **silently stopped**, which
+the board now says out loud.
+
+**6 — Somewhere to sleep, per stop.** *"Every activity should get a suggested
+camping/stellplatz/free camping at the push of a button."* Almost nothing had
+to change: `fetchOvernightCandidates` already worked from a coordinate and a
+country, and reading them off a DAY was the only part that did not. That body
+became `overnightCandidatesNear(near, country, tripId)`, the day path became
+one caller, and `getStopOvernightCandidates` is another. Results are held on
+the screen rather than written to the stop — they are a lookup, not a
+decision, and caching them would go stale silently as sites open and close.
+A stop with no country is refused with a reason rather than searched around
+nowhere.
+
+**7 — Where we are, and what we have done.** The GPS fix was already being
+taken every thirty minutes to measure drift, and never drawn;
+`useCurrentPosition` watches instead of samples (a marker half an hour behind
+the van is worse than none) and treats only a refusal as denial — a timeout
+in a tunnel would otherwise hide the marker for the rest of the session.
+`corridorStop.doneAt` is additive, absent means not done, and a done stop
+**leaves the route**: the budget becomes what is LEFT, and one of Google's 25
+waypoints is handed back as the trip is travelled. The card stays, muted,
+because a trip that looks emptier the more of it you have done is the wrong
+feedback. `markStopDone` writes the stamp and a diary entry, with the moment
+editable and defaulting to now — *"possible to change if we are lazy with
+marking done"* — and `createdAt` kept as the immutable record of when it was
+typed. Undo deletes the field rather than writing a falsy one, so "absent
+means not done" stays the only rule.
+
+**8 — Live: what's around us now.** A separate `searchNearby` callable rather
+than a flag on the rescan, because the two differ in the only thing that
+matters about a search endpoint — whether it mutates the trip — and a boolean
+deciding that is exactly the parameter someone forgets to pass. It reuses
+`findStopsForQuery` (Places-first), and the trip's notes and interests reach
+it server-side, so "cozy over mainstream" means the same thing from a lay-by
+as it does in planning. **Results are ephemeral**: someone looking for lunch
+three times a day would otherwise fill their corridor with pins they never
+chose. "Add to trip" saves one as an ordinary candidate.
+
+**Two things the tests caught, both mine.**
+
+The first was an assertion I wrote claiming the position marker "renders
+without a live Google map". It does not — it is an `<AdvancedMarker>` child,
+so it hits exactly the constraint already recorded here for every other pin,
+and the test failed with 0 elements. Coverage moved to a unit test of
+`useCurrentPosition` against a stubbed geolocation API, which is the same
+split MarkerBadge already uses: pin colours unit, legend e2e.
+
+The second was a real defect in that hook, surfaced by writing the test: its
+cleanup re-read `navigator.geolocation` instead of using the object it
+created the watch on. A global that gets swapped underneath a mounted
+component — a test stub, a polyfill — then either throws or silently leaks
+the watch. Fixed by holding the reference.
+
+Also worth recording: widening `logEntrySchema.refType` to include `'stop'`
+made the compiler stop in `viewSharedTrip`, because that payload lists every
+field it sends by hand rather than spreading. That is the design working —
+the one payload crossing the trust boundary to a non-member cannot gain a
+field by accident.
+
+Verification: lint 0, build 0, frontend **299**, functions **644**, e2e
+**136**.
+
+All eight phases of the board rework are shipped.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

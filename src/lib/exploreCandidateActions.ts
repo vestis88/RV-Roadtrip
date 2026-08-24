@@ -4,6 +4,7 @@ import { sortAlongRoute } from '@rv/shared'
 import type {
   CorridorStop,
   CorridorStopPriority,
+  OvernightStopCandidate,
   EmptyCountry,
   LatLng,
   Trip,
@@ -58,6 +59,27 @@ export async function setCandidatePriority(
   await updateDoc(doc(db, 'trips', tripId, 'corridorStops', stopId), {
     priority,
   })
+}
+
+/**
+ * Somewhere to sleep near a stop, on demand (2026-08-23).
+ *
+ * Requested: "Every activity should get a suggested
+ * camping/stellplatz/free camping at the push of a button." Resolved when
+ * asked for rather than up front, because it costs Places, Overpass and
+ * sometimes Claude — a whole corridor's worth, resolved eagerly, is the
+ * impossibility that made the day-by-day version lazy in the first place.
+ */
+export async function findStopOvernightOptions(
+  tripId: string,
+  stopId: string,
+): Promise<OvernightStopCandidate[]> {
+  const call = httpsCallable<
+    { tripId: string; stopId: string },
+    { candidates: OvernightStopCandidate[] }
+  >(functions, 'getStopOvernightCandidates')
+  const { data } = await call({ tripId, stopId })
+  return data.candidates
 }
 
 /**

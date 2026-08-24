@@ -218,6 +218,85 @@ function normalizeStopName(name: string): string {
     .trim()
 }
 
+/**
+ * The same search, returning what it found instead of writing it.
+ *
+ * Requested 2026-08-23 for the live "what's around us now" screen: "the
+ * results are a scratch list for right now — nothing is saved unless you tap
+ * Add." Someone looking for lunch three times a day would otherwise fill
+ * their corridor with two hundred pins they never chose.
+ *
+ * A separate callable rather than a flag on the one below, because the two
+ * differ in the only thing that matters about a search endpoint — whether it
+ * mutates the trip — and a boolean deciding that is exactly the parameter
+ * someone forgets to pass. They share findStopsForQuery, which is where the
+ * cost and the judgement are.
+ */
+export const searchNearby = onCall(
+  {
+    secrets: [claudeApiKey, googlePlacesApiKey],
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be signed in')
+    }
+    requireAccess(request.auth)
+    const tripId = request.data?.tripId
+    const center = request.data?.center as LatLng | undefined
+    const radiusKm = request.data?.radiusKm
+    const query = request.data?.query
+    if (
+      typeof tripId !== 'string' ||
+      typeof center?.lat !== 'number' ||
+      typeof center?.lng !== 'number' ||
+      typeof radiusKm !== 'number' ||
+      typeof query !== 'string' ||
+      query.trim().length === 0
+    ) {
+      throw new HttpsError(
+        'invalid-argument',
+        'tripId, center {lat,lng}, radiusKm and a non-empty query are required',
+      )
+    }
+    if (radiusKm <= 0 || radiusKm > MAX_RESCAN_RADIUS_KM) {
+      throw new HttpsError(
+        'invalid-argument',
+        `radiusKm must be between 0 and ${MAX_RESCAN_RADIUS_KM}`,
+      )
+    }
+    await requireTripMember(tripId, request.auth.uid)
+
+    const tripSnap = await getFirestore().collection('trips').doc(tripId).get()
+    const trip = tripSnap.data() as Trip | undefined
+    if (!trip) throw new HttpsError('not-found', 'Trip not found')
+
+    // The traveler's own notes and interests steer this exactly as they
+    // steer a rescan — "cozy over mainstream" means the same thing whether
+    // it is asked three months out or from a lay-by.
+    const { finds } = await findStopsForQuery({
+      query,
+      center,
+      radiusKm,
+      notesFreeText: trip.notes.freeText,
+      interests: trip.settings.interests,
+      tripId,
+    })
+
+    return {
+      finds: finds.map((find) => ({
+        name: find.name,
+        lat: find.lat,
+        lng: find.lng,
+        country: find.country,
+        why: find.why,
+        ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
+        ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
+      })),
+    }
+  },
+)
+
 export const rescanCorridor = onCall(
   {
     secrets: [claudeApiKey, googlePlacesApiKey],
