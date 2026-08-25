@@ -162,7 +162,7 @@ export function MapSearchPanel({
   return (
     <div
       data-testid="map-search-panel"
-      className="w-64 rounded-xl border border-neutral-300 bg-white/95 p-2 text-xs shadow-md backdrop-blur-sm dark:border-neutral-600 dark:bg-neutral-900/95"
+      className="w-72 rounded-xl border border-neutral-300 bg-white/95 p-2 text-xs shadow-md backdrop-blur-sm dark:border-neutral-600 dark:bg-neutral-900/95"
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex gap-1" role="radiogroup" aria-label="Search around">
@@ -283,23 +283,50 @@ export function MapSearchPanel({
             </p>
           ) : (
             <>
-              <ul className="max-h-40 space-y-1 overflow-y-auto">
+              {/* The photo and the reason, not just the name.
+                *
+                * Reported 2026-08-24: "the good descriptions and pictures
+                * were dropped, so the whole functionality seems wrong." Half
+                * of that was the server picking the Places path, which has
+                * no photo and a template blurb (see findStopsForQuery) — and
+                * half was this list, which had both fields in hand and
+                * rendered neither. A result you cannot judge is not a
+                * result; the name alone is what a search engine returns, not
+                * what this app is for. */}
+              <ul className="max-h-64 space-y-2 overflow-y-auto">
                 {finds.map((find) => (
-                  <li
-                    key={find.name}
-                    data-testid="live-find"
-                    className="flex items-start justify-between gap-2"
-                  >
-                    <span className="min-w-0 flex-1">{find.name}</span>
-                    <button
-                      type="button"
-                      data-testid={`live-add-${find.name}`}
-                      className="btn btn-sm btn-outline disabled:opacity-40"
-                      disabled={addedFindNames.has(find.name)}
-                      onClick={() => onAddFind(find)}
-                    >
-                      {addedFindNames.has(find.name) ? 'Added' : 'Add'}
-                    </button>
+                  <li key={find.name} data-testid="live-find" className="card p-2">
+                    {find.photoUrl && (
+                      <img
+                        src={find.photoUrl}
+                        alt=""
+                        decoding="async"
+                        data-testid={`live-find-photo-${find.name}`}
+                        className="-mx-2 -mt-2 mb-1.5 h-20 w-[calc(100%+1rem)] max-w-none object-cover"
+                      />
+                    )}
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 flex-1 font-medium text-neutral-900 dark:text-white">
+                        {find.name}
+                      </span>
+                      <button
+                        type="button"
+                        data-testid={`live-add-${find.name}`}
+                        className="btn btn-sm btn-outline shrink-0 disabled:opacity-40"
+                        disabled={addedFindNames.has(find.name)}
+                        onClick={() => onAddFind(find)}
+                      >
+                        {addedFindNames.has(find.name) ? 'Added' : 'Add'}
+                      </button>
+                    </div>
+                    {find.why && (
+                      <p
+                        data-testid={`live-find-why-${find.name}`}
+                        className="mt-1 leading-relaxed text-neutral-600 dark:text-neutral-300"
+                      >
+                        {find.why}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>

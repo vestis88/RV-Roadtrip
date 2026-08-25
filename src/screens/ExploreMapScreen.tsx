@@ -40,7 +40,6 @@ import {
   exploreFailureMessage,
   generateExploreHighlights,
   setCandidatePriority,
-  sortCandidatesForList,
 } from '../lib/exploreCandidateActions'
 import type { ExploreAttemptBaseline } from '../lib/exploreCandidateActions'
 import { isoCountryFlag } from '../lib/countryFlag'
@@ -78,6 +77,7 @@ import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 import { removeStopFromRoute } from '../lib/dayCleanup'
 import { canEditRoute } from '../lib/routeEditing'
 import { arrivalEstimates } from '../lib/arrivalEstimates'
+import { orderCandidatesByRoute } from '../lib/candidateOrder'
 import { quantisePosition, routeOriginFor } from '../lib/routeOrigin'
 import { useNavigate } from 'react-router-dom'
 
@@ -234,46 +234,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // Route order, not interest order: the list reads as the drive itself, so
   // a stop's neighbours in it are its neighbours on the map. Interest level
   // lives on each card instead (see ExploreCandidateCard).
-  const orderedCandidates = useMemo(
-    () =>
-      sortCandidatesForList(
-        candidates,
-        trip.settings.startPoint,
-        trip.settings.endPoint,
-      ),
-    [candidates, trip.settings.startPoint, trip.settings.endPoint],
-  )
-  /**
-   * The planning list is what is LEFT.
-   *
-   * Requested 2026-08-24: "done things should be removed from the planning
-   * list, only visible as checked symbols on the map." This reverses the
-   * earlier call to keep them in the list, muted — which was made on the
-   * theory that a trip looking emptier the more you had done was the wrong
-   * feedback, and which is simply worse than this once you are on the road
-   * and the list is a to-do rather than a record.
-   *
-   * Two escape hatches, because Undo lives on the card and removing the card
-   * would remove the undo the traveler asked for in the same breath:
-   *
-   *  - a done stop whose PIN is tapped renders anyway (selectedId), which is
-   *    what makes the checked pin a real control rather than decoration;
-   *  - "Show done" brings them all back, so they are not lost to anyone who
-   *    cannot find the pin.
-   */
-  const [showDone, setShowDone] = useState(false)
-  const doneCount = useMemo(
-    () => candidates.filter((stop) => !!stop.doneAt).length,
-    [candidates],
-  )
-  const listedCandidates = useMemo(
-    () =>
-      orderedCandidates.filter(
-        (stop) => !stop.doneAt || showDone || selectedId === stop.id,
-      ),
-    [orderedCandidates, showDone, selectedId],
-  )
-
   // What the route is actually built through: everything explicitly kept
   // (`locked`), and nothing else.
   //
@@ -578,6 +538,56 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       ),
     [originPoint, trip.settings.endPoint, routeStops],
   )
+  // Route order, not a projection onto the start→end line — see
+  // orderCandidatesByRoute. Declared after `backbone` because it needs it.
+  const orderedCandidates = useMemo(
+    () =>
+      orderCandidatesByRoute({
+        candidates,
+        routeStops,
+        backbone,
+        startPoint: trip.settings.startPoint,
+        endPoint: trip.settings.endPoint,
+      }),
+    [
+      candidates,
+      routeStops,
+      backbone,
+      trip.settings.startPoint,
+      trip.settings.endPoint,
+    ],
+  )
+  /**
+   * The planning list is what is LEFT.
+   *
+   * Requested 2026-08-24: "done things should be removed from the planning
+   * list, only visible as checked symbols on the map." This reverses the
+   * earlier call to keep them in the list, muted — which was made on the
+   * theory that a trip looking emptier the more you had done was the wrong
+   * feedback, and which is simply worse than this once you are on the road
+   * and the list is a to-do rather than a record.
+   *
+   * Two escape hatches, because Undo lives on the card and removing the card
+   * would remove the undo the traveler asked for in the same breath:
+   *
+   *  - a done stop whose PIN is tapped renders anyway (selectedId), which is
+   *    what makes the checked pin a real control rather than decoration;
+   *  - "Show done" brings them all back, so they are not lost to anyone who
+   *    cannot find the pin.
+   */
+  const [showDone, setShowDone] = useState(false)
+  const doneCount = useMemo(
+    () => candidates.filter((stop) => !!stop.doneAt).length,
+    [candidates],
+  )
+  const listedCandidates = useMemo(
+    () =>
+      orderedCandidates.filter(
+        (stop) => !stop.doneAt || showDone || selectedId === stop.id,
+      ),
+    [orderedCandidates, showDone, selectedId],
+  )
+
   // The same corridor the backbone describes, in words — so the search
   // prompt can say "along the route through Helsingør, Hillerød…" instead
   // of listing latitudes (see reverseGeocode.ts for what that cost).

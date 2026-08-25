@@ -2651,6 +2651,83 @@ Verification: lint 0, build 0, frontend **350**, e2e **142**
 (`dayview.spec.ts:140` flaked in the full run and passes in isolation — the
 known ordering flakiness).
 
+### 2026-08-24 (late) — the list follows the route, and Claude leads the search
+
+**The candidate list is in driving order now.** *"The list is not updating
+according to the logical chronological order, not even when locked in."*
+
+It was sorted by `sortAlongRoute`, which projects every stop onto the
+straight line from the trip's start to its end and sorts by that one number.
+For a loop or an out-and-back that scalar says almost nothing, and the drive
+order is not recoverable from it — the same failure `guessedOrder` already
+carries a note about, where a projection sent a trip north through Sweden to
+reach Estonia. The real order was sitting unused: `routeStops` IS the driving
+order, and it already draws the route line, the leg rows and the arrival
+dates. The list was the one thing re-deriving a worse order from scratch,
+which is why it disagreed with everything around it. Unkept candidates take
+the place they WOULD have, via `findCheapestBackboneLeg` — the same function
+behind the "≈+41 km" badge, so a card's position and its advertised detour
+cannot disagree about which leg it belongs to.
+
+**Three of the six tests I wrote for that proved nothing.** Run against the
+old projection they gave identical answers, so they would have passed before
+and after. Replaced with an out-and-back — south to Verona, back north to
+Innsbruck, then Venice — which the projection gets demonstrably wrong
+(`innsbruck,verona`) and the route order gets right. Verified by running the
+old function against the same coordinates rather than by reasoning about it.
+
+**Claude now leads every search, with Places as the fallback.** *"Don't
+expect to find pizza when I search all of Italy for things to do. Also, the
+good descriptions and pictures were dropped… I'd also like the std Claude
+search to be default also for zoomed in, and places if nothing is found."*
+
+Both halves were structural, not incidental:
+
+- **The blurb.** The Places branch describes a find with `describePlace` —
+  its Google summary, its star rating, "Matched your search: …". That is the
+  generic-description complaint from 2026-08-18, and the board-rework notes
+  name wiring anything new to it as the trap to avoid.
+- **The photo.** The Places branch never set `photoUrl` at all. Not a lookup
+  that missed — a field it never populated. Pictures were not dropped from
+  that path; they were never reachable down it. The Claude path verifies
+  every find through `verifyPlaceLocation`, which is where a photo and a
+  listing link come from.
+
+And a text search takes the query literally: "something worth doing nearby
+right now" over Tuscany returns the Tower of Pisa, because that is what
+ranks — not because anyone weighed it against a family that came for
+mountain biking.
+
+The latency that set the original order was a Claude path running WEB
+SEARCH, which took minutes and blew the client timeout. That tool was
+removed in August; what remains is one tool-free turn plus verification.
+Slower than Places, nowhere near the failure that set the order.
+
+Half the reported regression was mine and had nothing to do with the server:
+the merged search panel had `why` and `photoUrl` in hand and rendered
+neither. A result you cannot judge is not a result.
+
+**An existing e2e test caught a real regression in the inversion, and my own
+new test had encoded the wrong behaviour.** With Places first, a search in a
+credential-less environment ended in a rejected promise and an error banner.
+With Claude first, each failure was caught on the way to the next path, and
+the traveler was told "nothing found in that circle" — advice to widen a
+search that never ran. A search that broke must never read as a search that
+found nothing, so both engines erroring now throws. Note the condition:
+Claude answering "nothing here" is a real answer even if Places then falls
+over.
+
+**On the zoom limits, since they were asked about:** there is no gate that
+switches engines by zoom, and after this change Claude runs at every radius
+including the smallest. What exists is a 1 km floor and a 150 km cap
+(`MAX_RESCAN_RADIUS_KM`), the latter a quality bound rather than a cost one.
+Worth noting the two halves of the report pull against each other: searching
+all of Italy for "things to do" is exactly the question the cap exists to
+prevent.
+
+Verification: lint 0, build 0, frontend **356**, functions **646**, e2e
+**142** — clean.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
