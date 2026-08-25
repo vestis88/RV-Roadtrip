@@ -833,11 +833,19 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         * PlanStrip has no header of its own now and the board owns which of
         * its panels is open.
         *
-        * These keep the full 44px `btn` height rather than `btn-sm`. The
-        * first version shrank them and broke the tap-target floor the e2e
-        * suite asserts on — compactness here comes from deleting three rows,
-        * not from making the targets harder to hit on the iPad this is used
-        * from.
+        * The two primary buttons are `btn-sm` (36px), reported 2026-08-24
+        * as "unreasonably big" on an iPhone.
+        *
+        * That is below the 44px touch minimum, and worth stating rather than
+        * hiding: an earlier pass here shrank every button on the row, the
+        * suite caught it, and it was restored on the argument that
+        * compactness should come from deleting rows instead. Two things
+        * changed since. The rows ARE deleted now — the plan actions collapse
+        * behind "More" — and 36px is what every other control on this screen
+        * already is, from the interest chips to "We've done this", so 44px
+        * here was the odd one out rather than the standard. The nav links
+        * and the revealed plan actions keep the full height, and the e2e
+        * suite still measures those.
         *
         * The notices moved OUT of this row and onto their own line below:
         * they are sentences, and a sentence in a row of pill buttons wraps
@@ -849,7 +857,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         <button
           type="button"
           data-testid="explore-find-stops-button"
-          className="btn btn-primary"
+          className="btn btn-sm btn-primary"
           disabled={exploring}
           onClick={() => void runFindStops()}
         >
@@ -867,7 +875,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         <button
           type="button"
           data-testid="explore-generate-plan-button"
-          className="btn btn-secondary disabled:opacity-40"
+          className="btn btn-sm btn-secondary disabled:opacity-40"
           disabled={!canCommit || planBusy}
           onClick={() => setConfirmOpen(true)}
         >

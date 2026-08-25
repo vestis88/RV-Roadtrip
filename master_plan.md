@@ -2761,8 +2761,25 @@ offered only where there are locked stops to rebuild from), and the existing
 44px tap-target test had to learn that the button it measures now lives
 behind a disclosure — which is itself a tap target, so both are measured now.
 
-Verification: lint 0, build 0, frontend **356**, e2e **145**
-(`dayview.spec.ts:140` flaked in the full run and passes in isolation).
+**And then the two primary buttons came down to 36px** — reported as
+"unreasonably big" on the phone.
+
+Worth stating rather than hiding, because it reverses an argument made
+earlier the same day. A first pass shrank every button on that row, the
+tap-target suite caught it at 36px against a 44px floor, and it was restored
+on the reasoning that compactness should come from deleting rows instead.
+Two things changed after that. The rows ARE deleted now — the plan actions
+collapse behind "More" — and 36px is what every other control on this screen
+already is, from the interest chips to "We've done this", so 44px on these
+two was the odd one out rather than the standard.
+
+The full height stays where it earns its keep: the nav links, and the plan
+actions revealed behind the disclosure. "More" itself keeps it too, which is
+why the row still measures 57px — it is a text-only button whose height is
+hit area rather than visible pill, so a taller target sits beside smaller
+pills at no visual cost. The e2e suite still measures all of those.
+
+Verification: lint 0, build 0, frontend **356**, e2e **145** — clean.
 
 ### Known documentation gap
 
