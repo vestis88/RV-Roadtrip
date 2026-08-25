@@ -119,9 +119,23 @@ export function planSkeleton(input: {
   return { days }
 }
 
-/** Activities, restaurants or a finished detail pass — anything paid for. */
+/**
+ * Anything on this day that was paid for.
+ *
+ * `detailStatus` alone was not enough once sections could be filled one at a
+ * time (2026-08-25). A day whose lunch was filled by hand is still
+ * `pending` — correctly, since the rest was never asked for — and this
+ * function's whole job is to stop the automatic writer rebuilding over work
+ * somebody bought. Reading `filledSections` is what keeps that promise; it
+ * is on the day document precisely so this can be answered without a
+ * subcollection read, since planSkeleton runs on the client against day docs.
+ */
 function hasDetail(day: TripDayWithId): boolean {
-  return day.detailStatus === 'ready' || day.detailStatus === 'generating'
+  return (
+    day.detailStatus === 'ready' ||
+    day.detailStatus === 'generating' ||
+    (day.filledSections?.length ?? 0) > 0
+  )
 }
 
 function toTripDay(
@@ -228,7 +242,29 @@ export async function writeSkeletonDays(
 ): Promise<void> {
   const daysRef = collection(db, 'trips', tripId, 'days')
   const existing = await getDocs(daysRef)
+
+  // Firestore does not cascade. Deleting a day document leaves its
+  // activities, restaurants and overnight options addressable forever —
+  // found 2026-08-25, and every rebuild until now orphaned them. The same
+  // delete-the-contents-first shape applyDayCleanup and generatePlan's
+  // writeGeneratedDays already use.
+  const contents = await Promise.all(
+    existing.docs.map(async (day) => {
+      const [activities, restaurants, overnightOptions] = await Promise.all([
+        getDocs(collection(day.ref, 'activities')),
+        getDocs(collection(day.ref, 'restaurants')),
+        getDocs(collection(day.ref, 'overnightOptions')),
+      ])
+      return [activities, restaurants, overnightOptions]
+    }),
+  )
+
   const batch = writeBatch(db)
+  for (const snaps of contents) {
+    for (const snap of snaps) {
+      snap.docs.forEach((entry) => batch.delete(entry.ref))
+    }
+  }
   for (const old of existing.docs) batch.delete(old.ref)
   for (const day of days) batch.set(doc(daysRef), day)
   batch.update(doc(db, 'trips', tripId), {

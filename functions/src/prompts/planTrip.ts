@@ -4,6 +4,7 @@ import type { LatLng, TripSettings } from '@rv/shared'
 import { geocodeQuery, verifyPlaceLocation } from '../placesApi.js'
 import { logClaudeUsage, type ClaudeCallType } from '../claudeUsageLogger.js'
 import { salvageJsonPrefix, stripCodeFences } from './jsonFromClaude.js'
+import { buildDaySectionPrompt } from './daySectionPrompt.js'
 // Re-exported so this stays the import site it has always been for the
 // highlights salvage — the implementation moved because the rescan path
 // needed it too, and had spent months failing without it.
@@ -25,6 +26,8 @@ import {
   type RegionHighlightsResponse,
   type RouteOutline,
   type RouteOutlineDay,
+  daySectionResponseSchema,
+  type DaySectionResponse,
 } from './planTripSchema.js'
 
 export const claudeApiKey = defineSecret('CLAUDE_API_KEY')
@@ -263,6 +266,36 @@ export async function generateChunkDetail(
     16000,
     parseChunkDetail,
     { callType: options?.callType ?? 'detail', tripId: options?.tripId },
+  )
+}
+
+/**
+ * Fills ONE section of ONE day — the activities, or one meal's restaurants.
+ *
+ * Requested 2026-08-25: "the content could be generated for it with a click
+ * on that empty header (lunch) for instance."
+ *
+ * `maxTokens` is a fifth of generateChunkDetail's, because the answer is a
+ * fifth of the size: three restaurants or five activities for one day,
+ * rather than five and nine for three days.
+ *
+ * No prompt cache breakpoint. The whole-trip path caches its stable block
+ * because it makes the same call per chunk with a byte-identical prefix;
+ * this is one call about one day, so there is no second call to hit a cache.
+ */
+export async function generateDaySection(
+  client: Anthropic,
+  input: Parameters<typeof buildDaySectionPrompt>[0],
+  options?: { tripId?: string },
+): Promise<DaySectionResponse> {
+  const { system, user } = buildDaySectionPrompt(input)
+  return callWithRetry(
+    client,
+    system,
+    user,
+    4000,
+    (text) => daySectionResponseSchema.parse(JSON.parse(stripCodeFences(text))),
+    { callType: 'daySection', tripId: options?.tripId },
   )
 }
 

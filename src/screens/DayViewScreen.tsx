@@ -9,6 +9,7 @@ import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { DayDetailGate } from '../components/DayDetailGate'
+import { fillDaySection } from '../lib/dayDetailAction'
 import { buildDayRoutePoints } from '../lib/buildOverviewRoute'
 import { CardRow } from '../components/CardRow'
 import { FitToPoints } from '../components/FitToPoints'
@@ -117,10 +118,62 @@ function PlaceCardSection({
     }
   }
 
+  /**
+   * Filling this one section, because someone asked for this one section.
+   *
+   * Requested 2026-08-25. Offered only when the section is EMPTY: once there
+   * are cards here, "skip" and "select" already bring in replacements one at
+   * a time, and a button that replaced the lot would undo choices rather
+   * than add to them.
+   */
+  const [filling, setFilling] = useState(false)
+  const [fillError, setFillError] = useState<string | null>(null)
+  const isEmpty = entries.length === 0
+
+  async function fill() {
+    setFilling(true)
+    setFillError(null)
+    try {
+      await fillDaySection(tripId, dayId, kind, meal)
+    } catch (error) {
+      console.error('fillDaySection failed', error)
+      setFillError('Could not fill that in — please try again.')
+    } finally {
+      setFilling(false)
+    }
+  }
+
   return (
     <CardRow
       title={title}
       testId={rowTestId}
+      empty={
+        isEmpty ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid={`${rowTestId}-fill`}
+              className="btn btn-sm btn-secondary disabled:opacity-40"
+              disabled={filling}
+              onClick={() => void fill()}
+            >
+              {filling
+                ? 'Finding…'
+                : kind === 'activity'
+                  ? 'Find things to do'
+                  : `Find ${meal}`}
+            </button>
+            {fillError && (
+              <span
+                data-testid={`${rowTestId}-fill-error`}
+                className="text-xs text-red-600 dark:text-red-400"
+              >
+                {fillError}
+              </span>
+            )}
+          </div>
+        ) : undefined
+      }
       footer={
         skipped.length > 0 || requeuing || notice ? (
           <span className="flex flex-wrap items-center gap-2">

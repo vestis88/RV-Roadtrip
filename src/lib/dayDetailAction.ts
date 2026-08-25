@@ -1,5 +1,5 @@
 import { httpsCallable } from 'firebase/functions'
-import type { TripDay } from '@rv/shared'
+import type { DaySection, Meal, TripDay } from '@rv/shared'
 import { functions } from './firebase'
 import { LONG_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 
@@ -31,6 +31,29 @@ export async function detailDaysFrom(
     { detailed: number; alreadyReady: number }
   >(functions, 'detailDays', { timeout: LONG_CALLABLE_TIMEOUT_MS })
   const result = await call({ tripId, fromDayId })
+  return result.data
+}
+
+/**
+ * Fills one section of one day — the activities, or one meal's restaurants.
+ *
+ * Requested 2026-08-25: "the content could be generated for it with a click
+ * on that empty header (lunch) for instance." See
+ * functions/src/detailDaySectionCallable.ts for why this cannot just be a
+ * smaller detailDays: it must not mark the day 'ready', or the day list
+ * stops being derived from the locked stops the moment you fill one meal.
+ */
+export async function fillDaySection(
+  tripId: string,
+  dayId: string,
+  kind: 'activity' | 'restaurant',
+  meal?: Meal,
+): Promise<{ section: DaySection; written: number }> {
+  const call = httpsCallable<
+    { tripId: string; dayId: string; kind: string; meal?: Meal },
+    { section: DaySection; written: number }
+  >(functions, 'detailDaySection', { timeout: LONG_CALLABLE_TIMEOUT_MS })
+  const result = await call({ tripId, dayId, kind, ...(meal ? { meal } : {}) })
   return result.data
 }
 

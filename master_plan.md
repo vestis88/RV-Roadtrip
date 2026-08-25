@@ -2868,6 +2868,70 @@ that already worked.
 
 Verification: lint 0, build 0, frontend **369**, e2e **147** — clean.
 
+### 2026-08-25 (evening) — detail is bought by asking, not by looking
+
+*"I want to generate the bare minimum for the days, the locked in activities
+for the day… it should have the same structure as previously generated days,
+just that the content could be generated for it with a click on that empty
+header (lunch) for instance. I want it more dynamic."*
+
+Two thirds of that already existed as "Rebuild day list". The third turned
+out not to be a nicety but the thing holding the other two up.
+
+**Why the dynamic day list kept dying.** `DayDetailGate` fired `detailDays`
+the moment a day was opened — that day and the two after it — which sets
+`detailStatus: 'ready'`, which is exactly what `planSkeleton` refuses to
+rebuild over. So a traveler could rebuild a clean list derived from their
+locked stops, OPEN one day to look at it, and find the list frozen again.
+**Detail was being bought by looking.** Nothing was wrong with the guard; the
+spending was in the wrong place.
+
+So the gate no longer asks. Each empty section offers to fill itself, and the
+gate offers the whole day for anyone who wants all of it. Opening a day costs
+nothing, and the list stays derived from the stops for as long as nobody
+spends anything on it. An e2e test holds that line: opening a pending day
+must leave its `detailStatus` and `detailError` untouched.
+
+**The new callable is not a smaller `detailDays`,** and the differences are
+the design:
+
+- It **never touches `detailStatus`** — a day with only its lunch filled is
+  not "ready", and saying so would both lie and stop the whole-day pass ever
+  running on it.
+- It records **`filledSections`** instead: the day-document signal that
+  something here was paid for. It lives on the day rather than being counted
+  from subcollections because `planSkeleton` is what needs it, and that runs
+  on the client against day docs only.
+- It **replaces only its own scope.** `detailDays` clears a day's activities
+  AND restaurants before writing, which is right for a whole-day pass and
+  would have destroyed the other three sections here.
+- **Deterministic document ids** (`lunch-0`, `activity-3`), so two taps that
+  race cannot each delete the old scope and then add their own three, leaving
+  six.
+
+**A separate prompt, not a narrowed one.** `DETAIL_SYSTEM_PROMPT` is tuned,
+sits in the paid whole-trip path, and its shape is "exactly 5 activities and
+exactly 9 restaurants" — editing it to take a category would put every full
+generation at risk to serve a button. The new one asks a smaller question.
+What must not drift between them is the anti-generic-blurb rule, since
+`researchMoreAlternatives` fills sections from Places with a template
+sentence and that is what produced the "quite generic" complaint in August;
+a test asserts both prompts still carry it, phrase by phrase.
+
+**A leak found on the way.** `writeSkeletonDays` deleted day documents but
+not their `activities`/`restaurants`/`overnightOptions` subcollections.
+Firestore does not cascade, so every rebuild since that function existed has
+orphaned them. It now reads and deletes the contents first, the same shape
+`applyDayCleanup` and `writeGeneratedDays` already use.
+
+Two fixture mistakes of mine, both caught by the suites rather than by
+reasoning: the callable test's mocked places had no coordinates (those are
+what `enrichDayDetail` adds, and the schemas require them), and the prompt
+test's outline day was missing its `highlightReason`.
+
+Verification: lint 0, build 0, frontend **372**, functions **660**, e2e
+**149** (`map.spec.ts:33` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

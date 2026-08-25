@@ -487,6 +487,28 @@ export const tripDaySchema = z.object({
    * the connection that asked for it. Cleared when detail succeeds.
    */
   detailError: z.string().optional(),
+  /**
+   * Which of this day's sections the traveler has asked to be filled in,
+   * one at a time (2026-08-25: "the content could be generated for it with
+   * a click on that empty header (lunch) for instance").
+   *
+   * Separate from `detailStatus`, which is about the WHOLE day, and it has
+   * to be: a day with only its lunch filled is not 'ready' — the rest is
+   * still unasked-for — and calling it ready would also stop the whole-day
+   * pass from ever running on it.
+   *
+   * It lives on the day document rather than being counted from the
+   * activities/restaurants subcollections because `planSkeleton` is the one
+   * that needs to know, and it runs on the client against day documents
+   * only. Its whole job is to refuse to rebuild days that carry paid-for
+   * content, and it cannot read a subcollection to find out.
+   *
+   * ABSENT MEANS NOTHING WAS ASKED FOR, which is true of every day written
+   * before this existed and of every skeleton day.
+   */
+  filledSections: z
+    .array(z.enum(['activity', 'breakfast', 'lunch', 'dinner']))
+    .optional(),
 })
 
 // Persistent, always-editable route corridor (2026-07-29): one entry per
@@ -1074,6 +1096,9 @@ export type LpgInfo = z.infer<typeof lpgInfoSchema>
 export type CountryBriefSection = z.infer<typeof countryBriefSectionSchema>
 export type CountryBrief = z.infer<typeof countryBriefSchema>
 export type CountryGuideSection = z.infer<typeof countryGuideSectionSchema>
+/** One fillable part of a day — see tripDay.filledSections. */
+export type DaySection = NonNullable<TripDay['filledSections']>[number]
+
 export type LogEntry = z.infer<typeof logEntrySchema>
 export type SharedTripPlace = z.infer<typeof sharedTripPlaceSchema>
 export type SharedTripDay = z.infer<typeof sharedTripDaySchema>

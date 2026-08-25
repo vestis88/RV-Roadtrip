@@ -35,6 +35,7 @@ export {
   searchNearby,
 } from './rescanCorridorCallable.js'
 export { detailDays } from './detailDaysCallable.js'
+export { detailDaySection } from './detailDaySectionCallable.js'
 export { generateExploreHighlights } from './exploreHighlightsCallable.js'
 export { previewReconcileCorridor } from './previewReconcileCorridorCallable.js'
 export { researchMoreAlternatives } from './researchMoreAlternativesCallable.js'

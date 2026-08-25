@@ -227,5 +227,22 @@ export const chunkDetailResponseSchema = z.object({
   days: z.array(dayDetailSchema).min(1),
 })
 
+/**
+ * One section of one day (2026-08-25), asked for by a click on an empty
+ * heading rather than by opening the day.
+ *
+ * Both arrays are optional and neither is length-fixed, which is the whole
+ * difference from `dayDetailSchema`: a request for lunch comes back with
+ * three restaurants and no activities, and demanding the other nine would
+ * make the narrow call impossible to answer. The COUNT is enforced by the
+ * caller, which knows which section it asked for.
+ */
+export const daySectionResponseSchema = z.object({
+  activities: z.array(skeletonActivitySchema).optional(),
+  restaurants: z.array(skeletonRestaurantSchema).optional(),
+})
+
+export type DaySectionResponse = z.infer<typeof daySectionResponseSchema>
+
 export type DayDetail = z.infer<typeof dayDetailSchema>
 export type ChunkDetailResponse = z.infer<typeof chunkDetailResponseSchema>

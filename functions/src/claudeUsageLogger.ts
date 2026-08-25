@@ -4,6 +4,8 @@ export type ClaudeCallType =
   | 'highlights'
   | 'outline'
   | 'detail'
+  /** One section of one day, filled on request — see daySectionPrompt. */
+  | 'daySection'
   | 'reconcileDetail'
   | 'rescan'
   | 'overnight'

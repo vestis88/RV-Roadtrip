@@ -233,3 +233,80 @@ describe('rebuilding the day list over researched detail', () => {
     expect(decision.skipped).toBe('no-dates')
   })
 })
+
+/**
+ * Requested 2026-08-25 alongside per-section fill. A day whose lunch was
+ * filled by hand is still `pending` — correctly, since the rest was never
+ * asked for — so `detailStatus` alone stopped being enough to answer "is
+ * there anything here somebody paid for".
+ */
+describe('protecting hand-filled sections', () => {
+  const base = {
+    stops: [stop({ id: 's1', name: 'Füssen' })],
+    legs: [],
+    settings: SETTINGS,
+    planMeta: READY,
+  }
+
+  it('refuses to rebuild over a day with a filled section', () => {
+    const decision = planSkeleton({
+      ...base,
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive' as const,
+          overnight: { name: 'Elsewhere', lat: 0, lng: 0, country: 'NO' },
+          summary: '',
+          detailStatus: 'pending' as const,
+          filledSections: ['lunch' as const],
+        },
+      ],
+    })
+    expect(decision.skipped).toBe('has-detail')
+  })
+
+  // An empty list is the same as never having asked — every skeleton day and
+  // every day written before this existed.
+  it('still rebuilds over a day that has asked for nothing', () => {
+    const decision = planSkeleton({
+      ...base,
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive' as const,
+          overnight: { name: 'Elsewhere', lat: 0, lng: 0, country: 'NO' },
+          summary: '',
+          detailStatus: 'pending' as const,
+          filledSections: [],
+        },
+      ],
+    })
+    expect(decision.skipped).toBeUndefined()
+    expect(decision.days?.length).toBeGreaterThan(0)
+  })
+
+  // The explicit rebuild still overrides it — the traveler is told what it
+  // discards and chose anyway.
+  it('lets an explicit rebuild go ahead regardless', () => {
+    const decision = planSkeleton({
+      ...base,
+      rebuildOverDetail: true,
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive' as const,
+          overnight: { name: 'Elsewhere', lat: 0, lng: 0, country: 'NO' },
+          summary: '',
+          filledSections: ['activity' as const],
+        },
+      ],
+    })
+    expect(decision.skipped).toBeUndefined()
+  })
+})

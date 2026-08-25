@@ -283,7 +283,48 @@ test('selecting an activity reveals a time-of-day picker that writes the chosen 
 // route for the whole trip and the activities/restaurants for only the first
 // few days. Everything past that window carries its route and is filled in
 // when it is opened.
-test('a day past the eager window says it is being worked out, and asks for itself', async ({
+/**
+ * Rewritten 2026-08-25, when the gate stopped asking on its own.
+ *
+ * It used to fire `detailDays` on open, which set `detailStatus: 'ready'` —
+ * exactly the condition planSkeleton refuses to rebuild over. So a traveler
+ * could rebuild a day list derived from their locked stops, open ONE day to
+ * look at it, and find the list frozen. Detail was bought by LOOKING. It is
+ * bought by asking now, and this test is what holds that line: opening a
+ * pending day must change nothing about it.
+ */
+test('opening a day that has nothing yet spends nothing', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-11')
+  const dayRef = adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+  await dayRef.update({ detailStatus: 'pending' })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('day-detail-pending')).toBeVisible()
+  await expect(page.getByTestId('day-detail-fill-all')).toBeVisible()
+
+  // Nothing was claimed, nothing was generated, nothing failed. Given a beat
+  // to be sure the old auto-request really is gone rather than merely slow.
+  await expect
+    .poll(async () => (await dayRef.get()).data()?.detailStatus, {
+      timeout: 5_000,
+    })
+    .toBe('pending')
+  expect((await dayRef.get()).data()?.detailError).toBeUndefined()
+})
+
+/**
+ * And when it IS asked for, the failure still lands on the day, where it
+ * outlives the connection that asked — CLAUDE_API_KEY is not configured in
+ * this credential-less emulator, so the request fails by design.
+ */
+test('asking for the whole day reports a failure on the day itself', async ({
   page,
 }) => {
   const tripId = await createTripWithPlan(page)
@@ -297,13 +338,8 @@ test('a day past the eager window says it is being worked out, and asks for itse
 
   await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
+  await page.getByTestId('day-detail-fill-all').click()
 
-  await expect(page.getByTestId('day-detail-gate')).toBeVisible()
-
-  // CLAUDE_API_KEY isn't configured in this credential-less emulator, so the
-  // request it just fired fails — and the point is that the failure lands on
-  // the day, where it outlives the connection that asked for it, rather than
-  // leaving a spinner and no explanation.
   await expect(page.getByTestId('day-detail-error')).toBeVisible({
     timeout: 30_000,
   })
@@ -317,6 +353,39 @@ test('a day past the eager window says it is being worked out, and asks for itse
   // running is a spinner forever.
   expect(day.data()?.detailStatus).toBe('pending')
   expect(day.data()?.detailError).toBeTruthy()
+})
+
+/**
+ * Requested 2026-08-25: "the content could be generated for it with a click
+ * on that empty header (lunch) for instance."
+ */
+test('an empty section offers to fill just itself', async ({ page }) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-11')
+  const dayRef = adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .doc(dayId)
+  await dayRef.update({ detailStatus: 'pending' })
+  for (const snap of (await dayRef.collection('restaurants').get()).docs) {
+    await snap.ref.delete()
+  }
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await expect(page.getByTestId('lunch-row-fill')).toBeVisible()
+  await page.getByTestId('lunch-row-fill').click()
+
+  // No Claude key here, so it degrades — what matters is that the button
+  // asked for LUNCH and nothing else, and said so when it could not.
+  await expect(page.getByTestId('lunch-row-fill-error')).toBeVisible({
+    timeout: 30_000,
+  })
+  // Still not "ready": a section that failed cannot have detailed the day,
+  // and neither can one that succeeded.
+  expect((await dayRef.get()).data()?.detailStatus).toBe('pending')
 })
 
 // Absent means ready. Every day written before the split carries its detail
