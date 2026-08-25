@@ -44,6 +44,16 @@ test('primary nav links and the request-changes button meet the 44px tap target 
   }
 
   await page.getByTestId('nav-map').click()
+  // Behind "More" at phone width since 2026-08-24 — the five plan actions
+  // wrapped the row three times over and left the stop list a couple of
+  // card-heights. Both the disclosure and what it reveals still have to be
+  // tappable, so both are measured.
+  const moreBox = await page.getByTestId('more-plan-actions').boundingBox()
+  expect(moreBox?.height ?? 0, 'more-plan-actions height').toBeGreaterThanOrEqual(
+    MIN_TAP_TARGET_PX,
+  )
+
+  await page.getByTestId('more-plan-actions').click()
   const requestChangesBox = await page
     .getByTestId('request-changes-button')
     .boundingBox()

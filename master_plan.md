@@ -2728,6 +2728,42 @@ prevent.
 Verification: lint 0, build 0, frontend **356**, functions **646**, e2e
 **142** — clean.
 
+### 2026-08-24 (last) — the header again, this time for a phone
+
+*"The iPhone view is now very limited for scrolling the list at the bottom.
+The top should be further compacted!"*
+
+The header was compacted for an iPad earlier the same day and measured
+there. At 390px the same five actions wrapped the row three times over and
+the totals took two more lines, so the list — the thing you actually curate
+in — was left with a couple of card-heights.
+
+Fixed responsively rather than by shrinking everything: the three plan
+actions sit inline wherever they fit and collapse behind **"More"** where
+they do not, at Tailwind's own `sm:` breakpoint, so no JavaScript decides
+layout and there is nothing to keep in sync. The two longest labels get a
+short form on narrow screens ("Full plan (23)"), the word "driving" — which
+earns nothing beside a distance — drops out, and "from where we are" becomes
+"from here".
+
+Measured, not assumed: at 390×844 the actions row is one line (57px), the
+totals one line (33px), and the list **280px**, up from roughly 150. The new
+spec asserts those by bounding box, the same call the iPad split test makes,
+because what breaks here is a layout that computes wrong rather than a
+utility that goes missing. A tablet case asserts the opposite — everything
+inline, no "More" — so a phone-shaped fix cannot quietly undo the row that
+was asked for in the first place.
+
+Two test corrections of my own, both mine rather than the product's: an
+assertion that "Rebuild day list" appears behind the disclosure was a claim
+about the FIXTURE (whose stops are all `committed`, while that button is
+offered only where there are locked stops to rebuild from), and the existing
+44px tap-target test had to learn that the button it measures now lives
+behind a disclosure — which is itself a tap target, so both are measured now.
+
+Verification: lint 0, build 0, frontend **356**, e2e **145**
+(`dayview.spec.ts:140` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

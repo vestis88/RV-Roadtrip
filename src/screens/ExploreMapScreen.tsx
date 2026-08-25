@@ -189,6 +189,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   )
   const navigate = useNavigate()
   const [changeRequestOpen, setChangeRequestOpen] = useState(false)
+  const [morePlanActionsOpen, setMorePlanActionsOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -842,7 +843,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
         * they are sentences, and a sentence in a row of pill buttons wraps
         * the row and undoes the compaction it was put there for. */}
       <div
-        className="surface flex flex-wrap items-center justify-center gap-2 border-b border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
+        className="surface flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800"
         data-testid="explore-header"
       >
         <button
@@ -852,11 +853,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           disabled={exploring}
           onClick={() => void runFindStops()}
         >
-          {exploring
-            ? 'Finding great stops…'
-            : candidates.length > 0
-              ? 'Find more stops'
-              : 'Find great stops'}
+          {exploring ? (
+            'Finding great stops…'
+          ) : candidates.length > 0 ? (
+            <>
+              <span className="sm:hidden">Find stops</span>
+              <span className="hidden sm:inline">Find more stops</span>
+            </>
+          ) : (
+            'Find great stops'
+          )}
         </button>
         <button
           type="button"
@@ -865,43 +871,77 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           disabled={!canCommit || planBusy}
           onClick={() => setConfirmOpen(true)}
         >
-          {planBusy
-            ? 'Starting the full plan…'
-            : `Generate full plan (${candidates.length} stop${candidates.length === 1 ? '' : 's'})`}
+          {planBusy ? (
+            'Starting the full plan…'
+          ) : (
+            <>
+              {/* The longest label on the row, and the one that pushes the
+                * two primary buttons onto separate lines on a phone. */}
+              <span className="sm:hidden">
+                Full plan ({candidates.length})
+              </span>
+              <span className="hidden sm:inline">
+                Generate full plan ({candidates.length} stop
+                {candidates.length === 1 ? '' : 's'})
+              </span>
+            </>
+          )}
         </button>
         {days.length > 0 && (
           <>
+            {/* On a phone these three wrap the row twice over, which is what
+              * left almost no room for the list below the map (reported
+              * 2026-08-24 from an iPhone: "very limited for scrolling the
+              * list at the bottom. The top should be further compacted").
+              * Shown inline wherever they fit, behind "More" where they do
+              * not — `sm:` rather than a measured breakpoint, so there is no
+              * JS deciding layout and nothing to keep in sync. */}
             <button
               type="button"
-              data-testid="request-changes-button"
-              className="btn btn-ghost disabled:opacity-40"
-              disabled={planBusy}
-              onClick={() => setChangeRequestOpen(true)}
+              data-testid="more-plan-actions"
+              className="btn btn-ghost sm:hidden"
+              aria-expanded={morePlanActionsOpen}
+              onClick={() => setMorePlanActionsOpen((open) => !open)}
             >
-              {planBusy ? 'Updating…' : 'Request changes'}
+              {morePlanActionsOpen ? 'Less' : 'More'}
             </button>
-            {routeStops.length > 0 && (
+            <div
+              className={`${
+                morePlanActionsOpen ? 'flex' : 'hidden'
+              } w-full flex-wrap items-center justify-center gap-2 sm:flex sm:w-auto`}
+            >
               <button
                 type="button"
-                data-testid="rebuild-days-button"
+                data-testid="request-changes-button"
                 className="btn btn-ghost disabled:opacity-40"
                 disabled={planBusy}
-                onClick={() => setRebuildOpen(true)}
+                onClick={() => setChangeRequestOpen(true)}
               >
-                Rebuild day list
+                {planBusy ? 'Updating…' : 'Request changes'}
               </button>
-            )}
-            {canEditRoute(days, corridorStops) && (
-              <button
-                type="button"
-                data-testid="reorder-stops-button"
-                className="btn btn-ghost disabled:opacity-40"
-                disabled={planBusy}
-                onClick={() => setReorderOpen(true)}
-              >
-                {planBusy ? 'Updating the plan…' : 'Edit route'}
-              </button>
-            )}
+              {routeStops.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="rebuild-days-button"
+                  className="btn btn-ghost disabled:opacity-40"
+                  disabled={planBusy}
+                  onClick={() => setRebuildOpen(true)}
+                >
+                  Rebuild day list
+                </button>
+              )}
+              {canEditRoute(days, corridorStops) && (
+                <button
+                  type="button"
+                  data-testid="reorder-stops-button"
+                  className="btn btn-ghost disabled:opacity-40"
+                  disabled={planBusy}
+                  onClick={() => setReorderOpen(true)}
+                >
+                  {planBusy ? 'Updating the plan…' : 'Edit route'}
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -997,8 +1037,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 <>
                   <span className="font-medium text-neutral-900 dark:text-white">
                     {formatDriveTime(routeTotals.durationMin)}
-                  </span>{' '}
-                  driving · {Math.round(routeTotals.distanceKm)} km
+                  </span>
+                  {/* "driving" is the one word here that earns nothing: the
+                    * figure beside a distance is obviously a drive, and on a
+                    * phone it was part of what pushed this row onto a third
+                    * line. */}
+                  <span className="hidden sm:inline"> driving</span> ·{' '}
+                  {Math.round(routeTotals.distanceKm)} km
                 </>
               ) : (
                 <span className="text-neutral-500 dark:text-neutral-400">
@@ -1022,7 +1067,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               className="chip chip-accent"
               title="Distances and dates are measured from where you are, not from the trip's start point"
             >
-              from where we are
+              <span className="sm:hidden">from here</span>
+              <span className="hidden sm:inline">from where we are</span>
             </span>
           )}
           {days.length > 0 && (

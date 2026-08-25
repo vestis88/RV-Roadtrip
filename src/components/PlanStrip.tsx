@@ -255,7 +255,7 @@ export function PlanStrip({
         * screen — the exact failure the list below was given a height cap
         * for on 2026-08-19. */}
       <div
-        className="flex gap-1.5 overflow-x-auto border-b border-neutral-200 px-3 py-2 dark:border-neutral-800"
+        className="flex gap-1.5 overflow-x-auto border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800"
         data-testid="day-strip"
       >
         {days.map((day) => (
