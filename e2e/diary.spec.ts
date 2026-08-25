@@ -133,7 +133,10 @@ test('marking a stop done from the board files it in the diary on the day given'
   // visible as checked symbols on the map". "Show done" is what brings it
   // back, and is the reason Undo is still reachable.
   await expect(page.getByTestId(`explore-candidate-${stop.id}`)).toHaveCount(0)
-  await page.getByTestId('toggle-show-done').click()
+  // The "Show done" toggle became one bucket of the list filter on
+  // 2026-08-25 — two differently shaped controls for the same idea was one
+  // mechanism too many.
+  await page.getByTestId('candidate-filter-done').click()
   await expect(
     page.getByTestId(`explore-candidate-done-at-${stop.id}`),
   ).toBeVisible()

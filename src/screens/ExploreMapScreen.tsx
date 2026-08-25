@@ -78,6 +78,13 @@ import { removeStopFromRoute } from '../lib/dayCleanup'
 import { canEditRoute } from '../lib/routeEditing'
 import { arrivalEstimates } from '../lib/arrivalEstimates'
 import { orderCandidatesByRoute } from '../lib/candidateOrder'
+import {
+  CANDIDATE_FILTER_LABEL,
+  CANDIDATE_FILTER_ORDER,
+  countByFilter,
+  filterCandidates,
+  type CandidateFilter,
+} from '../lib/candidateFilter'
 import { quantisePosition, routeOriginFor } from '../lib/routeOrigin'
 import { useNavigate } from 'react-router-dom'
 
@@ -561,34 +568,30 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     ],
   )
   /**
-   * The planning list is what is LEFT.
+   * Which bucket of stops the list is showing.
    *
-   * Requested 2026-08-24: "done things should be removed from the planning
-   * list, only visible as checked symbols on the map." This reverses the
-   * earlier call to keep them in the list, muted — which was made on the
-   * theory that a trip looking emptier the more you had done was the wrong
-   * feedback, and which is simply worse than this once you are on the road
-   * and the list is a to-do rather than a record.
+   * Requested 2026-08-25: "There should be a filter for the list below the
+   * map. Selecting only locked in, only must see, only not locked in or all."
    *
-   * Two escape hatches, because Undo lives on the card and removing the card
-   * would remove the undo the traveler asked for in the same breath:
+   * This REPLACES the "Show done (N)" toggle rather than sitting beside it.
+   * Done stops leave the planning list by request (2026-08-24), and having
+   * two differently shaped controls for the same idea was one mechanism too
+   * many — "Done" is simply one of the buckets now.
    *
-   *  - a done stop whose PIN is tapped renders anyway (selectedId), which is
-   *    what makes the checked pin a real control rather than decoration;
-   *  - "Show done" brings them all back, so they are not lost to anyone who
-   *    cannot find the pin.
+   * A stop whose PIN is tapped renders whatever the filter says, because a
+   * tap that highlights nothing looks like a broken map — and it is still
+   * the only way back to Undo for a done stop.
    */
-  const [showDone, setShowDone] = useState(false)
-  const doneCount = useMemo(
-    () => candidates.filter((stop) => !!stop.doneAt).length,
-    [candidates],
-  )
+  const [listFilter, setListFilter] = useState<CandidateFilter>('all')
+  const filterCounts = useMemo(() => countByFilter(candidates), [candidates])
   const listedCandidates = useMemo(
     () =>
       orderedCandidates.filter(
-        (stop) => !stop.doneAt || showDone || selectedId === stop.id,
+        (stop) =>
+          selectedId === stop.id ||
+          filterCandidates([stop], listFilter).length > 0,
       ),
-    [orderedCandidates, showDone, selectedId],
+    [orderedCandidates, listFilter, selectedId],
   )
 
   // The same corridor the backbone describes, in words — so the search
@@ -1347,6 +1350,44 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             </p>
           ) : (
             <div className="space-y-2">
+              {/* Which stops to show. A bucket per chip, with its own count
+                * from the same predicate that does the filtering — a chip
+                * promising seven above a list of five is the disagreement
+                * this codebase already learned about from the header and the
+                * itinerary. Empty buckets are not offered: a chip reading
+                * "Done (0)" is a control that can only disappoint. */}
+              <div
+                role="radiogroup"
+                aria-label="Which stops to show"
+                data-testid="candidate-filter"
+                className="flex flex-wrap gap-1"
+              >
+                {CANDIDATE_FILTER_ORDER.filter(
+                  (filter) => filter === 'all' || filterCounts[filter] > 0,
+                ).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    role="radio"
+                    aria-checked={listFilter === filter}
+                    data-testid={`candidate-filter-${filter}`}
+                    onClick={() => setListFilter(filter)}
+                    className={`chip px-2.5 py-1 ${
+                      listFilter === filter ? 'chip-accent' : 'chip-neutral'
+                    }`}
+                  >
+                    {CANDIDATE_FILTER_LABEL[filter]} ({filterCounts[filter]})
+                  </button>
+                ))}
+              </div>
+              {listedCandidates.length === 0 && (
+                <p
+                  data-testid="candidate-filter-empty"
+                  className="p-3 text-center text-sm text-neutral-500 dark:text-neutral-400"
+                >
+                  No stops match that filter.
+                </p>
+              )}
               {/* Search results first, and in the list rather than in the
                 * map overlay — see SearchFindCard. They sit above the stops
                 * because they are the answer to the question just asked. */}
@@ -1455,6 +1496,21 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                         : undefined
                     }
                     arrival={arrivals.get(stop.id)}
+                    // Only for a stop that is actually in the route: an
+                    // unlocked candidate has no day because it has not been
+                    // chosen, which is not a problem to solve.
+                    onBuildDays={
+                      // `days.length > 0` because the panel this opens lives
+                      // in PlanStrip, which only renders once a plan has
+                      // days — offering it before that would be a button
+                      // that does nothing. With no days at all the skeleton
+                      // writer is about to make some anyway, unprompted.
+                      days.length > 0 &&
+                      stop.status === 'locked' &&
+                      (stop.linkedDayIds ?? []).length === 0
+                        ? () => setRebuildOpen(true)
+                        : undefined
+                    }
                     onOpenDay={(() => {
                       // The first day this stop is on. A stop can span
                       // several (a basecamp), and the first is the one the
@@ -1510,18 +1566,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   />
                 </div>
               ))}
-              {doneCount > 0 && (
-                <button
-                  type="button"
-                  data-testid="toggle-show-done"
-                  className="btn btn-sm btn-ghost w-full"
-                  onClick={() => setShowDone((shown) => !shown)}
-                >
-                  {showDone
-                    ? 'Hide done'
-                    : `Show done (${doneCount})`}
-                </button>
-              )}
             </div>
           )}
         </div>

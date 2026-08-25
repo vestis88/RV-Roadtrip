@@ -2828,6 +2828,46 @@ gone."
 Verification: lint 0, build 0, frontend **361**, e2e **146**
 (`dayview.spec.ts:140` flaked in the full run and passes in isolation).
 
+### 2026-08-25 (later) — a filter for the list, and why locked days do not exist
+
+**A filter, with two buckets beyond the four asked for.** *"Selecting only
+locked in, only must see, only not locked in or all. Add more if that makes
+sense."* Both additions replace something rather than piling on:
+
+- **Done** folds in the "Show done (N)" toggle from the day before. Done
+  stops leave the planning list by request, and a second, differently shaped
+  control for getting them back was one mechanism too many.
+- **No day yet** answers the other half of the same message. Counts come from
+  the same predicate that does the filtering, and empty buckets are not
+  offered — a chip reading "Done (0)" is a control that can only disappoint.
+
+**"I don't know how to get to that view for the locked in days. I feel like
+that should auto generate. Possible?"**
+
+It already does — and the reason it had not for this trip is worth stating,
+because the honest answer is not "yes" or "no".
+
+Locking a stop in does not create a day. Days come from `planSkeleton`, which
+derives them from the kept stops for free and writes them automatically. It
+holds off on exactly one condition: a trip where any day carries researched
+detail. That guard is right — that detail was paid for, and silently
+discarding it would be far worse than the missing day — but its consequence
+was invisible. A locked stop simply had no way into Day View and said nothing
+about why.
+
+So the card says it now: **"No day yet — build the day list"**, which opens
+the same panel that has been on the header since yesterday. Fully automatic
+generation over researched detail is the one thing deliberately NOT done: it
+would mean a background effect deleting activities and restaurants because a
+stop was locked. The button is one tap and says what it discards.
+
+Offered only where it can work — `days.length > 0`, since the panel lives in
+PlanStrip and PlanStrip only renders once the plan has days. With no days at
+all the skeleton writer is about to make some unprompted, which is the case
+that already worked.
+
+Verification: lint 0, build 0, frontend **369**, e2e **147** — clean.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

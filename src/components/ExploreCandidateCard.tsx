@@ -95,6 +95,18 @@ interface ExploreCandidateCardProps {
    */
   onOpenDay?: () => void
   /**
+   * This stop is in the route but has no day yet, so there is nothing to
+   * open — offered instead of `onOpenDay`, never alongside it.
+   *
+   * Reported 2026-08-25: "the day view. I don't know how to get to that view
+   * for the locked in days." Locking a stop in does not create a day; days
+   * come from the skeleton writer, which holds off on a trip that already
+   * carries researched detail so it cannot destroy it. The result was a
+   * locked stop that simply had no way into Day View and said nothing about
+   * why. This is that missing sentence, with the button that fixes it.
+   */
+  onBuildDays?: () => void
+  /**
    * Roughly when we get here (2026-08-24: "Locked in activities should get
    * an estimated date based on what is on our current route"). Absent for a
    * stop that is not in the route — an arrival date for somewhere you have
@@ -177,6 +189,7 @@ export function ExploreCandidateCard({
   onMarkDone,
   onUndoDone,
   onOpenDay,
+  onBuildDays,
   arrival,
   onFindOvernight,
   findingOvernight,
@@ -653,6 +666,20 @@ export function ExploreCandidateCard({
           >
             Photos &amp; details
           </a>
+          {!onOpenDay && onBuildDays && (
+            <button
+              type="button"
+              data-testid={`explore-candidate-build-days-${stop.id}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onBuildDays()
+              }}
+              className="link text-xs"
+              title="This stop is in your route but has no day yet"
+            >
+              No day yet — build the day list
+            </button>
+          )}
           {onOpenDay && (
             <button
               type="button"

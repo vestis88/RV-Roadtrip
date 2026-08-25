@@ -78,3 +78,73 @@ test.describe('on a tablet', () => {
     await expect(page.getByTestId('more-plan-actions')).toBeHidden()
   })
 })
+
+/**
+ * Requested 2026-08-25: "There should be a filter for the list below the map.
+ * Selecting only locked in, only must see, only not locked in or all."
+ */
+test.describe('filtering the list', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('each bucket shows what its count promises', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const stops = adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+    const kept = await stops.add({
+      name: 'Partnach Gorge',
+      lat: 47.47,
+      lng: 11.12,
+      country: 'DE',
+      status: 'locked',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      rank: 0,
+    })
+    const loose = await stops.add({
+      name: 'Eibsee',
+      lat: 47.45,
+      lng: 10.98,
+      country: 'DE',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'must-see',
+      rank: 1,
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('candidate-filter').waitFor()
+
+    // Everything ahead of you.
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toBeVisible()
+    await expect(page.getByTestId(`explore-candidate-${loose.id}`)).toBeVisible()
+
+    await page.getByTestId('candidate-filter-locked').click()
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toBeVisible()
+    await expect(page.getByTestId(`explore-candidate-${loose.id}`)).toHaveCount(0)
+
+    await page.getByTestId('candidate-filter-unlocked').click()
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toHaveCount(0)
+    await expect(page.getByTestId(`explore-candidate-${loose.id}`)).toBeVisible()
+
+    await page.getByTestId('candidate-filter-must-see').click()
+    await expect(page.getByTestId(`explore-candidate-${loose.id}`)).toBeVisible()
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toHaveCount(0)
+
+    // The bucket that answers "I can't get to Day View for my locked stops":
+    // in the route, but with no day behind it.
+    await page.getByTestId('candidate-filter-no-day').click()
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toBeVisible()
+    await expect(
+      page.getByTestId(`explore-candidate-build-days-${kept.id}`),
+    ).toBeVisible()
+  })
+})
