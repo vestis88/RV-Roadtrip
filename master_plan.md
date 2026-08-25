@@ -2781,6 +2781,53 @@ pills at no visual cost. The e2e suite still measures all of those.
 
 Verification: lint 0, build 0, frontend **356**, e2e **145** — clean.
 
+### 2026-08-25 — search results become things you can actually use
+
+*"Search is still broken. Results are just shown in a small list, not on map
+properly. Even worse, results added to the map are not possible to interact
+with, even though they have been added to the trip. At restart, the added
+results are gone."*
+
+Three symptoms, two confirmed defects, and one claim that needed a test
+rather than an argument.
+
+**Results in a 288px overlay.** Mine, from moving the search onto the map: the
+results came with it, into a panel with room for a name and a button. A find
+carries a photo and a paragraph about why it suits this trip, and neither
+fits there. Results now render in the list below the map, in the same column
+and the same shape as the stops they might become — dashed rather than solid,
+because that is the one real difference: nothing is part of the trip until it
+is added. The panel keeps only the controls and a one-line count.
+
+**Find pins were decoration.** They had no `onClick` at all, on a map where
+every other pin opens something. They select now, highlight their card, and
+scroll it into view — the same treatment stop pins have had since the card
+list existed.
+
+**And the added find left a dead pin on top of the live one.** After "Add",
+the find stayed in the ephemeral list, so two pins sat at the same
+coordinates: the new interactive stop, and the search result covering it with
+nothing to open. That is exactly "added to the trip but not possible to
+interact with". A saved find is retired from the ephemeral list now, handing
+the spot to the pin that does something.
+
+**"At restart, the added results are gone" could not be settled by reading**,
+so the write moved out of the screen into `addFind.ts` with a test that pins
+what it writes, and an e2e test drives the resulting stop through a reload:
+it renders a card, the card's actions work, and it is still there afterwards.
+The write was correct. What was gone at restart were the ephemeral 🔎 pins,
+which vanish by design — indistinguishable, from the outside, from a save
+that failed. The three UI fixes above are what make that distinction visible.
+
+One hardening while in there: optional fields are spread conditionally rather
+than passed as `undefined`, since Firestore rejects an undefined field value
+outright — a find with no photo would have thrown and taken the whole add
+with it, which is precisely the shape of "it said Added and then it was
+gone."
+
+Verification: lint 0, build 0, frontend **361**, e2e **146**
+(`dayview.spec.ts:140` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

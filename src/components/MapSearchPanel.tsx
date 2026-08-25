@@ -58,8 +58,6 @@ export function MapSearchPanel({
   onArmedChange,
   onFinds,
   finds,
-  onAddFind,
-  addedFindNames,
 }: {
   tripId: string
   mapCenter: LatLng
@@ -77,8 +75,6 @@ export function MapSearchPanel({
   /** Ephemeral finds, lifted so the map can draw them. */
   onFinds: (finds: LiveFind[] | null) => void
   finds: LiveFind[] | null
-  onAddFind: (find: LiveFind) => void
-  addedFindNames: Set<string>
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -272,73 +268,26 @@ export function MapSearchPanel({
         </p>
       )}
 
-      {/* Nothing above is saved. Said out loud, because the button below it
-        * saves everything it finds, and the difference is the only thing
-        * separating these two searches. */}
+      {/* The results themselves render in the LIST below the map, not here.
+        *
+        * Reported 2026-08-25: "Results are just shown in a small list, not on
+        * map properly." A find carries a photo and a paragraph about why it
+        * suits this trip, and this overlay is a few hundred pixels wide —
+        * so it kept the controls and gave the results back to the column
+        * that was built for exactly this shape of card. */}
       {finds && (
-        <div className="mt-2" data-testid="live-finds">
+        <p className="mt-2 text-neutral-500 dark:text-neutral-400" data-testid="live-finds">
           {finds.length === 0 ? (
-            <p data-testid="live-empty" className="text-neutral-500 dark:text-neutral-400">
+            <span data-testid="live-empty">
               Nothing found in that circle. Try wider, or a different wording.
-            </p>
+            </span>
           ) : (
-            <>
-              {/* The photo and the reason, not just the name.
-                *
-                * Reported 2026-08-24: "the good descriptions and pictures
-                * were dropped, so the whole functionality seems wrong." Half
-                * of that was the server picking the Places path, which has
-                * no photo and a template blurb (see findStopsForQuery) — and
-                * half was this list, which had both fields in hand and
-                * rendered neither. A result you cannot judge is not a
-                * result; the name alone is what a search engine returns, not
-                * what this app is for. */}
-              <ul className="max-h-64 space-y-2 overflow-y-auto">
-                {finds.map((find) => (
-                  <li key={find.name} data-testid="live-find" className="card p-2">
-                    {find.photoUrl && (
-                      <img
-                        src={find.photoUrl}
-                        alt=""
-                        decoding="async"
-                        data-testid={`live-find-photo-${find.name}`}
-                        className="-mx-2 -mt-2 mb-1.5 h-20 w-[calc(100%+1rem)] max-w-none object-cover"
-                      />
-                    )}
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 flex-1 font-medium text-neutral-900 dark:text-white">
-                        {find.name}
-                      </span>
-                      <button
-                        type="button"
-                        data-testid={`live-add-${find.name}`}
-                        className="btn btn-sm btn-outline shrink-0 disabled:opacity-40"
-                        disabled={addedFindNames.has(find.name)}
-                        onClick={() => onAddFind(find)}
-                      >
-                        {addedFindNames.has(find.name) ? 'Added' : 'Add'}
-                      </button>
-                    </div>
-                    {find.why && (
-                      <p
-                        data-testid={`live-find-why-${find.name}`}
-                        className="mt-1 leading-relaxed text-neutral-600 dark:text-neutral-300"
-                      >
-                        {find.why}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <p
-                data-testid="live-ephemeral-note"
-                className="mt-1 text-neutral-500 dark:text-neutral-400"
-              >
-                Shown on the map, saved only if you add them.
-              </p>
-            </>
+            <span data-testid="live-ephemeral-note">
+              {finds.length} on the map and in the list below — saved only if
+              you add them.
+            </span>
           )}
-        </div>
+        </p>
       )}
 
       <div className="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-700">

@@ -54,8 +54,8 @@ import { MapPanner } from '../components/MapPanner'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
-import { addDoc, collection } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { addFindToTrip } from '../lib/addFind'
+import { SearchFindCard } from '../components/SearchFindCard'
 import type { LiveFind } from '../lib/liveSearch'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
 import { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
@@ -136,6 +136,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   /** Ephemeral finds — see MapSearchPanel on why these are never written. */
   const [finds, setFinds] = useState<LiveFind[] | null>(null)
   const [addedFindNames, setAddedFindNames] = useState<Set<string>>(new Set())
+  /** Which find's pin was tapped — the same idea as selectedId, for finds. */
+  const [selectedFind, setSelectedFind] = useState<string | null>(null)
   const searchArea = useMemo(() => {
     const fromViewport = bounds
       ? visibleRadiusKm(bounds)
@@ -629,6 +631,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selectedId])
 
+  // The same for a find's pin, which now selects too — a tap that highlights
+  // a card 400px below the fold looks exactly like a tap that did nothing.
+  const findRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  useEffect(() => {
+    if (!selectedFind) return
+    findRefs.current[selectedFind]?.scrollIntoView({
+      block: 'nearest',
+      behavior: 'smooth',
+    })
+  }, [selectedFind])
+
   const selected = candidates.find((c) => c.id === selectedId) ?? null
 
   async function runFindStops() {
@@ -714,30 +727,26 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   /**
    * Saving one ephemeral find as an ordinary candidate.
    *
-   * The board decides what happens to it next, exactly as it would for a
-   * stop the traveler pinned by hand — which is why this writes `candidate`
-   * and `origin: 'traveler'` rather than anything special. Optimistic, and
-   * rolled back on failure: the button has to answer the tap on a phone at a
-   * lay-by, and a find that silently failed to save would be discovered a
-   * week later.
+   * The find is RETIRED from the ephemeral list on success, and that is the
+   * fix for a reported bug rather than tidiness: "results added to the map
+   * are not possible to interact with, even though they have been added to
+   * the trip." Both pins were being drawn at the same coordinates — the
+   * search result and the new stop — and the search pin, which has no card
+   * and nothing to open, sat on top of the real one. Removing it hands the
+   * spot to a pin that does something.
+   *
+   * Optimistic, and rolled back on failure: the button has to answer the tap
+   * at a lay-by, and a find that silently failed to save would be discovered
+   * a week later.
    */
-  async function addFindToTrip(find: LiveFind) {
+  async function saveFind(find: LiveFind) {
     setAddedFindNames((held) => new Set(held).add(find.name))
     try {
-      await addDoc(collection(db, 'trips', tripId, 'corridorStops'), {
-        name: find.name,
-        lat: find.lat,
-        lng: find.lng,
-        country: find.country,
-        why: find.why,
-        ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
-        ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
-        status: 'candidate',
-        linkedDayIds: [],
-        priority: 'worth-a-detour',
-        rank: 0,
-        origin: 'traveler',
-      })
+      await addFindToTrip(tripId, find)
+      setFinds((current) =>
+        current ? current.filter((f) => f.name !== find.name) : current,
+      )
+      if (selectedFind === find.name) setSelectedFind(null)
     } catch (error) {
       console.error('Adding a find failed', error)
       setAddedFindNames((held) => {
@@ -1243,8 +1252,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   position={{ lat: find.lat, lng: find.lng }}
                   title={find.name}
                   data-testid={`live-find-marker-${find.name}`}
+                  // Reported 2026-08-25: "results added to the map are not
+                  // possible to interact with." These pins had no onClick at
+                  // all — they were decoration on a map whose every other
+                  // pin opens something.
+                  onClick={() => setSelectedFind(find.name)}
                 >
-                  <MarkerBadge icon={LIVE_FIND_ICON} />
+                  <MarkerBadge
+                    icon={LIVE_FIND_ICON}
+                    highlighted={selectedFind === find.name}
+                  />
                 </AdvancedMarker>
               ))}
               {candidates.map((stop) => (
@@ -1310,8 +1327,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               onArmedChange={setAimingSearch}
               finds={finds}
               onFinds={setFinds}
-              addedFindNames={addedFindNames}
-              onAddFind={(find) => void addFindToTrip(find)}
             />
           </div>
         </div>
@@ -1332,6 +1347,26 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
             </p>
           ) : (
             <div className="space-y-2">
+              {/* Search results first, and in the list rather than in the
+                * map overlay — see SearchFindCard. They sit above the stops
+                * because they are the answer to the question just asked. */}
+              {(finds ?? []).map((find) => (
+                <SearchFindCard
+                  key={`find:${find.name}`}
+                  find={find}
+                  added={addedFindNames.has(find.name)}
+                  highlighted={selectedFind === find.name}
+                  innerRef={(element) => {
+                    findRefs.current[find.name] = element
+                  }}
+                  onSelect={() =>
+                    setSelectedFind((current) =>
+                      current === find.name ? null : find.name,
+                    )
+                  }
+                  onAdd={() => void saveFind(find)}
+                />
+              ))}
               {listedCandidates.map((stop) => (
                 <div key={stop.id}>
                   {legIntoStop.has(stop.id) && (

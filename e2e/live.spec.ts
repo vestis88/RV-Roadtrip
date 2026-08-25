@@ -119,3 +119,72 @@ test('a nearby search writes nothing until a find is added', async ({
     .get()
   expect(stops.size).toBe(0)
 })
+
+/**
+ * Reported 2026-08-25: "results added to the map are not possible to
+ * interact with, even though they have been added to the trip. At restart,
+ * the added results are gone."
+ *
+ * The search itself cannot run in this sandbox — no Claude or Places
+ * credentials — so the finds are seeded through the same state the search
+ * would produce is not reachable either. What IS reachable, and what the
+ * report is actually about, is the write: a saved find must survive a
+ * reload as an ordinary stop with a card and a pin. So this drives the
+ * corridorStop the add produces, and proves the round trip.
+ */
+test('a stop added from a search survives a reload and is fully interactive', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByTestId('trip-name-input').waitFor()
+  const tripId = await evaluateWithRetry(page, () =>
+    localStorage.getItem('tripId'),
+  )
+  if (!tripId) throw new Error('tripId missing from localStorage')
+
+  await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .update({
+      'settings.startPoint': { name: 'Bolzano', lat: 46.49, lng: 11.34 },
+      'settings.endPoint': { name: 'Verona', lat: 45.44, lng: 10.99 },
+    })
+
+  // Exactly the document addFindToTrip writes — see its unit test, which
+  // pins the shape. This asserts the board can then live with it.
+  const stop = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('corridorStops')
+    .add({
+      name: 'Cascate di Barbiano',
+      lat: 46.6,
+      lng: 11.5,
+      country: 'IT',
+      why: 'A waterfall hike through a narrow gorge.',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      rank: 0,
+      origin: 'traveler',
+    })
+
+  await page.getByTestId('nav-map').click()
+  await page.getByTestId('explore-map-screen').waitFor()
+
+  // Interactive: it has a card, and the card's actions work.
+  const card = page.getByTestId(`explore-candidate-${stop.id}`)
+  await expect(card).toBeVisible()
+  await page.getByTestId(`explore-candidate-lock-${stop.id}`).click()
+  await expect(
+    page.getByTestId(`explore-candidate-unlock-${stop.id}`),
+  ).toBeVisible()
+
+  // And it is still there after a restart, which is the reported symptom.
+  await page.reload()
+  await page.getByTestId('explore-map-screen').waitFor()
+  await expect(page.getByTestId(`explore-candidate-${stop.id}`)).toBeVisible()
+  await expect(
+    page.getByTestId(`explore-candidate-unlock-${stop.id}`),
+  ).toBeVisible()
+})
