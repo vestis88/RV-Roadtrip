@@ -123,7 +123,8 @@ test.describe('filtering the list', () => {
     await page.getByTestId('nav-map').click()
     await page.getByTestId('candidate-filter').waitFor()
 
-    // Everything ahead of you.
+    // This trip's dates are in the past, so it is not being travelled and
+    // the list opens on everything — see the derived default.
     await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toBeVisible()
     await expect(page.getByTestId(`explore-candidate-${loose.id}`)).toBeVisible()
 
@@ -294,5 +295,112 @@ test.describe('with location refused', () => {
     // actually REFUSED is unit-tested — clearing permissions here leaves the
     // answer merely unknown, not denied.
     await expect(page.getByTestId('go-to-my-location')).not.toBeEnabled()
+  })
+})
+
+/**
+ * The other half of the derived default: while planning, the list shows
+ * everything. Opening on "Locked in" would hide the candidates on the screen
+ * whose whole job is curation — and, worse, make them vanish the moment the
+ * first one was locked.
+ */
+test.describe('while still planning', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('the list opens on everything', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const loose = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Eibsee',
+        lat: 47.45,
+        lng: 10.98,
+        country: 'DE',
+        status: 'candidate',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 0,
+      })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('candidate-filter').waitFor()
+    await expect(
+      page.getByTestId(`explore-candidate-${loose.id}`),
+    ).toBeVisible()
+  })
+})
+
+/**
+ * And on the road it is a to-do: what is kept and still ahead, not twenty
+ * suggestions between the stops you committed to. Requested 2026-08-25:
+ * "The list should be locked in not done."
+ */
+test.describe('once the trip is under way', () => {
+  test.use({
+    viewport: { width: 1180, height: 820 },
+    // Dates alone are not enough — a trip created today spans today. Being
+    // somewhere on it, with a fix, is what makes this the road rather than
+    // the kitchen table.
+    permissions: ['geolocation'],
+    geolocation: { latitude: 47.47, longitude: 11.12 },
+  })
+
+  test('the list opens on what is kept', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const iso = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.startDate': iso(-1), 'settings.endDate': iso(5) })
+
+    const stops = adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+    const kept = await stops.add({
+      name: 'Partnach Gorge',
+      lat: 47.47,
+      lng: 11.12,
+      country: 'DE',
+      status: 'locked',
+      linkedDayIds: [],
+      priority: 'worth-a-detour',
+      rank: 0,
+    })
+    const loose = await stops.add({
+      name: 'Eibsee',
+      lat: 47.45,
+      lng: 10.98,
+      country: 'DE',
+      status: 'candidate',
+      linkedDayIds: [],
+      priority: 'must-see',
+      rank: 1,
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('candidate-filter').waitFor()
+
+    await expect(page.getByTestId(`explore-candidate-${kept.id}`)).toBeVisible()
+    await expect(
+      page.getByTestId(`explore-candidate-${loose.id}`),
+    ).toHaveCount(0, { timeout: 15_000 })
   })
 })

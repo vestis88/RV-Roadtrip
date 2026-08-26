@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { applyRouteOrder, isNewRouteOrder, routeOrderKey } from './routeOrder'
+import {
+  applyRouteOrder,
+  isNewRouteOrder,
+  manualRouteOrder,
+  mayOptimize,
+  routeOrderKey,
+} from './routeOrder'
 
 const stops = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
 const key = routeOrderKey(stops)
@@ -67,5 +73,33 @@ describe('routeOrderKey', () => {
     expect(routeOrderKey([{ id: 'a' }, { id: 'b' }])).not.toBe(
       routeOrderKey([{ id: 'a' }, { id: 'c' }]),
     )
+  })
+})
+
+/**
+ * Reported 2026-08-25: "For some reason, it made the locked in stops
+ * earlier. The list should be … starting with what is first on the route."
+ *
+ * Optimising from a moving origin re-answers a different question every few
+ * kilometres — "the best order from HERE" rather than "the best order for
+ * this trip" — so the list reshuffles as the van drives.
+ */
+describe('optimising while under way', () => {
+  it('leaves the order alone when the route starts from our position', () => {
+    expect(mayOptimize(null, true)).toBe(false)
+  })
+
+  it('still optimises from the trip’s own start point', () => {
+    expect(mayOptimize(null, false)).toBe(true)
+    // And the default is the planning case, so nothing else had to change.
+    expect(mayOptimize(null)).toBe(true)
+  })
+
+  // A manual order still wins either way — that override exists precisely so
+  // the next reply does not undo it.
+  it('never overrides a hand-made order', () => {
+    const manual = manualRouteOrder('k', [2, 0, 1])
+    expect(mayOptimize(manual, false)).toBe(false)
+    expect(mayOptimize(manual, true)).toBe(false)
   })
 })

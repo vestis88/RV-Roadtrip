@@ -99,7 +99,28 @@ export function manualRouteOrder(key: string, positions: number[]): RouteOrder {
  * False once the traveler has arranged it themselves: the whole point of an
  * override is that the next reply does not undo it. Resetting is simply
  * dropping the stored order, after which this is true again.
+ *
+ * ALSO false while the route is being drawn from the traveler's own position
+ * rather than the trip's start point, and that half is a fix rather than a
+ * preference. Reported 2026-08-25: "For some reason, it made the locked in
+ * stops earlier. The list should be locked in not done, starting with what
+ * is first on the route."
+ *
+ * Optimising from a moving origin re-answers a different question every few
+ * kilometres — "what is the best order from HERE" rather than "what is the
+ * best order for this trip" — so the list reshuffles as the van drives, and
+ * a stop that was first on the route stops being first the moment you pass
+ * it. Worse, the stored order is keyed on the SET of stops and not on where
+ * it was worked out from, so an order optimised from a lay-by in the
+ * Dolomites is indistinguishable from one optimised at the start line and
+ * gets applied just the same.
+ *
+ * So the order is a property of the trip, decided from its start point, and
+ * the position only decides where the drawn line begins.
  */
-export function mayOptimize(held: RouteOrder | null): boolean {
-  return !held?.manual
+export function mayOptimize(
+  held: RouteOrder | null,
+  routingFromPosition = false,
+): boolean {
+  return !held?.manual && !routingFromPosition
 }

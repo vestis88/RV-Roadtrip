@@ -603,8 +603,35 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    * tap that highlights nothing looks like a broken map — and it is still
    * the only way back to Undo for a done stop.
    */
-  const [listFilter, setListFilter] = useState<CandidateFilter>('all')
+  /**
+   * Which bucket the list shows, and what it shows before anyone has said.
+   *
+   * Requested 2026-08-25: "The list should be locked in not done, starting
+   * with what is first on the route." On the road that is exactly right —
+   * the list is a to-do, and twenty unlocked suggestions between the stops
+   * you committed to is not one.
+   *
+   * But it cannot be a fixed default, and it took two goes to find the right
+   * condition. A fixed 'locked' shows an empty list on a trip that has just
+   * found its first twenty candidates — the screen whose whole job is
+   * curation. Deriving it from "is anything locked" is worse in a subtler
+   * way: locking your FIRST stop then makes the other nineteen disappear
+   * mid-curation, which the e2e suite caught by trying to reject one.
+   *
+   * The real question is whether the traveler is planning or travelling.
+   * While planning, everything; on the road, what is kept and still ahead.
+   * `null` means nobody has chosen; once they do, their choice stands.
+   */
+  const [chosenFilter, setChosenFilter] = useState<CandidateFilter | null>(null)
   const filterCounts = useMemo(() => countByFilter(candidates), [candidates])
+  // `origin.fromPosition` and not merely "is the trip active today": a trip
+  // created this morning spans today by default, so that alone fires during
+  // curation — which is the case this default must not break. Routing from
+  // the traveler's own position needs the dates AND a real fix, which is as
+  // close to "on the road" as this screen can get.
+  const listFilter: CandidateFilter =
+    chosenFilter ??
+    (origin.fromPosition && filterCounts.locked > 0 ? 'locked' : 'all')
   const listedCandidates = useMemo(
     () =>
       orderedCandidates.filter(
@@ -1127,7 +1154,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               Your order — reset to Google&rsquo;s
             </button>
           )}
-          {!mayOptimize(routeOrder) ||
+          {!mayOptimize(routeOrder, origin.fromPosition) ||
           askedBackbone.length <= MAX_DIRECTIONS_POINTS_PER_REQUEST ? null : (
             /* Google optimises only when the whole route fits one request.
              * Past that it silently drove them in the order given, with
@@ -1231,7 +1258,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 // against real roads is strictly better information. The
                 // generated plan's route is NOT optimized: those points are
                 // days with dates on them.
-                optimizeOrder={mayOptimize(routeOrder)}
+                optimizeOrder={mayOptimize(routeOrder, origin.fromPosition)}
                 onOrder={handleOrder}
               />
               {/* Only while aiming. Drawn on every map all the time, it
@@ -1414,7 +1441,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                     role="radio"
                     aria-checked={listFilter === filter}
                     data-testid={`candidate-filter-${filter}`}
-                    onClick={() => setListFilter(filter)}
+                    onClick={() => setChosenFilter(filter)}
                     className={`chip px-2.5 py-1 ${
                       listFilter === filter ? 'chip-accent' : 'chip-neutral'
                     }`}

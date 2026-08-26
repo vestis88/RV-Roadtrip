@@ -2995,6 +2995,45 @@ already uses, and the same trap that caught the position marker in August.
 
 Verification: lint 0, build 0, frontend **389**, e2e **154** — clean.
 
+### 2026-08-25 (last) — the order stops moving, and the list knows what it is for
+
+*"For some reason, it made the locked in stops earlier. The list should be
+locked in not done, starting with what is first on the route."*
+
+**The reordering was mine, from that morning.** Once the route was drawn from
+the traveler's own position, Google was optimising from there too — which
+re-answers a different question every few kilometres ("the best order from
+HERE" rather than "the best order for this trip"), so a stop that was first
+stopped being first the moment it was passed. Worse, a stored order is keyed
+on the SET of stops and not on where it was worked out from, so an order
+optimised from a lay-by is indistinguishable from one optimised at the start
+line and gets applied just the same.
+
+So the ORDER is a property of the trip, decided from its start point, and the
+position only decides where the drawn line begins. `mayOptimize` takes that
+second condition now.
+
+**And the list defaults to what is kept and still ahead — but only on the
+road.** That took three attempts, each corrected by the suite rather than by
+argument:
+
+1. A fixed `'locked'` default showed an empty list on a trip that had just
+   found its first twenty candidates — the screen whose whole job is
+   curation. Nineteen specs said so at once.
+2. Deriving it from "is anything locked" was worse in a subtler way: locking
+   your FIRST stop then made the other nineteen vanish mid-curation. One spec
+   caught that, by trying to reject a stop it could no longer see.
+3. `isTripActiveToday` looked right and is not: a trip created this morning
+   spans today by default, so it fires during curation too.
+
+The signal that holds is `origin.fromPosition` — routing from the traveler's
+own position, which needs the dates AND a real fix. That is as close to "on
+the road" as this screen can get, and it is already computed for the route.
+Once the traveler picks a filter themselves, their choice stands.
+
+Verification: lint 0, build 0, frontend **392**, e2e **156**
+(`dayview.spec.ts:140` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
