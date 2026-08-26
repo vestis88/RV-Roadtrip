@@ -148,3 +148,102 @@ test.describe('filtering the list', () => {
     ).toBeVisible()
   })
 })
+
+/**
+ * Reported 2026-08-25: "The days on top are still som old irrelevant stuff.
+ * I want info about today, tomorrow and so on."
+ */
+test.describe('the day strip', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('starts at today, with the earlier days tucked away', async ({
+    page,
+  }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+
+    // Re-date the fixture's three days around today, so the trip is running.
+    const iso = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    const daysRef = adminDb.collection('trips').doc(tripId).collection('days')
+    const snap = await daysRef.orderBy('index').get()
+    await Promise.all(
+      snap.docs.map((doc, index) => doc.ref.update({ date: iso(index - 1) })),
+    )
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .update({
+        'settings.startDate': iso(-1),
+        'settings.endDate': iso(1),
+      })
+
+    await page.getByTestId('nav-map').click()
+    const strip = page.getByTestId('day-strip')
+    await strip.waitFor()
+
+    await expect(strip).toContainText('Today')
+    await expect(strip).toContainText('Tomorrow')
+    // Yesterday is behind the reveal, not on screen.
+    const yesterdayId = snap.docs[0].id
+    await expect(page.getByTestId(`day-strip-${yesterdayId}`)).toHaveCount(0)
+
+    await page.getByTestId('day-strip-show-past').click()
+    await expect(page.getByTestId(`day-strip-${yesterdayId}`)).toBeVisible()
+  })
+
+  // Before the trip there is no "today" inside it, and relabelling would be
+  // a lie — the strip is a plan, not a countdown.
+  test('numbers the days while the trip is still ahead', async ({ page }) => {
+    await createTripWithPlan(page)
+    await page.getByTestId('nav-map').click()
+    const strip = page.getByTestId('day-strip')
+    await strip.waitFor()
+
+    await expect(strip).toContainText('Day 1')
+    await expect(page.getByTestId('day-strip-show-past')).toHaveCount(0)
+  })
+
+  /**
+   * The "old irrelevant stuff" case: days from an earlier generation, and
+   * kept stops that none of them mention.
+   */
+  test('says when the days do not include the kept stops', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Partnach Gorge',
+        lat: 47.47,
+        lng: 11.12,
+        country: 'DE',
+        status: 'locked',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 0,
+      })
+
+    await page.getByTestId('nav-map').click()
+    const banner = page.getByTestId('days-out-of-step-banner')
+    await expect(banner).toBeVisible({ timeout: 10_000 })
+    await expect(banner).toContainText('earlier plan')
+
+    await page.getByTestId('days-out-of-step-rebuild').click()
+    await expect(page.getByTestId('rebuild-days-panel')).toBeVisible()
+  })
+})

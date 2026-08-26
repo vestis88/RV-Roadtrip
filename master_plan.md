@@ -2932,6 +2932,50 @@ test's outline day was missing its `highlightReason`.
 Verification: lint 0, build 0, frontend **372**, functions **660**, e2e
 **149** (`map.spec.ts:33` flaked in the full run and passes in isolation).
 
+### 2026-08-25 (late) — the strip starts at today, the map opens on us
+
+*"The days on top are still som old irrelevant stuff. I want info about
+today, tomorrow and so on… the default map location seems to be start point.
+Make this gps location at like 50 km edge to edge on screen."*
+
+Both are the same complaint in two places: on day twelve of a trip, the app
+opened on day one.
+
+**The day strip is anchored to today.** "Today" and "Tomorrow" carry the two
+days anyone acts on; past that a date beats a day number, because nobody
+counts to seventeen to work out when they are somewhere. Days behind you are
+hidden, not deleted — "where did we sleep on Tuesday" is a real question — so
+they sit behind a "← 3 earlier" chip. Before the trip starts, and after it
+ends, there is no "today" inside it and the strip stays exactly as it was:
+Day 1, Day 2. Relabelling a finished trip's last day "Today" would be a lie.
+
+**And when the days genuinely are old**, the board now says so. That was the
+literal case here: days left over from an earlier full generation, while six
+locked stops had no day at all. The automatic writer cannot fix it on its own
+— those days carry researched detail, and discarding it silently would be far
+worse than the stale strip — so there is a banner that counts the kept stops
+the day list has never heard of, with the one button that can.
+
+**The map opens on the GPS fix at ~50 km across.** ONCE, which is the whole
+subtlety: a watch reports a fix every few seconds, and re-centring on each
+would drag the map out from under anyone looking somewhere else — the same
+class of fault as the render-time pan that once locked this map up entirely.
+So it fires on the first fix, never again, and declines even that if the
+traveler has already moved the camera. `onDragstart`/`onZoomChanged` mark
+that rather than `onCameraChanged`, which cannot tell a gesture from our own
+`moveCamera`.
+
+The zoom is computed rather than constant, from the map element's real width
+and the latitude. Google's metres-per-pixel carries a `cos(latitude)`, so a
+fixed zoom means "50 km" only somewhere in between — it covers about a third
+less ground in northern Norway than at the Mediterranean. The test asserts
+the SPAN the resulting zoom actually covers, at three latitudes and two
+screen widths, rather than pinning a magic number: the number is only right
+if the span is.
+
+Verification: lint 0, build 0, frontend **384**, e2e **152**
+(`corridor.spec.ts:278` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

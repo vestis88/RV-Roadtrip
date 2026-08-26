@@ -10,6 +10,7 @@ import {
   committedStopsInRouteOrder,
   stopsAddableToRoute,
 } from '../lib/routeEditing'
+import { dayStrip } from '../lib/dayStrip'
 import { applyDayCleanup, planDayCleanup, staleDays } from '../lib/dayCleanup'
 import {
   planSkeleton,
@@ -213,6 +214,17 @@ export function PlanStrip({
     }
   }
 
+  const today = new Date().toISOString().slice(0, 10)
+  const strip = dayStrip(days, today)
+  const [showPastDays, setShowPastDays] = useState(false)
+  /**
+   * Kept stops the day list knows nothing about — the "old irrelevant stuff"
+   * case. Counted rather than merely detected so the banner can say how far
+   * out of step the two are.
+   */
+  const daysMissingKeptStops =
+    days.length === 0 ? 0 : stopsAddableToRoute(corridorStops).length
+
   function toggleLock(dayId: string) {
     setLockedDayIds((prev) => {
       const next = new Set(prev)
@@ -253,26 +265,75 @@ export function PlanStrip({
         * Horizontally scrollable rather than wrapped: a two-month trip is
         * sixty of these, and sixty wrapped chips would push the map off the
         * screen — the exact failure the list below was given a height cap
-        * for on 2026-08-19. */}
+        * for on 2026-08-19.
+        *
+        * Anchored to today since 2026-08-25 ("I want info about today,
+        * tomorrow and so on"): the first thing on screen used to be day one,
+        * which on day twelve is a town left a week and a half ago. See
+        * dayStrip for what happens before and after the trip. */}
       <div
-        className="flex gap-1.5 overflow-x-auto border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800"
+        className="flex items-center gap-1.5 overflow-x-auto border-b border-neutral-200 px-3 py-1.5 dark:border-neutral-800"
         data-testid="day-strip"
       >
-        {days.map((day) => (
+        {strip.past.length > 0 && (
           <button
-            key={day.id}
             type="button"
-            data-testid={`day-strip-${day.id}`}
-            onClick={() => navigate(`/map/day/${day.id}`)}
-            className="chip chip-neutral shrink-0 px-3 py-1 text-xs whitespace-nowrap hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            data-testid="day-strip-show-past"
+            className="chip chip-neutral shrink-0 px-2.5 py-1 text-xs whitespace-nowrap"
+            onClick={() => setShowPastDays((shown) => !shown)}
           >
-            <span className="font-medium">Day {day.index + 1}</span>
-            <span className="ml-1.5 text-neutral-500 dark:text-neutral-400">
-              {day.overnight.name}
-            </span>
+            {showPastDays ? 'Hide earlier' : `← ${strip.past.length} earlier`}
           </button>
-        ))}
+        )}
+        {(showPastDays ? [...strip.past, ...strip.upcoming] : strip.upcoming).map(
+          (chip) => (
+            <button
+              key={chip.day.id}
+              type="button"
+              data-testid={`day-strip-${chip.day.id}`}
+              onClick={() => navigate(`/map/day/${chip.day.id}`)}
+              className={`chip shrink-0 px-3 py-1 text-xs whitespace-nowrap ${
+                chip.label === 'Today'
+                  ? 'chip-accent'
+                  : 'chip-neutral hover:bg-neutral-200 dark:hover:bg-neutral-700'
+              } ${chip.day.date < today ? 'opacity-60' : ''}`}
+            >
+              <span className="font-medium">{chip.label}</span>
+              <span className="ml-1.5 text-neutral-500 dark:text-neutral-400">
+                {chip.day.overnight.name}
+              </span>
+            </button>
+          ),
+        )}
       </div>
+
+      {/* The days on screen describe stops the traveler has not kept.
+        *
+        * Reported 2026-08-25: "The days on top are still som old irrelevant
+        * stuff." They were — left over from an earlier full generation,
+        * while six locked stops had no day at all. The automatic writer
+        * cannot fix that on its own (those days carry researched detail, and
+        * discarding it silently would be far worse), so the board says so
+        * and offers the one button that can. */}
+      {daysMissingKeptStops > 0 && (
+        <div
+          data-testid="days-out-of-step-banner"
+          className="border-b border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+        >
+          <p>
+            These days are from an earlier plan — {daysMissingKeptStops} kept
+            stop{daysMissingKeptStops === 1 ? ' is' : 's are'} not in them.
+          </p>
+          <button
+            type="button"
+            data-testid="days-out-of-step-rebuild"
+            className="btn btn-sm btn-outline mt-1.5"
+            onClick={() => onRebuildOpenChange(true)}
+          >
+            Rebuild day list
+          </button>
+        </div>
+      )}
 
       {stale.length > 0 && (
         <div

@@ -51,6 +51,7 @@ import {
 } from '../lib/mapIcons'
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
+import { MapOpeningView } from '../components/MapOpeningView'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
@@ -88,6 +89,13 @@ import {
 import { quantisePosition, routeOriginFor } from '../lib/routeOrigin'
 import { useNavigate } from 'react-router-dom'
 
+/**
+ * How much ground the map shows when it opens on the traveler's position.
+ * Wide enough for the next couple of hours of driving, tight enough that
+ * individual stops are still distinguishable.
+ */
+const OPENING_SPAN_KM = 50
+
 interface ExploreMapScreenProps {
   tripId: string
   trip: Trip
@@ -115,6 +123,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // stop's own "Add to route" — see PlanStrip's note on why it lives here.
   const [reorderOpen, setReorderOpen] = useState(false)
   const [zoom, setZoom] = useState(6)
+  /**
+   * Whether the traveler has moved the camera themselves.
+   *
+   * The map opens on their position once (MapOpeningView), and must not do
+   * it a second time — nor the first time, if they got there before the GPS
+   * did. `onCameraChanged` fires for our own move too, so this is set from
+   * the gesture handlers rather than from the camera.
+   */
+  const [cameraMoved, setCameraMoved] = useState(false)
   // The visible map rectangle, so "Rescan this area" can search the area
   // the traveler is actually looking at rather than a fixed circle around
   // its centre. Undefined until the map reports its first camera change.
@@ -1164,6 +1181,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               defaultZoom={zoom}
               mapId="rv-trip-explore"
               gestureHandling="greedy"
+              // A real gesture, as opposed to our own moveCamera — which is
+              // why this is not read off onCameraChanged.
+              onDragstart={() => setCameraMoved(true)}
+              onZoomChanged={() => setCameraMoved(true)}
               onCameraChanged={(event: MapCameraChangedEvent) => {
                 setZoom(event.detail.zoom)
                 // What "this area" means — see visibleRadiusKm. Stored as the
@@ -1224,6 +1245,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   />
                 </AdvancedMarker>
               )}
+              {/* Where the map opens: on us, not on where the trip began.
+                * Once, and never against a traveler who has already moved
+                * it — see MapOpeningView. */}
+              <MapOpeningView
+                position={here}
+                spanKm={OPENING_SPAN_KM}
+                moved={cameraMoved}
+              />
               <MapPanner
                 target={
                   selected ? { lat: selected.lat, lng: selected.lng } : null
