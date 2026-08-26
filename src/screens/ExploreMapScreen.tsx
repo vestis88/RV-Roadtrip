@@ -52,6 +52,7 @@ import {
 import { MarkerBadge } from '../components/MarkerBadge'
 import { MapPanner } from '../components/MapPanner'
 import { MapOpeningView } from '../components/MapOpeningView'
+import { GoToMyLocationButton } from '../components/GoToMyLocationButton'
 import { ExploreCandidateCard } from '../components/ExploreCandidateCard'
 import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
@@ -96,6 +97,9 @@ import { useNavigate } from 'react-router-dom'
  */
 const OPENING_SPAN_KM = 50
 
+/** Identifies the map to the controls rendered beside it — see useMap. */
+const EXPLORE_MAP_ID = 'explore-map'
+
 interface ExploreMapScreenProps {
   tripId: string
   trip: Trip
@@ -117,7 +121,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const { days } = useTripDays(tripId)
   const online = useOnlineStatus()
   // Where we are, drawn rather than only measured — see useCurrentPosition.
-  const { position: here } = useCurrentPosition()
+  const { position: here, denied: positionDenied } = useCurrentPosition()
   const planStatus = trip.planMeta.status
   // Opened both from PlanStrip's "Edit route" and from a locked, unlinked
   // stop's own "Add to route" — see PlanStrip's note on why it lives here.
@@ -1179,6 +1183,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 lng: trip.settings.startPoint.lng,
               }}
               defaultZoom={zoom}
+              // `id` so the overlay controls beside the map — which are
+              // siblings of it, not markers inside it — can reach the
+              // instance through useMap. `mapId` is Google's own styling id
+              // and a different thing entirely.
+              id={EXPLORE_MAP_ID}
               mapId="rv-trip-explore"
               gestureHandling="greedy"
               // A real gesture, as opposed to our own moveCamera — which is
@@ -1339,6 +1348,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           )}
 
           <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+            <GoToMyLocationButton
+              mapId={EXPLORE_MAP_ID}
+              position={here}
+              denied={positionDenied}
+            />
             <AddCorridorStopForm
               tripId={tripId}
               defaultLocation={{ ...center, name: '' }}

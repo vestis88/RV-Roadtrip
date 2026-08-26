@@ -2973,8 +2973,27 @@ the SPAN the resulting zoom actually covers, at three latitudes and two
 screen widths, rather than pinning a magic number: the number is only right
 if the span is.
 
-Verification: lint 0, build 0, frontend **384**, e2e **152**
-(`corridor.spec.ts:278` flaked in the full run and passes in isolation).
+**And a way back.** *"I want a button to go to my location. Then the zoom
+could be like 5 km."* The opening view fires once and never again, by design,
+which left no route back after a pan. The button closes that, closer than the
+opening view on purpose: opening wide answers "where am I in this trip",
+pressing this answers "what is around me right now", and 5 km is about the
+next twenty minutes of driving rather than the next two hours.
+
+It reaches the map by `id` through `useMap`, because the overlay controls are
+positioned siblings of the `<Map>` element rather than markers inside it, and
+the whole screen sits under one APIProvider. It disappears entirely once
+location is refused — a permanently dead control is worse than no control —
+but only stays disabled while the answer is merely unknown.
+
+**A test of mine was unachievable before it was wrong.** The first e2e
+version asserted the button becomes enabled once a fix arrives. It cannot, in
+CI, at any level of correctness: `useMap` returns null without a live Google
+map and the test browser has no Maps key. Moved to a unit test against a
+stubbed map, with e2e asserting only presence — the same split MarkerBadge
+already uses, and the same trap that caught the position marker in August.
+
+Verification: lint 0, build 0, frontend **389**, e2e **154** — clean.
 
 ### Known documentation gap
 

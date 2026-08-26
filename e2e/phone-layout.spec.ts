@@ -247,3 +247,52 @@ test.describe('the day strip', () => {
     await expect(page.getByTestId('rebuild-days-panel')).toBeVisible()
   })
 })
+
+/**
+ * Requested 2026-08-25: "I want a button to go to my location. Then the zoom
+ * could be like 5 km."
+ *
+ * The map opens on the traveler's position but only once, deliberately — a
+ * GPS watch reports a fix every few seconds and re-centring on each would
+ * drag the map out from under anyone looking elsewhere. That left no way
+ * back after a pan, which is what this button is.
+ */
+test.describe('going back to my location', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    permissions: ['geolocation'],
+    geolocation: { latitude: 46.49, longitude: 11.34 },
+  })
+
+  /**
+   * Presence only. What the button DOES needs a live Google map — `useMap`
+   * returns null without one and this browser has no Maps key — so the
+   * behaviour is unit-tested against a stubbed map instead. The same split
+   * MarkerBadge already uses, and the same trap: the first version of this
+   * asserted the button becomes enabled, which cannot happen in CI however
+   * correct the code is.
+   */
+  test('is on the map, beside the other controls', async ({ page }) => {
+    await createTripWithPlan(page)
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('explore-map-screen').waitFor()
+
+    await expect(page.getByTestId('go-to-my-location')).toBeVisible()
+  })
+})
+
+test.describe('with location refused', () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  test('the button is not offered at all', async ({ page, context }) => {
+    await context.clearPermissions()
+    await createTripWithPlan(page)
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('explore-map-screen').waitFor()
+
+    // Inert without a fix. Whether it disappears entirely once permission is
+    // actually REFUSED is unit-tested — clearing permissions here leaves the
+    // answer merely unknown, not denied.
+    await expect(page.getByTestId('go-to-my-location')).not.toBeEnabled()
+  })
+})
