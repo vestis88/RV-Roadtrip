@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { orderCandidatesByRoute } from './candidateOrder'
+import { orderCandidatesByRoute, orderStopsFromHere } from './candidateOrder'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 
 function stop(
@@ -128,6 +128,82 @@ describe('ordering the candidate list', () => {
       startPoint: MUNICH,
       endPoint: VENICE,
     })
+    expect(ordered.map((s) => s.id)).toEqual(['near', 'far'])
+  })
+})
+
+/**
+ * Reported 2026-08-26 from the Seiser Alm: "it's jumping around, for some
+ * reason putting Kronplatz ahead of Seiser Alm, even though we are at Seiser
+ * Alm."
+ *
+ * The order is worked out from the traveler's own position now — "just treat
+ * that as the current starting point" — and the guess that feeds it is
+ * projected from there too. These assert the geometry that makes that come
+ * out right, against the real coordinates from the report.
+ */
+describe('ordering from where the van actually is', () => {
+  const SEISER_ALM = { lat: 46.53, lng: 11.6 }
+  const KRONPLATZ = { lat: 46.74, lng: 11.95 }
+  const VERONA = { lat: 45.44, lng: 10.99 }
+
+  it('puts the stop you are standing at first', () => {
+    const seiser = stop('seiser', SEISER_ALM.lat, SEISER_ALM.lng)
+    const kronplatz = stop('kronplatz', KRONPLATZ.lat, KRONPLATZ.lng)
+    // The route as it is drawn: from here, through both, to the end point.
+    const ordered = orderCandidatesByRoute({
+      candidates: [kronplatz, seiser],
+      routeStops: [seiser, kronplatz],
+      backbone: [SEISER_ALM, seiser, kronplatz, VERONA],
+    })
+    expect(ordered.map((s) => s.id)).toEqual(['seiser', 'kronplatz'])
+  })
+
+  /**
+   * And the guess that feeds it. Moving the anchor to the van was NOT enough
+   * on its own, which is what writing this test showed: `sortAlongRoute`
+   * sorts by scalar projection, and Kronplatz — north-east while the route
+   * runs south-west to Verona — projects NEGATIVE from the Seiser Alm and so
+   * sorted first anyway. A stop behind you is still yours; it is just not
+   * next.
+   */
+  it('puts what is ahead before what is behind', () => {
+    const seiser = { id: 'seiser', ...SEISER_ALM }
+    const kronplatz = { id: 'kronplatz', ...KRONPLATZ }
+    const verona = { id: 'verona', ...VERONA }
+
+    const ordered = orderStopsFromHere(
+      SEISER_ALM,
+      VERONA,
+      [kronplatz, seiser, verona],
+      (s) => s,
+    )
+    expect(ordered.map((s) => s.id)).toEqual(['seiser', 'verona', 'kronplatz'])
+  })
+
+  // The plain projection is what got it wrong, and saying so here is what
+  // stops someone "simplifying" this back to it.
+  it('is not what the plain projection would say', async () => {
+    const { sortAlongRoute } = await import('@rv/shared')
+    const seiser = { id: 'seiser', ...SEISER_ALM }
+    const kronplatz = { id: 'kronplatz', ...KRONPLATZ }
+    expect(
+      sortAlongRoute(SEISER_ALM, VERONA, [seiser, kronplatz], (s) => s).map(
+        (s) => s.id,
+      ),
+    ).toEqual(['kronplatz', 'seiser'])
+  })
+
+  // Turning around, the nearest thing behind you is the first you reach.
+  it('orders the ones behind by how far back they are', () => {
+    const near = { id: 'near', lat: 46.6, lng: 11.65 }
+    const far = { id: 'far', lat: 46.9, lng: 12.1 }
+    const ordered = orderStopsFromHere(
+      SEISER_ALM,
+      VERONA,
+      [far, near],
+      (s) => s,
+    )
     expect(ordered.map((s) => s.id)).toEqual(['near', 'far'])
   })
 })

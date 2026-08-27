@@ -3034,6 +3034,40 @@ Once the traveler picks a filter themselves, their choice stands.
 Verification: lint 0, build 0, frontend **392**, e2e **156**
 (`dayview.spec.ts:140` flaked in the full run and passes in isolation).
 
+### 2026-08-26 — a stop behind you is not the next one
+
+*"Now the order is wrong again. I feel it should start working out the order
+from my position, just treat that as the current starting point. Now it's
+jumping around, for some reason putting Kronplatz ahead of Seiser Alm, even
+though we are at Seiser Alm."*
+
+Yesterday's fix — disabling optimisation while routing from the traveler's
+position — was wrong, and wrong in a way only the road showed. With Google
+not reordering, the order fell back to `guessedOrder`, a straight-line
+projection from the trip's START point, which ignores where the van is
+entirely. Stopping the optimisation removed the thing that had been
+correcting a bad guess. Reverted: optimisation happens wherever the route
+starts from, and `routeOrderKey` now carries the ORIGIN so an answer worked
+out in one valley is never applied in another.
+
+**Moving the anchor to the van was not enough on its own**, and only writing
+the test showed why. `sortAlongRoute` sorts by scalar projection onto the
+origin→end line, and a stop BEHIND the origin projects NEGATIVE — so it sorts
+before everything ahead. Standing at the Seiser Alm with the route running
+south-west, Kronplatz to the north-east projected to a negative number and
+was presented as the next stop. Exactly as reported, and the first version of
+the test asserted the anchor alone would fix it. It does not.
+
+`orderStopsFromHere` is the rule that does: what is ahead first, in
+projection order, then what is behind, ordered by how far back it is —
+because turning around, the nearest thing behind you is the first you reach.
+A stop you have passed is still yours; it is just not next. A test asserts
+the plain projection still gets it wrong, so nobody simplifies this back to
+it.
+
+Verification: lint 0, build 0, frontend **400**, e2e **156**
+(`corridor.spec.ts:760` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

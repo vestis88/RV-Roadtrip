@@ -6,7 +6,6 @@ import {
 } from '@vis.gl/react-google-maps'
 import {
   routeBackboneFrom,
-  sortAlongRoute,
   estimateDetourKm,
   type CorridorStopPriority,
   type LatLng,
@@ -79,7 +78,10 @@ import { planSkeleton, writeSkeletonDays } from '../lib/skeletonDays'
 import { removeStopFromRoute } from '../lib/dayCleanup'
 import { canEditRoute } from '../lib/routeEditing'
 import { arrivalEstimates } from '../lib/arrivalEstimates'
-import { orderCandidatesByRoute } from '../lib/candidateOrder'
+import {
+  orderCandidatesByRoute,
+  orderStopsFromHere,
+} from '../lib/candidateOrder'
 import {
   CANDIDATE_FILTER_LABEL,
   CANDIDATE_FILTER_ORDER,
@@ -296,22 +298,79 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // that the Baltic is between two of these points, which is how a trip
   // ended up driving north through Sweden and around the Gulf of Bothnia to
   // reach Estonia. Google replaces it below, against real roads.
+  // The ROUNDED numbers, deliberately, and kept as two scalars rather than
+  // an object: `here` is a fresh object on every GPS fix, so memoising on it
+  // would recompute the origin — and so re-ask Directions — for a few metres
+  // of drift. Two numbers that only change when the van crosses a grid cell
+  // are exactly the dependency this needs.
+  const cell = here ? quantisePosition(here) : null
+  const cellLat = cell?.lat ?? null
+  const cellLng = cell?.lng ?? null
+  const origin = useMemo(
+    () =>
+      routeOriginFor({
+        startPoint: trip.settings.startPoint,
+        position:
+          cellLat !== null && cellLng !== null
+            ? { lat: cellLat, lng: cellLng }
+            : null,
+        startDate: trip.settings.startDate,
+        endDate: trip.settings.endDate,
+        today: new Date().toISOString().slice(0, 10),
+      }),
+    [
+      trip.settings.startPoint,
+      trip.settings.startDate,
+      trip.settings.endDate,
+      cellLat,
+      cellLng,
+    ],
+  )
+  const originPoint = origin.point
+
+  /**
+   * The starting guess at the driving order, projected onto the line from
+   * where we ARE to where the trip ends.
+   *
+   * From `originPoint` and not the trip's start point, requested 2026-08-26:
+   * "I feel it should start working out the order from my position, just
+   * treat that as the current starting point." Anchoring it at the start
+   * meant the guess ignored the van entirely — which showed up as Kronplatz
+   * ordered ahead of the Seiser Alm while parked at the Seiser Alm, because
+   * from Munich that is the order and from here it is not.
+   *
+   * It is still only a guess: a scalar projection cannot know that a
+   * mountain range is between two points. Google replaces it below, against
+   * real roads.
+   */
   const guessedOrder = useMemo(
     () =>
-      sortAlongRoute(
-        trip.settings.startPoint,
+      orderStopsFromHere(
+        originPoint,
         trip.settings.endPoint,
         lockedStops,
         (stop) => ({ lat: stop.lat, lng: stop.lng }),
       ),
-    [trip.settings.startPoint, trip.settings.endPoint, lockedStops],
+    [originPoint, trip.settings.endPoint, lockedStops],
   )
   // Keyed by which stops it describes: an order is a list of positions, and
   // applying yesterday's positions to a different set of stops would shuffle
   // them into nonsense. A changed set simply falls back to the guess until
   // Directions answers again.
   const [routeOrder, setRouteOrder] = useState<RouteOrder | null>(null)
-  const orderKey = useMemo(() => routeOrderKey(guessedOrder), [guessedOrder])
+  // Keyed on where it was worked out from as well as which stops it
+  // describes — an order is only an answer to "best order from HERE", and
+  // applying yesterday's answer from a different valley is how the list
+  // ends up disagreeing with the road. Only while routing from the van;
+  // planning from the trip's own start point keeps the plain key.
+  const orderKey = useMemo(
+    () =>
+      routeOrderKey(
+        guessedOrder,
+        origin.fromPosition ? originPoint : undefined,
+      ),
+    [guessedOrder, origin.fromPosition, originPoint],
+  )
   const handleOrder = useCallback(
     (order: number[]) => {
       // Only when it actually says something new. Google agreeing with the
@@ -513,35 +572,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    * it costs no render: the whole point is that an unmoved van changes
    * nothing at all.
    */
-  // The ROUNDED numbers, deliberately, and kept as two scalars rather than
-  // an object: `here` is a fresh object on every GPS fix, so memoising on it
-  // would recompute the origin — and so re-ask Directions — for a few metres
-  // of drift. Two numbers that only change when the van crosses a grid cell
-  // are exactly the dependency this needs.
-  const cell = here ? quantisePosition(here) : null
-  const cellLat = cell?.lat ?? null
-  const cellLng = cell?.lng ?? null
-  const origin = useMemo(
-    () =>
-      routeOriginFor({
-        startPoint: trip.settings.startPoint,
-        position:
-          cellLat !== null && cellLng !== null
-            ? { lat: cellLat, lng: cellLng }
-            : null,
-        startDate: trip.settings.startDate,
-        endDate: trip.settings.endDate,
-        today: new Date().toISOString().slice(0, 10),
-      }),
-    [
-      trip.settings.startPoint,
-      trip.settings.startDate,
-      trip.settings.endDate,
-      cellLat,
-      cellLng,
-    ],
-  )
-  const originPoint = origin.point
 
   // What is ASKED. Built from the guess and nothing else, so its identity
   // changes only when the locked stops themselves do. DirectionsRoute lists
@@ -1154,7 +1184,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               Your order — reset to Google&rsquo;s
             </button>
           )}
-          {!mayOptimize(routeOrder, origin.fromPosition) ||
+          {!mayOptimize(routeOrder) ||
           askedBackbone.length <= MAX_DIRECTIONS_POINTS_PER_REQUEST ? null : (
             /* Google optimises only when the whole route fits one request.
              * Past that it silently drove them in the order given, with
@@ -1258,7 +1288,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 // against real roads is strictly better information. The
                 // generated plan's route is NOT optimized: those points are
                 // days with dates on them.
-                optimizeOrder={mayOptimize(routeOrder, origin.fromPosition)}
+                optimizeOrder={mayOptimize(routeOrder)}
                 onOrder={handleOrder}
               />
               {/* Only while aiming. Drawn on every map all the time, it

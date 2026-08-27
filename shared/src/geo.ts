@@ -50,7 +50,11 @@ export function haversineDistanceKm(a: LatLng, b: LatLng): number {
  * along a single trip's corridor, the same tradeoff estimateDetourKm already
  * makes with haversine distance.
  */
-function projectAlongRoute(start: LatLng, end: LatLng, point: LatLng): number {
+export function projectAlongRoute(
+  start: LatLng,
+  end: LatLng,
+  point: LatLng,
+): number {
   const dx = end.lat - start.lat
   const dy = end.lng - start.lng
   const lengthSquared = dx * dx + dy * dy

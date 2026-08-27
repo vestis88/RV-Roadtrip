@@ -77,29 +77,67 @@ describe('routeOrderKey', () => {
 })
 
 /**
- * Reported 2026-08-25: "For some reason, it made the locked in stops
- * earlier. The list should be … starting with what is first on the route."
+ * An order is only an answer to "best order from HERE".
  *
- * Optimising from a moving origin re-answers a different question every few
- * kilometres — "the best order from HERE" rather than "the best order for
- * this trip" — so the list reshuffles as the van drives.
+ * Reported 2026-08-26: "it's jumping around, for some reason putting
+ * Kronplatz ahead of Seiser Alm, even though we are at Seiser Alm." Keyed on
+ * the stops alone, an order worked out in one valley was indistinguishable
+ * from one worked out in another and got applied just the same.
  */
-describe('optimising while under way', () => {
-  it('leaves the order alone when the route starts from our position', () => {
-    expect(mayOptimize(null, true)).toBe(false)
+describe('keying an order to where it was worked out', () => {
+  const from = { lat: 46.53, lng: 11.6 }
+
+  it('is the same key from the same place', () => {
+    expect(routeOrderKey(stops, from)).toBe(routeOrderKey(stops, from))
   })
 
-  it('still optimises from the trip’s own start point', () => {
-    expect(mayOptimize(null, false)).toBe(true)
-    // And the default is the planning case, so nothing else had to change.
+  it('is a different key from somewhere else', () => {
+    expect(routeOrderKey(stops, from)).not.toBe(
+      routeOrderKey(stops, { lat: 46.74, lng: 11.94 }),
+    )
+  })
+
+  // The origin is already snapped to a ~1 km grid before it gets here, so
+  // this must not turn a metre of drift into a new key on its own.
+  it('ignores movement below its own resolution', () => {
+    expect(routeOrderKey(stops, from)).toBe(
+      routeOrderKey(stops, { lat: 46.5301, lng: 11.6002 }),
+    )
+  })
+
+  // Planning from the trip's own start point keeps the plain key.
+  it('says nothing about an origin when there is none', () => {
+    expect(routeOrderKey(stops)).toBe('a,b,c')
+  })
+
+  /**
+   * And an order from elsewhere is not applied. This is the whole point: a
+   * stale answer silently reordering the list is worse than no answer.
+   */
+  it('does not apply an order worked out somewhere else', () => {
+    const here = routeOrderKey(stops, from)
+    const elsewhere = routeOrderKey(stops, { lat: 46.74, lng: 11.94 })
+    const order = { key: elsewhere, order: [2, 0, 1] }
+    expect(applyRouteOrder(stops, order, here)).toBe(stops)
+  })
+})
+
+/**
+ * Optimisation was briefly disabled while routing from the traveler's own
+ * position (2026-08-25), to stop the order shifting as they drove. That was
+ * wrong in a way only the road showed: with Google not reordering, the order
+ * fell back to a projection from the trip's START point, which ignores where
+ * the van is. Optimising from the right place is the answer, not optimising
+ * less.
+ */
+describe('optimising while under way', () => {
+  it('optimises wherever the route starts from', () => {
     expect(mayOptimize(null)).toBe(true)
   })
 
-  // A manual order still wins either way — that override exists precisely so
-  // the next reply does not undo it.
+  // A manual order still wins — that override exists precisely so the next
+  // reply does not undo it.
   it('never overrides a hand-made order', () => {
-    const manual = manualRouteOrder('k', [2, 0, 1])
-    expect(mayOptimize(manual, false)).toBe(false)
-    expect(mayOptimize(manual, true)).toBe(false)
+    expect(mayOptimize(manualRouteOrder('k', [2, 0, 1]))).toBe(false)
   })
 })

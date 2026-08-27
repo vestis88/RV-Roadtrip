@@ -1,4 +1,9 @@
-import { findCheapestBackboneLeg, sortAlongRoute, type LatLng } from '@rv/shared'
+import {
+  findCheapestBackboneLeg,
+  projectAlongRoute,
+  sortAlongRoute,
+  type LatLng,
+} from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 
 /**
@@ -29,6 +34,46 @@ import type { CorridorStopWithId } from '../hooks/useCorridorStops'
  * place in the list and the detour it advertises can never disagree about
  * which leg it belongs to.
  */
+/**
+ * The kept stops in the order they will be driven, from where the van is.
+ *
+ * Requested 2026-08-26: "I feel it should start working out the order from
+ * my position, just treat that as the current starting point."
+ *
+ * `sortAlongRoute` alone is not enough for that, and the reason is the whole
+ * bug. It sorts by scalar projection onto the origin→end line, and a stop
+ * BEHIND the origin projects NEGATIVE — so it sorts before everything ahead.
+ * Standing at the Seiser Alm with Verona as the end point, Kronplatz is
+ * north-east while the route runs south-west, so it projected to a negative
+ * number and was presented as the next stop. Reported exactly that way:
+ * "putting Kronplatz ahead of Seiser Alm, even though we are at Seiser Alm."
+ *
+ * A stop you have passed, or that lies the other way, is still yours — it is
+ * just not next. So the ones ahead come first in projection order, and the
+ * ones behind follow, in the order you would meet them going back.
+ */
+export function orderStopsFromHere<T>(
+  origin: LatLng,
+  end: LatLng,
+  stops: T[],
+  pointOf: (stop: T) => LatLng,
+): T[] {
+  const measured = stops.map((stop, index) => ({
+    stop,
+    index,
+    along: projectAlongRoute(origin, end, pointOf(stop)),
+  }))
+  const ahead = measured.filter((entry) => entry.along >= 0)
+  const behind = measured.filter((entry) => entry.along < 0)
+  // Behind is sorted DESCENDING: the least-far-back comes first, because
+  // that is the one you would reach first if you turned around.
+  const order = [
+    ...ahead.sort((a, b) => a.along - b.along || a.index - b.index),
+    ...behind.sort((a, b) => b.along - a.along || a.index - b.index),
+  ]
+  return order.map((entry) => entry.stop)
+}
+
 export function orderCandidatesByRoute(input: {
   candidates: CorridorStopWithId[]
   /** Kept stops in driving order — see ExploreMapScreen's routeStops. */

@@ -44,8 +44,25 @@ export interface RouteOrder {
 }
 
 /** Identifies the set of stops an order describes. */
-export function routeOrderKey(stops: { id: string }[]): string {
-  return stops.map((stop) => stop.id).join(',')
+export function routeOrderKey(
+  stops: { id: string }[],
+  /**
+   * Where the order was worked out FROM, when that is not the trip's start
+   * point — see ExploreMapScreen's originPoint.
+   *
+   * Part of the key since 2026-08-26, and it is a correctness fix rather
+   * than a refinement. An order is only an answer to "best order from HERE";
+   * keyed on the stops alone, an order optimised at a lay-by in the
+   * Dolomites was indistinguishable from one optimised at the start line and
+   * got applied just the same. The origin is already snapped to a ~1 km grid
+   * (quantisePosition), so this changes when the van has genuinely moved and
+   * not once per GPS fix.
+   */
+  from?: { lat: number; lng: number },
+): string {
+  const ids = stops.map((stop) => stop.id).join(',')
+  if (!from) return ids
+  return `${from.lat.toFixed(2)},${from.lng.toFixed(2)}|${ids}`
 }
 
 /**
@@ -100,27 +117,22 @@ export function manualRouteOrder(key: string, positions: number[]): RouteOrder {
  * override is that the next reply does not undo it. Resetting is simply
  * dropping the stored order, after which this is true again.
  *
- * ALSO false while the route is being drawn from the traveler's own position
- * rather than the trip's start point, and that half is a fix rather than a
- * preference. Reported 2026-08-25: "For some reason, it made the locked in
- * stops earlier. The list should be locked in not done, starting with what
- * is first on the route."
+ * It does NOT care where the route starts from any more. That was tried on
+ * 2026-08-25 — optimisation disabled while routing from the traveler's own
+ * position, to stop the order shifting as they drove — and it was wrong in a
+ * way only the road showed: with Google not reordering, the order fell back
+ * to `guessedOrder`, a straight-line projection from the trip's START point,
+ * which ignores where the van is entirely. Reported the next morning: "it's
+ * jumping around, for some reason putting Kronplatz ahead of Seiser Alm,
+ * even though we are at Seiser Alm."
  *
- * Optimising from a moving origin re-answers a different question every few
- * kilometres — "what is the best order from HERE" rather than "what is the
- * best order for this trip" — so the list reshuffles as the van drives, and
- * a stop that was first on the route stops being first the moment you pass
- * it. Worse, the stored order is keyed on the SET of stops and not on where
- * it was worked out from, so an order optimised from a lay-by in the
- * Dolomites is indistinguishable from one optimised at the start line and
- * gets applied just the same.
- *
- * So the order is a property of the trip, decided from its start point, and
- * the position only decides where the drawn line begins.
+ * The answer was not to stop optimising but to optimise from the right
+ * place: "I feel it should start working out the order from my position,
+ * just treat that as the current starting point." The order moving as the
+ * trip is travelled is then correct rather than thrash — it is a different
+ * question with a different answer — and `routeOrderKey` carries the origin
+ * so a stale answer is never applied to a new one.
  */
-export function mayOptimize(
-  held: RouteOrder | null,
-  routingFromPosition = false,
-): boolean {
-  return !held?.manual && !routingFromPosition
+export function mayOptimize(held: RouteOrder | null): boolean {
+  return !held?.manual
 }
