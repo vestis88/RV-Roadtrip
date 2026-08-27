@@ -492,3 +492,52 @@ test.describe('what today is about', () => {
     await expect(strip).not.toContainText('earlier')
   })
 })
+
+/**
+ * Reported 2026-08-26: "Now there are two rebuild days on the same screen.
+ * Which to push?" — the banner's button had opened the panel and then stayed,
+ * looking like a second, different action.
+ */
+test.describe('opening the rebuild', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('leaves only the panel, not the button that opened it', async ({
+    page,
+  }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Partnach Gorge',
+        lat: 47.47,
+        lng: 11.12,
+        country: 'DE',
+        status: 'locked',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 0,
+      })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('days-out-of-step-rebuild').waitFor()
+    await page.getByTestId('days-out-of-step-rebuild').click()
+
+    await expect(page.getByTestId('rebuild-days-panel')).toBeVisible()
+    // Both triggers stand down while their own panel is up.
+    await expect(page.getByTestId('days-out-of-step-rebuild')).toHaveCount(0)
+    await expect(page.getByTestId('rebuild-days-button')).toHaveCount(0)
+
+    // And they come back once it is dismissed, rather than being lost.
+    await page.getByTestId('rebuild-days-cancel').click()
+    await expect(page.getByTestId('days-out-of-step-rebuild')).toBeVisible()
+  })
+})

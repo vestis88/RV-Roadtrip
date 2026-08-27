@@ -358,7 +358,7 @@ export function PlanStrip({
         * cannot fix that on its own (those days carry researched detail, and
         * discarding it silently would be far worse), so the board says so
         * and offers the one button that can. */}
-      {daysMissingKeptStops > 0 && (
+      {daysMissingKeptStops > 0 && !rebuildOpen && (
         <div
           data-testid="days-out-of-step-banner"
           className="border-b border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"

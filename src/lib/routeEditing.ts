@@ -46,7 +46,17 @@ export function stopsAddableToRoute(
   corridorStops: CorridorStopWithId[],
 ): { id: string; name: string }[] {
   return corridorStops
-    .filter((stop) => stop.status === 'locked' && stop.linkedDayIds.length === 0)
+    .filter(
+      (stop) =>
+        stop.status === 'locked' &&
+        stop.linkedDayIds.length === 0 &&
+        // Not one you have already been to. A done stop needs no day and
+        // cannot be "added to the route" — it is behind you. Counting them
+        // made the out-of-step banner promise to fix thirteen stops while
+        // the rebuild panel beneath it said six, which is how the same
+        // screen ended up contradicting itself (2026-08-26).
+        !stop.doneAt,
+    )
     .map((stop) => ({ id: stop.id, name: stop.name }))
 }
 

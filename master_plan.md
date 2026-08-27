@@ -3122,6 +3122,27 @@ nights that are nobody's kept stop, and deriving would lose them.
 
 Verification: lint 0, build 0, frontend **404**, e2e **157** — clean.
 
+### 2026-08-26 — one rebuild button, and one number
+
+*"Now there are two rebuild days on the same screen. Which to push? Should
+both be there?"*
+
+They were never two actions — one opened the confirmation and the other was
+the confirmation — but nothing on screen said so, because the trigger stayed
+up looking exactly like an unpressed button beside the panel it had already
+opened. Both triggers (the out-of-step banner's and the header's) now stand
+down while the panel is up, and come back when it is dismissed.
+
+**And the same screen was contradicting itself about how many stops it was
+talking about**: the banner said thirteen kept stops were missing from the
+days while the panel underneath offered to build from six.
+`stopsAddableToRoute` was counting stops already marked done — which need no
+day and cannot be added to a route, being behind you. It filters them now, so
+the count the banner reports is the set the rebuild actually uses.
+
+Verification: lint 0, build 0, frontend **406**, e2e **158**
+(`dayview.spec.ts:140` flaked in the full run and passes in isolation).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

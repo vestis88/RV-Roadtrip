@@ -110,3 +110,34 @@ describe('filtering the candidate list', () => {
     }
   })
 })
+
+/**
+ * Reported 2026-08-26: the out-of-step banner promised to fix thirteen kept
+ * stops while the rebuild panel beneath it said six. `stopsAddableToRoute`
+ * counted stops already marked done — which need no day and cannot be added
+ * to a route, being behind you.
+ */
+describe('which kept stops still need a day', () => {
+  it('leaves out the ones already done', async () => {
+    const { stopsAddableToRoute } = await import('./routeEditing')
+    const addable = stopsAddableToRoute([
+      stop('ahead', { status: 'locked' }),
+      stop('behindUs', {
+        status: 'locked',
+        doneAt: '2026-08-24T10:00:00.000Z',
+      }),
+    ])
+    expect(addable.map((s) => s.id)).toEqual(['ahead'])
+  })
+
+  // And it still finds the ones that genuinely have no day.
+  it('finds a kept stop with no day', async () => {
+    const { stopsAddableToRoute } = await import('./routeEditing')
+    expect(
+      stopsAddableToRoute([
+        stop('withDay', { status: 'locked', linkedDayIds: ['d1'] }),
+        stop('withoutDay', { status: 'locked' }),
+      ]).map((s) => s.id),
+    ).toEqual(['withoutDay'])
+  })
+})

@@ -1018,7 +1018,12 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               >
                 {planBusy ? 'Updating…' : 'Request changes'}
               </button>
-              {routeStops.length > 0 && (
+              {/* Hidden while its own panel is open — otherwise the
+                * screen carries two controls that look like the same
+                * unpressed action and the traveler has to guess which one
+                * does it (2026-08-26: "Now there are two rebuild days on
+                * the same screen. Which to push?"). */}
+              {routeStops.length > 0 && !rebuildOpen && (
                 <button
                   type="button"
                   data-testid="rebuild-days-button"
