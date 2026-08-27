@@ -423,7 +423,9 @@ test.describe('what today is about', () => {
     geolocation: { latitude: 46.53, longitude: 11.6 },
   })
 
-  test('names the closest stop still to do', async ({ page }) => {
+  test('reads the board when the stored days do not match it', async ({
+    page,
+  }) => {
     const { getFirestore } = await import('firebase-admin/firestore')
     const { getApps, initializeApp } = await import('firebase-admin/app')
     process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
@@ -460,10 +462,33 @@ test.describe('what today is about', () => {
         rank: 0,
       })
 
+    // And one further along, which the stale days date into the PAST — the
+    // reported symptom: "Kronplatz ... is also shown as earlier, even though
+    // it's clearly marked as next on the map."
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Kronplatz Bikepark',
+        lat: 46.74,
+        lng: 11.95,
+        country: 'IT',
+        status: 'locked',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 1,
+      })
+
     await page.getByTestId('nav-map').click()
     const strip = page.getByTestId('day-strip')
     await strip.waitFor()
 
+    // The strip now names the kept stops, not the older plan's overnights.
     await expect(strip).toContainText('Seiser Alm Bahn', { timeout: 15_000 })
+    await expect(strip).toContainText('Kronplatz Bikepark')
+    await expect(strip).toContainText('Today')
+    // Nothing still to do is dated into the past.
+    await expect(strip).not.toContainText('earlier')
   })
 })

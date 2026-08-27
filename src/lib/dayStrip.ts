@@ -57,10 +57,52 @@ export function dayStrip(days: TripDayWithId[], today: string): DayStrip {
  * that a date is more use than a day number, because nobody counts to
  * seventeen to work out when they are somewhere.
  */
+export function labelForDate(date: string, today: string): string {
+  if (date === today) return 'Today'
+  if (date === addDays(today, 1)) return 'Tomorrow'
+  return formatShortDate(date)
+}
+
 function labelFor(day: TripDayWithId, today: string): string {
-  if (day.date === today) return 'Today'
-  if (day.date === addDays(today, 1)) return 'Tomorrow'
-  return formatShortDate(day.date)
+  return labelForDate(day.date, today)
+}
+
+/**
+ * The strip built from the KEPT STOPS rather than from the stored days.
+ *
+ * Reported 2026-08-26, twice: "It shows Seiser Alm as previous even though we
+ * haven't marked it done. Same with next locked in stop on the map,
+ * Kronplatz, is also shown as earlier, even though it's clearly marked as
+ * next on the map."
+ *
+ * Both were the same thing. The strip is a VIEW of the `days` collection, and
+ * on this trip that collection is left over from an older generation — so it
+ * dated Kronplatz to two days ago while the board, correctly, had it as the
+ * next stop ahead. Relabelling the "Today" chip patched one entry and left
+ * the rest saying the same wrong thing.
+ *
+ * So when the days no longer describe the kept stops, the strip stops
+ * reading them and reads the board instead: the stops in the order they will
+ * be driven, dated by their arrival estimates. Nothing is written — the
+ * stored days still hold the researched detail, and rebuilding them stays
+ * the traveler's choice.
+ */
+export interface DerivedChip<T> {
+  stop: T
+  label: string
+}
+
+export function derivedDayStrip<T extends { id: string }>(
+  stops: T[],
+  arrivals: Map<string, { date: string }>,
+  today: string,
+): DerivedChip<T>[] {
+  return stops
+    .map((stop) => {
+      const date = arrivals.get(stop.id)?.date
+      return date ? { stop, label: labelForDate(date, today) } : null
+    })
+    .filter((chip): chip is DerivedChip<T> => chip !== null)
 }
 
 /** "27 Aug", in the traveler's own calendar rather than a locale guess. */

@@ -10,7 +10,7 @@ import {
   committedStopsInRouteOrder,
   stopsAddableToRoute,
 } from '../lib/routeEditing'
-import { dayStrip } from '../lib/dayStrip'
+import { dayStrip, derivedDayStrip } from '../lib/dayStrip'
 import { applyDayCleanup, planDayCleanup, staleDays } from '../lib/dayCleanup'
 import {
   planSkeleton,
@@ -49,6 +49,7 @@ export function PlanStrip({
   days,
   corridorStops,
   routeStops,
+  arrivals,
   routeLegs,
   reorderOpen,
   onReorderOpenChange,
@@ -68,6 +69,11 @@ export function PlanStrip({
    * rather than a second, subtly different one.
    */
   routeStops: CorridorStopWithId[]
+  /**
+   * When each kept stop is reached — see arrivalEstimates. Used to date the
+   * strip when the stored days no longer describe these stops.
+   */
+  arrivals: Map<string, { date: string; committed: boolean }>
   routeLegs: { durationMin: number; distanceKm: number }[]
   /**
    * Held by the board rather than here, for one reason: a locked stop with
@@ -286,7 +292,29 @@ export function PlanStrip({
             {showPastDays ? 'Hide earlier' : `← ${strip.past.length} earlier`}
           </button>
         )}
-        {(showPastDays ? [...strip.past, ...strip.upcoming] : strip.upcoming).map(
+        {daysMissingKeptStops > 0
+          ? // The stored days do not describe these stops, so the strip
+            // reads the board instead — see derivedDayStrip. Tapping one
+            // offers the rebuild, because there is no day behind it to open.
+            derivedDayStrip(routeStops, arrivals, today).map((chip) => (
+              <button
+                key={`stop:${chip.stop.id}`}
+                type="button"
+                data-testid={`day-strip-stop-${chip.stop.id}`}
+                onClick={() => onRebuildOpenChange(true)}
+                className={`chip shrink-0 px-3 py-1 text-xs whitespace-nowrap ${
+                  chip.label === 'Today'
+                    ? 'chip-accent'
+                    : 'chip-neutral hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                }`}
+              >
+                <span className="font-medium">{chip.label}</span>
+                <span className="ml-1.5 text-neutral-500 dark:text-neutral-400">
+                  {chip.stop.name}
+                </span>
+              </button>
+            ))
+          : (showPastDays ? [...strip.past, ...strip.upcoming] : strip.upcoming).map(
           (chip) => (
             <button
               key={chip.day.id}
@@ -319,7 +347,7 @@ export function PlanStrip({
               </span>
             </button>
           ),
-        )}
+          )}
       </div>
 
       {/* The days on screen describe stops the traveler has not kept.

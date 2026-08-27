@@ -866,6 +866,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           days={days}
           corridorStops={corridorStops}
           routeStops={routeStops}
+          arrivals={arrivals}
           routeLegs={routeLegs ?? []}
           reorderOpen={reorderOpen}
           changeRequestOpen={changeRequestOpen}

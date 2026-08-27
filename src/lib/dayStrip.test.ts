@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayStrip } from './dayStrip'
+import { dayStrip, derivedDayStrip } from './dayStrip'
 import type { TripDayWithId } from '../hooks/useTripDays'
 
 function day(index: number, date: string): TripDayWithId {
@@ -84,5 +84,60 @@ describe('the day strip', () => {
   it('reads in plan order regardless of input order', () => {
     const { upcoming } = dayStrip([DAYS[3], DAYS[2]], '2026-08-22')
     expect(upcoming.map((chip) => chip.day.id)).toEqual(['d2', 'd3'])
+  })
+})
+
+/**
+ * Reported 2026-08-26, twice over: "It shows Seiser Alm as previous even
+ * though we haven't marked it done. Same with next locked in stop on the
+ * map, Kronplatz, is also shown as earlier, even though it's clearly marked
+ * as next on the map."
+ *
+ * Both were one thing: the strip reads the stored `days`, and on that trip
+ * they were left over from an older generation — so it dated Kronplatz to
+ * two days ago while the board correctly had it next. Relabelling the
+ * "Today" chip patched one entry and left the rest saying the same wrong
+ * thing.
+ */
+describe('the strip built from the kept stops', () => {
+  const stops = [
+    { id: 'seiser', name: 'Seiser Alm' },
+    { id: 'kronplatz', name: 'Kronplatz Bikepark' },
+    { id: 'garda', name: 'Lago di Garda' },
+  ]
+  const arrivals = new Map([
+    ['seiser', { date: '2026-08-26' }],
+    ['kronplatz', { date: '2026-08-27' }],
+    ['garda', { date: '2026-08-30' }],
+  ])
+
+  it('reads the board, in the order the stops will be driven', () => {
+    const chips = derivedDayStrip(stops, arrivals, '2026-08-26')
+    expect(chips.map((chip) => chip.stop.id)).toEqual([
+      'seiser',
+      'kronplatz',
+      'garda',
+    ])
+  })
+
+  // Nothing that is still to do is ever "earlier" — that was the report.
+  it('never dates a stop still to do into the past', () => {
+    const chips = derivedDayStrip(stops, arrivals, '2026-08-26')
+    expect(chips.map((chip) => chip.label)).toEqual([
+      'Today',
+      'Tomorrow',
+      '30 Aug',
+    ])
+  })
+
+  // A stop with no estimate yet — before Google has answered, say — is left
+  // out rather than shown with a made-up date.
+  it('leaves out a stop it cannot date', () => {
+    const chips = derivedDayStrip(stops, new Map([['seiser', { date: '2026-08-26' }]]), '2026-08-26')
+    expect(chips.map((chip) => chip.stop.id)).toEqual(['seiser'])
+  })
+
+  it('is empty when nothing is kept', () => {
+    expect(derivedDayStrip([], arrivals, '2026-08-26')).toEqual([])
   })
 })

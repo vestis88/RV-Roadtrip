@@ -3094,6 +3094,34 @@ line rather than the old one.
 
 Verification: lint 0, build 0, frontend **400**, e2e **157** — clean.
 
+### 2026-08-26 (last) — the strip reads the board, not an old plan
+
+*"It shows Seiser Alm as previous even though we haven't marked it done. Same
+with next locked in stop on the map, Kronplatz, is also shown as earlier,
+even though it's clearly marked as next on the map."*
+
+Both halves were one thing, and the previous fix was a plaster on it. The
+strip is a VIEW of the `days` collection; on this trip that collection is
+left over from an older generation, so it dated Kronplatz to two days ago
+while the board — correctly, after the morning's ordering work — had it as
+the next stop ahead. Relabelling the "Today" chip fixed one entry and left
+every other one saying the same wrong thing.
+
+So when the stored days no longer describe the kept stops, the strip stops
+reading them and reads the board: the stops in the order they will be driven,
+dated by their arrival estimates, with the first one Today. Nothing is
+written — the stored days still hold the researched detail, and rebuilding
+them stays the traveler's choice. A chip with no day behind it opens the
+rebuild rather than navigating nowhere.
+
+The condition is the one already on screen: `daysMissingKeptStops`, the same
+count the "these days are from an earlier plan" banner reports. When the days
+and the board agree, the strip goes on showing the real days, with their real
+overnight towns and their past-days reveal — a generated plan has connecting
+nights that are nobody's kept stop, and deriving would lose them.
+
+Verification: lint 0, build 0, frontend **404**, e2e **157** — clean.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
