@@ -214,6 +214,7 @@ export function PlanStrip({
     }
   }
 
+  const nextStop = routeStops[0]
   const today = new Date().toISOString().slice(0, 10)
   const strip = dayStrip(days, today)
   const [showPastDays, setShowPastDays] = useState(false)
@@ -300,7 +301,21 @@ export function PlanStrip({
             >
               <span className="font-medium">{chip.label}</span>
               <span className="ml-1.5 text-neutral-500 dark:text-neutral-400">
-                {chip.day.overnight.name}
+                {/* Today names what you are actually heading to, not what an
+                  * older plan said you would sleep next to. Reported
+                  * 2026-08-26: "'today' should reflect the closest not
+                  * marked done activity. Now it's some other far away
+                  * location" — it read "Castello Scaligero di Sirmione"
+                  * from a van parked 200 km away at the Seiser Alm.
+                  *
+                  * `routeStops` is ordered from the van and excludes
+                  * anything done (see orderStopsFromHere and lockedStops),
+                  * so its first entry IS the closest one still to do. Only
+                  * Today: the days after it are the plan's answer, and this
+                  * one is the road's. */}
+                {chip.label === 'Today' && nextStop
+                  ? nextStop.name
+                  : chip.day.overnight.name}
               </span>
             </button>
           ),

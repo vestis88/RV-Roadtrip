@@ -1230,7 +1230,13 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
        * beginning (`lg:flex-row`); these two screens never got it. */}
       <div className="flex min-h-0 flex-1 flex-col lg:landscape:flex-row">
         <div
-          className="relative h-[45vh] min-h-[260px] lg:landscape:h-auto lg:landscape:flex-1"
+          // 35vh on a phone, 45 from `sm` up. Reported 2026-08-26: "On
+          // iPhone, the map keeps being to dominant." At 390×844 the map was
+          // taking 380px of a screen that had already given a third of
+          // itself to the header — so the list you curate in got what was
+          // left. The floor stays, because a map under about 220px stops
+          // being a map and becomes a texture.
+          className="relative h-[35vh] min-h-[220px] sm:h-[45vh] sm:min-h-[260px] lg:landscape:h-auto lg:landscape:flex-1"
           data-testid="explore-map-canvas"
         >
           {apiKey ? (

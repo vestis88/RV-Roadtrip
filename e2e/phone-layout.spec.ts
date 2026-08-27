@@ -32,9 +32,15 @@ test('the phone header stays out of the list’s way', async ({ page }) => {
   const totals = await page.getByTestId('explore-route-totals').boundingBox()
   expect(totals?.height ?? 0).toBeLessThan(50)
 
-  // What it is all for: room to actually scroll the stops.
+  // What it is all for: room to actually scroll the stops. Raised from 240
+  // on 2026-08-26 when the map came down to 35vh on phones — "On iPhone, the
+  // map keeps being to dominant."
   const list = await page.getByTestId('explore-candidate-list').boundingBox()
-  expect(list?.height ?? 0).toBeGreaterThan(240)
+  expect(list?.height ?? 0).toBeGreaterThan(330)
+
+  // And the map is still a map, not a texture.
+  const map = await page.getByTestId('explore-map-screen').boundingBox()
+  expect(map?.height ?? 0).toBeGreaterThan(0)
 })
 
 test('the plan actions are reachable behind More on a phone', async ({
@@ -402,5 +408,62 @@ test.describe('once the trip is under way', () => {
     await expect(
       page.getByTestId(`explore-candidate-${loose.id}`),
     ).toHaveCount(0, { timeout: 15_000 })
+  })
+})
+
+/**
+ * Reported 2026-08-26: "'today' should reflect the closest not marked done
+ * activity. Now it's some other far away location." The chip read an
+ * overnight town from an older plan, 200 km from where the van was parked.
+ */
+test.describe('what today is about', () => {
+  test.use({
+    viewport: { width: 1180, height: 820 },
+    permissions: ['geolocation'],
+    geolocation: { latitude: 46.53, longitude: 11.6 },
+  })
+
+  test('names the closest stop still to do', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const iso = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    const daysRef = adminDb.collection('trips').doc(tripId).collection('days')
+    const snap = await daysRef.orderBy('index').get()
+    await Promise.all(
+      snap.docs.map((doc, index) => doc.ref.update({ date: iso(index) })),
+    )
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .update({ 'settings.startDate': iso(0), 'settings.endDate': iso(5) })
+
+    // Right where the van is, and still to do.
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Seiser Alm Bahn',
+        lat: 46.53,
+        lng: 11.6,
+        country: 'IT',
+        status: 'locked',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 0,
+      })
+
+    await page.getByTestId('nav-map').click()
+    const strip = page.getByTestId('day-strip')
+    await strip.waitFor()
+
+    await expect(strip).toContainText('Seiser Alm Bahn', { timeout: 15_000 })
   })
 })

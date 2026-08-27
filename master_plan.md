@@ -3068,6 +3068,32 @@ it.
 Verification: lint 0, build 0, frontend **400**, e2e **156**
 (`corridor.spec.ts:760` flaked in the full run and passes in isolation).
 
+### 2026-08-26 (later) — Today names the next stop, and the map stops shouting
+
+*"'today' should reflect the closest not marked done activity. Now it's some
+other far away location. On iPhone, the map keeps being to dominant."*
+
+**Today now names what the van is heading to.** The chip read its day's
+`overnight.name` — an overnight town from an older plan, which for this trip
+meant "Castello Scaligero di Sirmione" on a screen 200 km away at the Seiser
+Alm. It takes the first entry of `routeStops` instead, which after the
+morning's ordering work IS the closest stop still to do: that list is ordered
+from the van, excludes anything done, and puts what is behind you last.
+
+Only Today. The days after it are the plan's answer to "where will we be";
+this one is the road's answer to "where are we going", and they are different
+questions.
+
+**The map is 35vh on a phone, 45 from `sm` up.** At 390×844 it was taking
+380px of a screen that had already given a third of itself to the header, so
+the list — the thing actually curated in — got what was left. The floor stays
+at 220px, because a map smaller than that stops being a map and becomes a
+texture. Measured: the stop list goes from 280px to **365px**, and the
+existing geometry assertion was raised from 240 to 330 so it holds the new
+line rather than the old one.
+
+Verification: lint 0, build 0, frontend **400**, e2e **157** — clean.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
