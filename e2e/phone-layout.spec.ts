@@ -126,6 +126,22 @@ test.describe('filtering the list', () => {
       rank: 1,
     })
 
+    // The fixture's days carry activities and restaurants but no
+    // `detailStatus`, so the automatic skeleton writer treats them as its
+    // own and rebuilds over them — which now also LINKS the locked stop to
+    // a day and empties the bucket this test is about. Marked ready, which
+    // is what a generated day really carries, so the writer stands aside
+    // and the new stop is genuinely day-less: exactly the case the bucket
+    // exists for, a locked find added to a trip that was already planned.
+    const seededDays = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .get()
+    await Promise.all(
+      seededDays.docs.map((day) => day.ref.update({ detailStatus: 'ready' })),
+    )
+
     await page.getByTestId('nav-map').click()
     await page.getByTestId('candidate-filter').waitFor()
 
@@ -539,5 +555,59 @@ test.describe('opening the rebuild', () => {
     // And they come back once it is dismissed, rather than being lost.
     await page.getByTestId('rebuild-days-cancel').click()
     await expect(page.getByTestId('days-out-of-step-rebuild')).toBeVisible()
+  })
+})
+
+/**
+ * Reported 2026-08-26: "Previously clicking the button gave no visual
+ * confirmation/progress info." The panel simply closed — and it is a button
+ * that warns it will discard researched detail, so silence is a poor answer.
+ */
+test.describe('rebuilding the day list', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('says what it did', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Partnach Gorge',
+        lat: 47.47,
+        lng: 11.12,
+        country: 'DE',
+        status: 'locked',
+        linkedDayIds: [],
+        priority: 'must-see',
+        rank: 0,
+      })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('days-out-of-step-rebuild').waitFor()
+    await page.getByTestId('days-out-of-step-rebuild').click()
+    await page.getByTestId('rebuild-days-confirm').click()
+
+    // In words, not by inference from a strip the traveler was already
+    // unsure about.
+    const result = page.getByTestId('rebuild-days-result')
+    await expect(result).toBeVisible({ timeout: 20_000 })
+    await expect(result).toContainText('Day list rebuilt')
+    await expect(result).toContainText('kept stop')
+
+    // The panel is gone, and so is the banner it was answering.
+    await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)
+    await expect(page.getByTestId('days-out-of-step-banner')).toHaveCount(0)
+
+    // And the confirmation can be dismissed rather than sitting there.
+    await page.getByTestId('rebuild-days-result-dismiss').click()
+    await expect(result).toHaveCount(0)
   })
 })

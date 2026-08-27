@@ -512,12 +512,22 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       planMeta: trip.planMeta,
     })
     if (!decision.days) return
+    // The stop ids are part of the signature, not just the dates: the same
+    // run of days can be reached with a stop on a different one, and the
+    // links written below are what tells the board a kept stop HAS a day.
     const signature = decision.days
-      .map((day) => `${day.date}:${day.overnight.name}:${day.type}`)
+      .map(
+        (day, index) =>
+          `${day.date}:${day.overnight.name}:${day.type}:${(decision.stopIdsByDay?.[index] ?? []).join(',')}`,
+      )
       .join('|')
     if (skeletonWritten.current === signature) return
     skeletonWritten.current = signature
-    void writeSkeletonDays(tripId, decision.days).catch((error: unknown) => {
+    void writeSkeletonDays(
+      tripId,
+      decision.days,
+      decision.stopIdsByDay,
+    ).catch((error: unknown) => {
       console.error('Writing the day skeleton failed', error)
       // Cleared so a transient failure is retried on the next change rather
       // than leaving the trip permanently dayless.

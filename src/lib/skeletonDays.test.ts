@@ -140,6 +140,44 @@ describe('planSkeleton', () => {
     expect(days![1].overnight.name).toBe(days![0].overnight.name)
     expect(days![2].date).toBe('2026-07-03')
   })
+
+  /**
+   * Reported 2026-08-26 as "which button do I push" and then as the rebuild
+   * appearing to do nothing: pressing "Rebuild day list" wrote the days and
+   * left the "these days are from an earlier plan" banner standing.
+   *
+   * The banner asks `stopsAddableToRoute` — "is this a kept stop with no
+   * day" — so days written without linking every packed stop back to them
+   * cannot clear it. Which stop landed on which day is only known here, in
+   * the packing, so it has to come back out with the days.
+   */
+  it('says which stops landed on which day, so they can be linked back', () => {
+    const { days, stopIdsByDay } = planSkeleton({
+      stops: [stop({ id: 'a', name: 'Otta' }), stop({ id: 'b', name: 'Lom' })],
+      legs: [{ durationMin: 120, distanceKm: 150 }],
+      existingDays: [],
+      settings: SETTINGS,
+      planMeta: READY,
+    })
+    expect(stopIdsByDay).toHaveLength(days!.length)
+    // Every kept stop is claimed by exactly one day — a stop left out is a
+    // stop the board goes on calling day-less.
+    expect(stopIdsByDay!.flat().sort()).toEqual(['a', 'b'])
+  })
+
+  // A parked night carries no `stops` of its own — the basecamp sits on the
+  // first of its nights — so `parkedAt` is what links the rest of them. Left
+  // to `stops` alone, the extra nights would claim nobody.
+  it('links a basecamp to every night it is parked for', () => {
+    const { stopIdsByDay } = planSkeleton({
+      stops: [stop({ id: 'a', stayDuration: { kind: 'nights', nights: 3 } })],
+      legs: [{ durationMin: 60, distanceKm: 80 }],
+      existingDays: [],
+      settings: SETTINGS,
+      planMeta: READY,
+    })
+    expect(stopIdsByDay).toEqual([['a'], ['a'], ['a']])
+  })
 })
 
 /**

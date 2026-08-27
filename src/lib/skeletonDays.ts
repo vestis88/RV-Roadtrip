@@ -46,6 +46,18 @@ export interface SkeletonDecision {
     | 'unchanged'
     | 'too-many-days'
   days?: TripDay[]
+  /**
+   * Which stops landed on which day, by day index.
+   *
+   * Carried out of the packing because the stops have to be LINKED to the
+   * days that get written — and without that the rebuild does not clear the
+   * condition it is offered to fix. `stopsAddableToRoute` asks "is this a
+   * kept stop with no day", so a rebuild that wrote days and left every
+   * `linkedDayIds` empty left the "these days are from an earlier plan"
+   * banner standing afterwards, which is indistinguishable from the rebuild
+   * having done nothing (2026-08-26).
+   */
+  stopIdsByDay?: string[][]
 }
 
 /**
@@ -116,7 +128,16 @@ export function planSkeleton(input: {
   if (!input.rebuildOverDetail && sameAs(existingDays, days)) {
     return { skipped: 'unchanged' }
   }
-  return { days }
+  // A parked day carries no `stops` of its own (the basecamp is on the first
+  // of its nights), so `parkedAt` is what links the rest of them.
+  const stopIdsByDay = packed.map((day) =>
+    day.stops.length > 0
+      ? day.stops.map((stop) => stop.id)
+      : day.parkedAt
+        ? [day.parkedAt.id]
+        : [],
+  )
+  return { days, stopIdsByDay }
 }
 
 /**
@@ -239,6 +260,13 @@ function addDays(date: string, n: number): string {
 export async function writeSkeletonDays(
   tripId: string,
   days: TripDay[],
+  /**
+   * Which stops belong to which day, from the same decision that produced
+   * `days` — see SkeletonDecision.stopIdsByDay. Omitted, the days are still
+   * written but nothing is linked to them, which leaves the board saying the
+   * kept stops have no day.
+   */
+  stopIdsByDay: string[][] = [],
 ): Promise<void> {
   const daysRef = collection(db, 'trips', tripId, 'days')
   const existing = await getDocs(daysRef)
@@ -266,7 +294,25 @@ export async function writeSkeletonDays(
     }
   }
   for (const old of existing.docs) batch.delete(old.ref)
-  for (const day of days) batch.set(doc(daysRef), day)
+  // The links, built as the day refs are created — the ids do not exist
+  // until now, and both halves have to land in the same batch or the board
+  // briefly shows days that no stop claims.
+  const dayIdsByStop = new Map<string, string[]>()
+  days.forEach((day, index) => {
+    const ref = doc(daysRef)
+    batch.set(ref, day)
+    for (const stopId of stopIdsByDay[index] ?? []) {
+      dayIdsByStop.set(stopId, [...(dayIdsByStop.get(stopId) ?? []), ref.id])
+    }
+  })
+  // Every stop that was packed gets its new days; a stop that was packed
+  // onto nothing is cleared rather than left pointing at a deleted day.
+  const packedStopIds = new Set(stopIdsByDay.flat())
+  for (const stopId of packedStopIds) {
+    batch.update(doc(db, 'trips', tripId, 'corridorStops', stopId), {
+      linkedDayIds: dayIdsByStop.get(stopId) ?? [],
+    })
+  }
   batch.update(doc(db, 'trips', tripId), {
     'planMeta.status': 'ready',
     'planMeta.totalKm': 0,

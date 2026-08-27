@@ -192,6 +192,10 @@ export function PlanStrip({
    * permanently, but it is not free either.
    */
   const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildResult, setRebuildResult] = useState<{
+    days: number
+    stops: number
+  } | null>(null)
   const [rebuildError, setRebuildError] = useState<string | null>(null)
 
   async function rebuildDays() {
@@ -210,7 +214,18 @@ export function PlanStrip({
         setRebuildError(describeSkeletonSkip(decision.skipped))
         return
       }
-      await writeSkeletonDays(tripId, decision.days)
+      await writeSkeletonDays(tripId, decision.days, decision.stopIdsByDay)
+      // Said out loud, because the panel closing is not an answer.
+      // Reported 2026-08-26: "Previously clicking the button gave no visual
+      // confirmation/progress info." The day strip does change underneath,
+      // but a traveler who pressed a button that warned them it would
+      // discard researched detail deserves to be told it worked, in words,
+      // rather than left to infer it from a strip they were already unsure
+      // about.
+      setRebuildResult({
+        days: decision.days.length,
+        stops: routeStops.length,
+      })
       onRebuildOpenChange(false)
     } catch (error) {
       console.error('Rebuilding the day list failed', error)
@@ -358,6 +373,28 @@ export function PlanStrip({
         * cannot fix that on its own (those days carry researched detail, and
         * discarding it silently would be far worse), so the board says so
         * and offers the one button that can. */}
+      {rebuildResult && (
+        <div
+          data-testid="rebuild-days-result"
+          className="flex flex-wrap items-center gap-2 border-b border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+        >
+          <p className="flex-1">
+            Day list rebuilt — {rebuildResult.days} day
+            {rebuildResult.days === 1 ? '' : 's'} from your{' '}
+            {rebuildResult.stops} kept stop
+            {rebuildResult.stops === 1 ? '' : 's'}. Open a day to fill it in.
+          </p>
+          <button
+            type="button"
+            data-testid="rebuild-days-result-dismiss"
+            className="link"
+            onClick={() => setRebuildResult(null)}
+          >
+            Got it
+          </button>
+        </div>
+      )}
+
       {daysMissingKeptStops > 0 && !rebuildOpen && (
         <div
           data-testid="days-out-of-step-banner"
@@ -450,6 +487,14 @@ export function PlanStrip({
             discarded. Each new day fills itself in again when you open it.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
+            {rebuilding && (
+              <p
+                data-testid="rebuild-days-progress"
+                className="w-full text-neutral-600 dark:text-neutral-300"
+              >
+                Clearing the old days and writing the new ones…
+              </p>
+            )}
             <button
               type="button"
               data-testid="rebuild-days-confirm"

@@ -3143,6 +3143,47 @@ the count the banner reports is the set the rebuild actually uses.
 Verification: lint 0, build 0, frontend **406**, e2e **158**
 (`dayview.spec.ts:140` flaked in the full run and passes in isolation).
 
+### 2026-08-26 — the rebuild says what it did, and links what it wrote
+
+*"Previously clicking the button gave no visual confirmation/progress info.
+Is that also available now? Else build it."*
+
+It was not, and building it turned up why the button had felt inert. The
+rebuild showed "Rebuilding…" on the button itself and then closed its panel,
+which is the same thing the Cancel button does — so a traveler who had just
+been warned that this discards researched detail was left to infer success
+from a day strip they were already unsure about. There is now a progress line
+while it runs and a result banner after: *"Day list rebuilt — 4 days from
+your 6 kept stops. Open a day to fill it in."*
+
+**The banner it was offered to fix survived it.** Writing that assertion into
+the test is what exposed it: `writeSkeletonDays` wrote the days and never
+touched the stops, so every kept stop still had an empty `linkedDayIds`, and
+`stopsAddableToRoute` — "is this a kept stop with no day" — went on counting
+all of them. The "these days are from an earlier plan" banner therefore stood
+unchanged after a successful rebuild, which is indistinguishable from the
+rebuild having done nothing. It was not a missing-feedback problem alone;
+the action really had left half its job undone since the skeleton path
+landed.
+
+Which stop lands on which day is known only inside the packing, so it comes
+back out with the days as `stopIdsByDay` and both halves — the day documents
+and the stops' `linkedDayIds` — go into the same batch. A basecamp's extra
+nights carry no `stops` of their own (the stop sits on the first night), so
+`parkedAt` links the rest of them; without that the extra nights would claim
+nobody. The automatic writer passes the same mapping, and its
+write-once signature now includes the stop ids, since the same run of dates
+can be reached with a stop on a different day.
+
+One e2e fixture needed correcting rather than the code: the seeded plan's
+days carry activities and restaurants but no `detailStatus`, so the automatic
+writer treated them as its own and rebuilt over them. Marked `ready` — which
+is what a generated day really carries — the filter test's locked stop is
+genuinely day-less again, which is the case that bucket exists for.
+
+Verification: lint 0, build 0, frontend **408**, functions **660**, e2e
+**159** — all green, no flakes.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
