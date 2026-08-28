@@ -12,7 +12,10 @@ import {
   generateRescanCandidates,
   notLocated,
 } from './prompts/rescanCorridor.js'
-import { findStopsForQuery } from './querySearch.js'
+import {
+  findStopsForQuery,
+  type ClaudeFailureKind,
+} from './querySearch.js'
 
 /**
  * How long the search itself may run, leaving the rest of the function's
@@ -78,7 +81,13 @@ export async function runRescanCorridor(
   centerName?: string,
   waypointNames?: string[],
   deadlineMs?: number,
-): Promise<{ stopsWritten: number; droppedTooFar: number; notLocated: number }> {
+): Promise<{
+  stopsWritten: number
+  droppedTooFar: number
+  notLocated: number
+  source: 'claude' | 'places'
+  claudeFailure?: ClaudeFailureKind
+}> {
   const db = getFirestore()
   const tripRef = db.collection('trips').doc(tripId)
   const tripSnap = await tripRef.get()
@@ -114,9 +123,11 @@ export async function runRescanCorridor(
   // "Rescan this area" pass has no query to search for and is Claude's job
   // by definition — "what's worth stopping for around here" is a judgement,
   // not a lookup.
+  let claudeFailure: ClaudeFailureKind | undefined
+  let searchSource: 'claude' | 'places' = 'claude'
   const finds = query
-    ? (
-        await findStopsForQuery({
+    ? await (async () => {
+        const result = await findStopsForQuery({
           query,
           center,
           radiusKm,
@@ -128,7 +139,10 @@ export async function runRescanCorridor(
           waypointNames,
           ...(existingStopNames.length > 0 ? { existingStopNames } : {}),
         })
-      ).finds
+        searchSource = result.source
+        claudeFailure = result.claudeFailure
+        return result.finds
+      })()
     : await generateRescanCandidates({
         center,
         radiusKm,
@@ -198,6 +212,11 @@ export async function runRescanCorridor(
     stopsWritten: fresh.length,
     droppedTooFar: droppedForDistance(finds),
     notLocated: notLocated(finds),
+    // The plain "rescan this area" pass has no fallback to report — it is
+    // Claude or an error — so this is only ever interesting for a typed
+    // query. Reported the same way either way so the caller needs no branch.
+    source: searchSource,
+    ...(claudeFailure ? { claudeFailure } : {}),
   }
 }
 
@@ -274,7 +293,7 @@ export const searchNearby = onCall(
     // The traveler's own notes and interests steer this exactly as they
     // steer a rescan — "cozy over mainstream" means the same thing whether
     // it is asked three months out or from a lay-by.
-    const { finds } = await findStopsForQuery({
+    const { finds, source, claudeFailure } = await findStopsForQuery({
       query,
       center,
       radiusKm,
@@ -284,6 +303,11 @@ export const searchNearby = onCall(
     })
 
     return {
+      // Which engine actually answered, said out loud — see
+      // classifyClaudeFailure. A fallback nobody can see is indistinguishable
+      // from the regression it looks like.
+      source,
+      ...(claudeFailure ? { claudeFailure } : {}),
       finds: finds.map((find) => ({
         name: find.name,
         lat: find.lat,
@@ -393,7 +417,12 @@ export const rescanCorridor = onCall(
         )
     }, RESCAN_HEARTBEAT_MS)
     try {
-      const { stopsWritten, droppedTooFar, notLocated: unlocatable } = await runRescanCorridor(
+      const {
+        stopsWritten,
+        droppedTooFar,
+        notLocated: unlocatable,
+        claudeFailure,
+      } = await runRescanCorridor(
         tripId,
         center,
         radiusKm,
@@ -415,6 +444,11 @@ export const rescanCorridor = onCall(
         'planMeta.rescanLastRadiusKm': radiusKm,
         // Proposed and then not findable on the map at all — see notLocated.
         'planMeta.rescanLastNotLocated': unlocatable,
+        // Which engine answered — see classifyClaudeFailure. Deleted rather
+        // than left behind on a run that did not fall back, so a fixed
+        // problem stops being reported the moment a search works again,
+        // the same discipline as rescanLastError above.
+        'planMeta.rescanLastClaudeFailure': claudeFailure ?? FieldValue.delete(),
         // A run that worked answers the last one that didn't.
         'planMeta.rescanLastError': FieldValue.delete(),
         'planMeta.rescanLastFailedAt': FieldValue.delete(),

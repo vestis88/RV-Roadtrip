@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { LatLng, PlanMeta } from '@rv/shared'
 import { RescanCorridorButton } from './RescanCorridorButton'
-import { LIVE_PRESETS, searchAroundUs, type LiveFind } from '../lib/liveSearch'
+import { LIVE_PRESETS, searchAroundUs, type LiveResult } from '../lib/liveSearch'
+import { searchSourceNote } from '../lib/searchSourceNote'
 import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 
 /**
@@ -56,8 +57,8 @@ export function MapSearchPanel({
   onRadiusOverrideChange,
   armed,
   onArmedChange,
-  onFinds,
-  finds,
+  onResult,
+  result,
 }: {
   tripId: string
   mapCenter: LatLng
@@ -73,8 +74,8 @@ export function MapSearchPanel({
   armed: boolean
   onArmedChange: (armed: boolean) => void
   /** Ephemeral finds, lifted so the map can draw them. */
-  onFinds: (finds: LiveFind[] | null) => void
-  finds: LiveFind[] | null
+  onResult: (result: LiveResult | null) => void
+  result: LiveResult | null
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -85,6 +86,8 @@ export function MapSearchPanel({
   // implied by which button was pressed: "what's near us" while panning
   // tomorrow's route, and "scan this valley" while parked in it, are both
   // things people want.
+  const sourceNote = searchSourceNote(result?.source, result?.claudeFailure)
+
   const searchCentre =
     anchor === 'position' && position
       ? { lat: position.lat, lng: position.lng }
@@ -93,9 +96,9 @@ export function MapSearchPanel({
   async function runNearby(id: string, query: string) {
     setBusy(id)
     setError(null)
-    onFinds(null)
+    onResult(null)
     try {
-      onFinds(
+      onResult(
         await searchAroundUs(tripId, searchCentre, query, area.radiusKm),
       )
     } catch (err) {
@@ -275,18 +278,32 @@ export function MapSearchPanel({
         * suits this trip, and this overlay is a few hundred pixels wide —
         * so it kept the controls and gave the results back to the column
         * that was built for exactly this shape of card. */}
-      {finds && (
+      {result && (
         <p className="mt-2 text-neutral-500 dark:text-neutral-400" data-testid="live-finds">
-          {finds.length === 0 ? (
+          {result.finds.length === 0 ? (
             <span data-testid="live-empty">
               Nothing found in that circle. Try wider, or a different wording.
             </span>
           ) : (
             <span data-testid="live-ephemeral-note">
-              {finds.length} on the map and in the list below — saved only if
-              you add them.
+              {result.finds.length} on the map and in the list below — saved
+              only if you add them.
             </span>
           )}
+        </p>
+      )}
+
+      {/* Which engine answered, and only when that is not the one the search
+        * asked for. Reported 2026-08-28 as "the results seem to be based
+        * solely on Google Maps results again?" — they were, because the
+        * Anthropic account had run out of credit and the fallback did its
+        * job in silence. See searchSourceNote. */}
+      {sourceNote && (
+        <p
+          data-testid="search-source-note"
+          className="mt-1 rounded-lg bg-amber-50 p-1.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+        >
+          {sourceNote}
         </p>
       )}
 

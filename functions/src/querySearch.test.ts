@@ -216,3 +216,90 @@ describe('findStopsForQuery', () => {
     expect(finds.length).toBeLessThanOrEqual(8)
   })
 })
+
+/**
+ * Reported 2026-08-28 from a lay-by at Lake Garda: *"The results seem to be
+ * based solely on Google Maps results again?"* They were. The production log
+ * for that minute:
+ *
+ *     {"event":"query_search","source":"places","finds":8,"claudeMs":560,
+ *      "claudeError":"400 … Your credit balance is too low to access the
+ *      Anthropic API."}
+ *
+ * Nothing was wrong with the Claude-first order — the account had run out of
+ * credit and the fallback did exactly its job, in silence. A correct
+ * fallback nobody can see is indistinguishable from the regression it looks
+ * like, so the reason now travels with the result.
+ */
+describe('saying which engine answered', () => {
+  it('reports the fallback and why, when Claude could not answer', async () => {
+    searchPlacesByQueryMock.mockResolvedValue([place()])
+    generateRescanCandidatesMock.mockRejectedValue(
+      new Error(
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}',
+      ),
+    )
+    const { findStopsForQuery } = await import('./querySearch.js')
+
+    const result = await findStopsForQuery({
+      query: 'something worth doing nearby right now',
+      center: HILLEROD,
+      radiusKm: 25,
+    })
+
+    // The results still come back — eight real places near a traveler on the
+    // road are worth having, and withholding them to make a point about
+    // billing would be the wrong trade.
+    expect(result.finds.length).toBeGreaterThan(0)
+    expect(result.source).toBe('places')
+    expect(result.claudeFailure).toBe('credit')
+  })
+
+  /**
+   * The distinction the whole field exists for. Claude answering "nothing
+   * here" is a fact about the ground; Claude being unreachable is a fact
+   * about us, and a screen that reads them the same way sends someone
+   * looking for a bug that is not there.
+   */
+  it('does not claim a failure when Claude simply had nothing to add', async () => {
+    searchPlacesByQueryMock.mockResolvedValue([place()])
+    generateRescanCandidatesMock.mockResolvedValue([])
+    const { findStopsForQuery } = await import('./querySearch.js')
+
+    const result = await findStopsForQuery({
+      query: 'a good lunch place nearby',
+      center: HILLEROD,
+      radiusKm: 25,
+    })
+
+    expect(result.source).toBe('places')
+    expect(result.claudeFailure).toBeUndefined()
+  })
+
+  it('says nothing about a fallback when Claude answered', async () => {
+    generateRescanCandidatesMock.mockResolvedValue([
+      { name: 'Seiser Alm', country: 'IT', why: 'A high-alpine meadow.', ...HILLEROD },
+    ])
+    const { findStopsForQuery } = await import('./querySearch.js')
+
+    const result = await findStopsForQuery({
+      query: 'something worth doing nearby right now',
+      center: HILLEROD,
+      radiusKm: 25,
+    })
+
+    expect(result.source).toBe('claude')
+    expect(result.claudeFailure).toBeUndefined()
+  })
+
+  // Each kind is here because it has a DIFFERENT answer for whoever reads
+  // it: a card to top up, a key to fix, a minute to wait, a retry.
+  it('tells the failures apart by what the reader would do about them', async () => {
+    const { classifyClaudeFailure } = await import('./querySearch.js')
+    expect(classifyClaudeFailure('Your credit balance is too low')).toBe('credit')
+    expect(classifyClaudeFailure('401 authentication_error: invalid x-api-key')).toBe('auth')
+    expect(classifyClaudeFailure('429 rate limit exceeded')).toBe('rate-limit')
+    expect(classifyClaudeFailure('Request timed out after 60s')).toBe('timeout')
+    expect(classifyClaudeFailure('socket hang up')).toBe('other')
+  })
+})

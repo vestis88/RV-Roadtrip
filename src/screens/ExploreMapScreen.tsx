@@ -57,7 +57,7 @@ import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
 import { addFindToTrip } from '../lib/addFind'
 import { SearchFindCard } from '../components/SearchFindCard'
-import type { LiveFind } from '../lib/liveSearch'
+import type { LiveFind, LiveResult } from '../lib/liveSearch'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
 import { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
@@ -164,7 +164,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [radiusOverrideKm, setRadiusOverrideKm] = useState<number | null>(null)
   const [searchAnchor, setSearchAnchor] = useState<SearchAnchor>('map')
   /** Ephemeral finds — see MapSearchPanel on why these are never written. */
-  const [finds, setFinds] = useState<LiveFind[] | null>(null)
+  const [searchResult, setSearchResult] = useState<LiveResult | null>(null)
+  // The finds themselves, which is all the map and the list want. The engine
+  // that produced them travels alongside — see searchSourceNote.
+  const finds = searchResult?.finds ?? null
   const [addedFindNames, setAddedFindNames] = useState<Set<string>>(new Set())
   /** Which find's pin was tapped — the same idea as selectedId, for finds. */
   const [selectedFind, setSelectedFind] = useState<string | null>(null)
@@ -834,8 +837,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     setAddedFindNames((held) => new Set(held).add(find.name))
     try {
       await addFindToTrip(tripId, find)
-      setFinds((current) =>
-        current ? current.filter((f) => f.name !== find.name) : current,
+      // The find leaves the scratch list; which engine produced it does not
+      // change by one of them being kept.
+      setSearchResult((current) =>
+        current
+          ? {
+              ...current,
+              finds: current.finds.filter((f) => f.name !== find.name),
+            }
+          : current,
       )
       if (selectedFind === find.name) setSelectedFind(null)
     } catch (error) {
@@ -1450,8 +1460,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               onRadiusOverrideChange={setRadiusOverrideKm}
               armed={aimingSearch}
               onArmedChange={setAimingSearch}
-              finds={finds}
-              onFinds={setFinds}
+              result={searchResult}
+              onResult={setSearchResult}
             />
           </div>
         </div>

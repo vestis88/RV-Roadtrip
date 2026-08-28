@@ -32,6 +32,50 @@ function describePlace(place: QueryPlaceFind, query: string): string {
 }
 
 /**
+ * Why the Claude leg could not answer — coarse on purpose.
+ *
+ * The fallback existed from the start and worked exactly as designed on
+ * 2026-08-28: Claude 400'd in half a second, Places answered, and eight
+ * stops appeared on the map. What it did NOT do was say so, and the report
+ * that followed was *"The results seem to be based solely on Google Maps
+ * results again?"* — the traveler reading a silent, correct fallback as the
+ * regression they had reported four days earlier. Reading production logs
+ * was the only way to tell the two apart, which is a diagnosis a traveler in
+ * a lay-by cannot make.
+ *
+ * The kinds are the ones with DIFFERENT answers for the person reading them:
+ * out of credit is a card to top up, a rejected key is a deployment
+ * problem, a rate limit is "wait a minute", and a timeout is "try again".
+ * Anything else stays "it failed" rather than being guessed at.
+ */
+export type ClaudeFailureKind =
+  | 'credit'
+  | 'auth'
+  | 'rate-limit'
+  | 'timeout'
+  | 'other'
+
+/**
+ * Matched against the message rather than a status code because that is what
+ * survives the SDK's own error wrapping — the 2026-08-28 entry reached the
+ * log as a string containing both the 400 and the sentence about credit.
+ */
+export function classifyClaudeFailure(error: string): ClaudeFailureKind {
+  const text = error.toLowerCase()
+  if (text.includes('credit balance') || text.includes('billing')) return 'credit'
+  if (
+    text.includes('authentication') ||
+    text.includes('invalid x-api-key') ||
+    text.includes('401')
+  ) {
+    return 'auth'
+  }
+  if (text.includes('rate limit') || text.includes('429')) return 'rate-limit'
+  if (text.includes('timeout') || text.includes('timed out')) return 'timeout'
+  return 'other'
+}
+
+/**
  * Answers "Describe it" and preset searches.
  *
  * **Claude first, Places only as a fallback.** Inverted 2026-08-24, and the
@@ -93,7 +137,17 @@ export async function findStopsForQuery(input: {
   waypointNames?: string[]
   /** Passed straight through to the Claude fallback — see rescanCorridor. */
   existingStopNames?: string[]
-}): Promise<{ finds: RescanFind[]; source: 'places' | 'claude' }> {
+}): Promise<{
+  finds: RescanFind[]
+  source: 'places' | 'claude'
+  /**
+   * Set only when Claude FAILED. Absent alongside `source: 'places'` means
+   * Claude ran and had nothing to propose, which is a real answer about the
+   * area rather than an outage — and the two must not read the same on
+   * screen.
+   */
+  claudeFailure?: ClaudeFailureKind
+}> {
   const startedAt = Date.now()
 
   // Claude first. A turn that fails outright must not fail the search — the
@@ -182,7 +236,11 @@ export async function findStopsForQuery(input: {
       `Both searches failed — Claude: ${claudeError}; Places: ${placesError}`,
     )
   }
-  return { finds: withinCorridor, source: 'places' }
+  return {
+    finds: withinCorridor,
+    source: 'places',
+    ...(claudeError ? { claudeFailure: classifyClaudeFailure(claudeError) } : {}),
+  }
 }
 
 function logQuerySearch(payload: {

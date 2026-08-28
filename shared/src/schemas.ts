@@ -313,6 +313,19 @@ export const planMetaSchema = z.object({
   // be verified", the second of which points at map data rather than at the
   // search. Both used to read as "Nothing new found nearby".
   rescanLastNotLocated: z.number().int().nonnegative().optional(),
+  /**
+   * Why the last typed search fell back to Google Places, when it did.
+   *
+   * Absent means the search Claude was asked for is the search that
+   * answered. Reported 2026-08-28 as *"The results seem to be based solely
+   * on Google Maps results again?"* — and it was, because the Anthropic
+   * account had run out of credit and the fallback did its job in silence.
+   * A correct fallback nobody can see is indistinguishable from the
+   * regression it looks like, so the reason now travels with the result.
+   */
+  rescanLastClaudeFailure: z
+    .enum(['credit', 'auth', 'rate-limit', 'timeout', 'other'])
+    .optional(),
   // Heartbeat for the `status` busy guard — refreshed whenever a running
   // generation writes progress, so a claim left behind by a killed
   // container can be reclaimed instead of wedging the trip forever. See

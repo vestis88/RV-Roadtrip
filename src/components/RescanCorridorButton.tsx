@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LatLng, PlanMeta } from '@rv/shared'
 import { MAX_RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
 import { describeResult } from '../lib/rescanResultMessage'
+import { searchSourceNote } from '../lib/searchSourceNote'
 import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
@@ -234,6 +235,16 @@ export function RescanCorridorButton({
     }
   }
 
+  /**
+   * Only alongside a result — a scan that ERRORED says so in its own line
+   * below, and stacking "it failed" on "it fell back" describes two things
+   * when one happened.
+   */
+  const scanSourceNote =
+    status && planMeta.rescanLastClaudeFailure
+      ? searchSourceNote('places', planMeta.rescanLastClaudeFailure)
+      : null
+
   const statusLines = (
     <>
       {status && (
@@ -242,6 +253,18 @@ export function RescanCorridorButton({
           className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
         >
           {status}
+        </p>
+      )}
+      {/* Which engine answered the last scan, when it was not the one asked
+          for. Read off the trip rather than remembered here, for the same
+          reason the result sentence above is: a scan outlives the connection
+          that started it. See searchSourceNote. */}
+      {scanSourceNote && (
+        <p
+          data-testid="rescan-source-note"
+          className="rounded bg-amber-50/95 px-2 py-1 text-xs text-amber-900 shadow-md backdrop-blur-sm dark:bg-amber-950/95 dark:text-amber-100"
+        >
+          {scanSourceNote}
         </p>
       )}
       {/* The local rejection when there is one, the trip's own record of the

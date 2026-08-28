@@ -1,6 +1,7 @@
 import { httpsCallable } from 'firebase/functions'
 import type { LatLng } from '@rv/shared'
 import { functions } from './firebase'
+import type { ClaudeFailureKind, SearchSource } from './searchSourceNote'
 
 /**
  * "What's around us now."
@@ -55,10 +56,10 @@ export async function searchAroundUs(
   center: LatLng,
   query: string,
   radiusKm: number = LIVE_RADIUS_KM,
-): Promise<LiveFind[]> {
+): Promise<LiveResult> {
   const call = httpsCallable<
     { tripId: string; center: LatLng; radiusKm: number; query: string },
-    { finds: LiveFind[] }
+    LiveResult
   >(functions, 'searchNearby')
   const { data } = await call({
     tripId,
@@ -66,5 +67,25 @@ export async function searchAroundUs(
     radiusKm,
     query,
   })
-  return data.finds
+  return {
+    finds: data.finds,
+    // Older deployments answered without a source at all. Treated as "not
+    // reported" rather than as Places, so a stale function version says
+    // nothing instead of accusing itself.
+    ...(data.source ? { source: data.source } : {}),
+    ...(data.claudeFailure ? { claudeFailure: data.claudeFailure } : {}),
+  }
+}
+
+/**
+ * The finds plus WHICH ENGINE found them.
+ *
+ * Carried out of the callable because a fallback the traveler cannot see is
+ * indistinguishable from a regression — see searchSourceNote for the report
+ * that proved it.
+ */
+export interface LiveResult {
+  finds: LiveFind[]
+  source?: SearchSource
+  claudeFailure?: ClaudeFailureKind
 }

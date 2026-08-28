@@ -3184,6 +3184,63 @@ genuinely day-less again, which is the case that bucket exists for.
 Verification: lint 0, build 0, frontend **408**, functions **660**, e2e
 **159** — all green, no flakes.
 
+### 2026-08-28 — the search was right; the account was empty
+
+*"The results seem to be based solely on Google Maps results again?"*
+
+They were, and nothing in the code had regressed. The production log for that
+minute says it outright:
+
+    {"event":"query_search","source":"places","finds":8,"claudeMs":560,
+     "claudeError":"400 … Your credit balance is too low to access the
+     Anthropic API."}
+
+— against the previous evening's entry for the same trip,
+`{"source":"claude","finds":5,"claudeMs":12736}`. The Claude-first order
+inverted on 2026-08-24 is intact. The Anthropic account ran out of credit,
+Claude refused in half a second, and the Places fallback answered with its
+own template blurbs and no photos, exactly as designed.
+
+**The bug is that it did so in silence.** A correct fallback nobody can see
+is indistinguishable from the regression it looks like — same generic
+descriptions, same missing pictures — and telling the two apart took a Cloud
+Logging query, which is not something a traveler parked at Lake Garda can
+run. The instrumentation added on 2026-08-24 is what made the diagnosis take
+minutes instead of an evening; it was pointed at the wrong audience.
+
+So the reason now travels with the result. `findStopsForQuery` returns which
+engine answered and, when Claude failed, a coarse kind — `credit`, `auth`,
+`rate-limit`, `timeout`, `other`. Those five exist because each has a
+different answer for whoever reads it: a card to top up, a key to fix in the
+deployment, a minute to wait, a retry. Anything else stays "it could not be
+reached" rather than being guessed at.
+
+Two distinctions the encoding protects:
+
+- **A fallback is not an error.** The eight places still come back and still
+  go on the map. Withholding real results near a traveler on the road to
+  make a point about billing would be the wrong trade; the note sits beside
+  them instead.
+- **"Nothing here" is not "we are down".** Places answering after Claude
+  proposed nothing carries no failure kind at all, because Claude having
+  nothing to add is a fact about the ground, and reading it as an outage
+  sends someone hunting a bug that does not exist.
+
+The typed-query rescan records the same reason on the trip
+(`planMeta.rescanLastClaudeFailure`), deleted on any run that did not fall
+back — the same discipline `rescanLastError` already follows, so a fixed
+problem stops being reported the moment a search works again. The plain
+"rescan this area" pass needs none of this: it is Claude or an error, and it
+already says which.
+
+Verification: lint 0, build 0, frontend **413**, functions **664**, e2e
+**159** — all green.
+
+**Open, and not a code problem:** the Anthropic account needs credit before
+the richer search comes back. Until it does, every Claude-backed feature —
+day detail, corridor research, plan generation — falls back or fails; only
+this search had a fallback to fall back to.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
