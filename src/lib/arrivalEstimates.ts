@@ -21,10 +21,12 @@ import type { TripDayWithId } from '../hooks/useTripDays'
  * estimates pull forward as things are ticked off, which is the behaviour
  * that makes this worth showing at all.
  *
- * **A stop already on a real day takes that day's date.** The packing is a
- * fast greedy estimate; the day plan is the committed answer. Letting both
- * claim to say "when" is exactly how the header and the itinerary came to
- * disagree before, so where a committed date exists it wins outright.
+ * **A stop already on a real day takes that day's date, while that day is
+ * still ahead.** The packing is a fast greedy estimate; the day plan is the
+ * committed answer, and letting both claim to say "when" is how the header
+ * and the itinerary came to disagree before. But a committed day in the
+ * PAST, on a stop nobody marked done, is not an answer to "when will we get
+ * there" — see the override below.
  */
 export interface ArrivalEstimate {
   /** YYYY-MM-DD. */
@@ -67,13 +69,28 @@ export function arrivalEstimates(input: {
     }
   })
 
-  // A committed day overrides the estimate for the stop that owns it.
+  // A committed day overrides the estimate for the stop that owns it —
+  // UNLESS that day has already been and gone.
+  //
+  // Reported 2026-08-31 with a screenshot: a stop on the route ahead, not
+  // marked done, dated 2026-08-20 — eleven days in the past — while the
+  // banner directly above it said "These days are from an earlier plan".
+  // Both statements were produced by this file: the committed date won
+  // outright, and the day it came from belonged to a plan the traveler had
+  // long since driven past.
+  //
+  // A day in the past on a stop that is NOT done is not a commitment; it is
+  // the residue of an older plan, and it is the one case where the packing
+  // — which counts forward from today — is strictly better informed. So the
+  // committed date wins only while it is still ahead. Done stops never
+  // reach here (they are filtered above), so this cannot swallow the date
+  // something was actually done on.
   for (const stop of routeStops) {
     const committedDate = (stop.linkedDayIds ?? [])
       .map((dayId) => dateByDayId.get(dayId))
       .filter((date): date is string => !!date)
       .sort()[0]
-    if (committedDate) {
+    if (committedDate && committedDate >= today) {
       estimates.set(stop.id, { date: committedDate, committed: true })
     }
   }

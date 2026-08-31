@@ -260,10 +260,31 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   // leaves the map impossible to pan or zoom while it runs (reported as
   // the map freezing after promoting a stop, with the route never
   // updating — it was being cancelled and restarted continuously).
+  /**
+   * Everything the list below the map can show.
+   *
+   * `proposed` belongs here and was missing until 2026-08-31, reported as
+   * *"Used rescan this area. Said it found 7 results. Can't see any."* They
+   * were written, and they were invisible in every bucket including "All",
+   * because a rescan writes `candidate` only while the trip has no plan and
+   * `proposed` once it has one (see rescanCorridorCallable) — and this
+   * filter listed the first and not the second. So on any trip past
+   * generation, "rescan this area" wrote to a collection nothing rendered.
+   *
+   * ExploreCandidateCard has handled a `proposed` stop since the board
+   * became the Map tab at every plan status — it renders "Lock in" for
+   * exactly this case — so the card was answering a situation this line
+   * made unreachable. The status keeps its meaning (a rescan finding on an
+   * already-generated trip, still to be reviewed); it just has somewhere to
+   * be reviewed now.
+   */
   const candidates = useMemo(
     () =>
       corridorStops.filter(
-        (stop) => stop.status === 'candidate' || stop.status === 'locked',
+        (stop) =>
+          stop.status === 'candidate' ||
+          stop.status === 'locked' ||
+          stop.status === 'proposed',
       ),
     [corridorStops],
   )
@@ -1462,6 +1483,11 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               onArmedChange={setAimingSearch}
               result={searchResult}
               onResult={setSearchResult}
+              listFilter={listFilter}
+              // Straight to the bucket a fresh scan result lands in, rather
+              // than to 'all' — the traveler is looking for the seven new
+              // ones, not for everything they have ever kept.
+              onShowNewStops={() => setChosenFilter('unlocked')}
             />
           </div>
         </div>

@@ -3,6 +3,7 @@ import type { LatLng, PlanMeta } from '@rv/shared'
 import { RescanCorridorButton } from './RescanCorridorButton'
 import { LIVE_PRESETS, searchAroundUs, type LiveResult } from '../lib/liveSearch'
 import { searchSourceNote } from '../lib/searchSourceNote'
+import type { CandidateFilter } from '../lib/candidateFilter'
 import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 
 /**
@@ -59,6 +60,8 @@ export function MapSearchPanel({
   onArmedChange,
   onResult,
   result,
+  listFilter,
+  onShowNewStops,
 }: {
   tripId: string
   mapCenter: LatLng
@@ -76,6 +79,9 @@ export function MapSearchPanel({
   /** Ephemeral finds, lifted so the map can draw them. */
   onResult: (result: LiveResult | null) => void
   result: LiveResult | null
+  /** Passed straight to the scan — see RescanCorridorButton.listFilter. */
+  listFilter: CandidateFilter
+  onShowNewStops: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -140,6 +146,8 @@ export function MapSearchPanel({
             planMeta={planMeta}
             armed={armed}
             onArmedChange={onArmedChange}
+            listFilter={listFilter}
+            onShowNewStops={onShowNewStops}
           />
         ) : (
           // What the last scan had to say, without its controls. A result
@@ -152,6 +160,8 @@ export function MapSearchPanel({
             planMeta={planMeta}
             armed={armed}
             onArmedChange={onArmedChange}
+            listFilter={listFilter}
+            onShowNewStops={onShowNewStops}
           />
         )}
       </div>
@@ -307,7 +317,19 @@ export function MapSearchPanel({
         </p>
       )}
 
+      {/* Asked outright on 2026-08-31: "What differs rescan this area to
+        * find something to do?" Nothing on the panel said, and the two do
+        * opposite things with their results — one hands you a scratch list,
+        * the other writes to the trip. A divider is not an explanation. */}
       <div className="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-700">
+        <p
+          data-testid="search-modes-note"
+          className="mb-1.5 text-xs text-neutral-500 dark:text-neutral-400"
+        >
+          The buttons above are a scratch list — nothing is saved unless you
+          add it. A rescan writes what it finds straight into your stops
+          below.
+        </p>
         <RescanCorridorButton
           tripId={tripId}
           center={searchCentre}
@@ -315,6 +337,8 @@ export function MapSearchPanel({
           planMeta={planMeta}
           armed={armed}
           onArmedChange={onArmedChange}
+          listFilter={listFilter}
+          onShowNewStops={onShowNewStops}
         />
       </div>
     </div>

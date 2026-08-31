@@ -100,3 +100,21 @@ export function countByFilter(
   }
   return counts
 }
+
+/**
+ * Whether a stop a scan has just written could appear in this bucket.
+ *
+ * Reported 2026-08-31: *"Used rescan this area. Said it found 7 results.
+ * Can't see any."* The seven were written — `stopsWritten` is the length of
+ * the batch the callable awaits — and the list below the map was filtered to
+ * "Locked in", which by construction none of them can be.
+ *
+ * A freshly scanned stop is always the same shape: not done, not locked
+ * (`candidate` while exploring, `proposed` once a plan exists), no day yet,
+ * and never `must-see` — the scan writes `worth-a-detour` at most. So only
+ * two of the six buckets can hold one, and "found 7" landing on a list that
+ * cannot show them reads as a search that lied.
+ */
+export function filterShowsNewStops(filter: CandidateFilter): boolean {
+  return filter === 'all' || filter === 'unlocked'
+}

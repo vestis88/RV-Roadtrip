@@ -3241,6 +3241,58 @@ the richer search comes back. Until it does, every Claude-backed feature —
 day detail, corridor research, plan generation — falls back or fails; only
 this search had a fallback to fall back to.
 
+### 2026-08-31 — a scan that wrote to a list nothing rendered
+
+*"Used rescan this area. Said it found 7 results. Can't see any. What differs
+rescan this area to find something to do? Also, strange date for current
+stop."*
+
+Three findings, and the first one was not the filter it looked like.
+
+**The rescan wrote seven stops into a status the board could not show.**
+`runRescanCorridor` writes `status: 'candidate'` while a trip has no plan and
+`'proposed'` once it has one — and `ExploreMapScreen`'s list was built from
+`candidate` and `locked` alone. So on any trip past generation, every rescan
+find was invisible in **every** bucket, "All" included; the counts never grew
+because they are computed from the same array. The count on the map was
+truthful — it is the length of the batch the callable awaits — and pointed at
+a list that structurally could not contain its results.
+
+`ExploreCandidateCard` has rendered "Lock in" for a `proposed` stop since the
+board became the Map tab at every plan status: the card was answering a
+situation one line in the screen made unreachable. The status keeps its
+meaning — a rescan finding on an already-generated trip, still to be reviewed
+— it just has somewhere to be reviewed now.
+
+**And the filter could hide them a second time.** The screenshot's list was
+on "Locked in", which a stop written seconds ago can never be: fresh finds
+are never locked, never done, never must-see, and have no day, so only "All"
+and "Not locked" can hold one. `filterShowsNewStops` derives that rather than
+listing it, and the scan's own result line now says where its finds went with
+a one-tap "Show them". A count the traveler cannot reconcile with what is on
+screen is worse than no count.
+
+**"What differs rescan this area to find something to do?"** Nothing on the
+panel said, and the two do opposite things with their results: the preset
+buttons are a scratch list that writes nothing until you add something, the
+rescan writes straight into your stops. One line under the divider now says
+so — the question was asked because a horizontal rule is not an explanation.
+
+**The date.** A stop on the route ahead, not marked done, showing 2026-08-20
+— eleven days in the past — directly beneath a banner reading "These days are
+from an earlier plan". Both sentences came from `arrivalEstimates`: a
+committed day won outright over the packing, and the day it won with belonged
+to a plan the traveler had already driven past. A past day on a stop nobody
+marked done is not a commitment, it is residue, and the packing — which
+counts forward from today — is strictly better informed about a stop still
+ahead. So a committed date wins only while it is still ahead; done stops are
+filtered before this point, so it cannot swallow a real date something was
+done on. The day strip reads the same estimates, so its chips stop mixing
+last week's dates with next week's in one row.
+
+Verification: lint 0, build 0, frontend **417**, functions **664**, e2e
+**161** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

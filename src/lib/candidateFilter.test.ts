@@ -141,3 +141,47 @@ describe('which kept stops still need a day', () => {
     ).toEqual(['withoutDay'])
   })
 })
+
+/**
+ * Reported 2026-08-31: "Used rescan this area. Said it found 7 results.
+ * Can't see any." They were written; the list was filtered to "Locked in",
+ * which a stop written seconds ago cannot possibly be.
+ */
+describe('filterShowsNewStops', () => {
+  it('is true only for the buckets a fresh scan result lands in', async () => {
+    const { filterShowsNewStops, CANDIDATE_FILTER_ORDER } = await import(
+      './candidateFilter'
+    )
+    expect(CANDIDATE_FILTER_ORDER.filter(filterShowsNewStops)).toEqual([
+      'all',
+      'unlocked',
+    ])
+  })
+
+  /**
+   * Not a hand-written list: the buckets are derived by running the real
+   * filter over a stop shaped exactly as the rescan callable writes one, so
+   * this cannot drift away from what the scan actually produces.
+   */
+  it('agrees with what the filter does to a just-written stop', async () => {
+    const { filterShowsNewStops, filterCandidates, CANDIDATE_FILTER_ORDER } =
+      await import('./candidateFilter')
+    const justScanned = {
+      id: 'new',
+      name: 'Cascata del Varone',
+      lat: 45.9,
+      lng: 10.85,
+      country: 'IT',
+      // What runRescanCorridor writes once a plan exists.
+      status: 'proposed',
+      linkedDayIds: [],
+      origin: 'traveler',
+    } as unknown as Parameters<typeof filterCandidates>[0][number]
+
+    for (const filter of CANDIDATE_FILTER_ORDER) {
+      expect(filterCandidates([justScanned], filter).length > 0).toBe(
+        filterShowsNewStops(filter),
+      )
+    }
+  })
+})

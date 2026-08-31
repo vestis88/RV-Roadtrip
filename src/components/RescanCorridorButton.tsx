@@ -4,6 +4,11 @@ import { MAX_RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorA
 import { describeResult } from '../lib/rescanResultMessage'
 import { searchSourceNote } from '../lib/searchSourceNote'
 import {
+  CANDIDATE_FILTER_LABEL,
+  filterShowsNewStops,
+  type CandidateFilter,
+} from '../lib/candidateFilter'
+import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
 } from '../lib/exploreCandidateActions'
@@ -31,6 +36,19 @@ interface RescanCorridorButtonProps {
    */
   armed: boolean
   onArmedChange: (armed: boolean) => void
+  /**
+   * The bucket the list below the map is currently showing, and the way to
+   * move it off one that cannot hold a scan result.
+   *
+   * Reported 2026-08-31: *"Used rescan this area. Said it found 7 results.
+   * Can't see any."* They were written — this scan's count IS the number of
+   * documents it committed — into a list filtered to "Locked in", which a
+   * stop written seconds ago can never be. The scan reports its success up
+   * here on the map; the results land down there, behind a filter it knew
+   * nothing about. See filterShowsNewStops.
+   */
+  listFilter: CandidateFilter
+  onShowNewStops: () => void
   /**
    * Render only what the scan has to SAY — its elapsed counter, its result,
    * its durable error — and none of the controls.
@@ -107,6 +125,8 @@ export function RescanCorridorButton({
   planMeta,
   armed,
   onArmedChange,
+  listFilter,
+  onShowNewStops,
   statusOnly,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
@@ -236,6 +256,18 @@ export function RescanCorridorButton({
   }
 
   /**
+   * The scan found things and the list cannot show them.
+   *
+   * Gated on `status` for the same reason the source note is: this is a
+   * statement about the scan that just finished, not a standing complaint
+   * about the filter.
+   */
+  const foundButHidden =
+    !!status &&
+    (planMeta.rescanLastFoundCount ?? 0) > 0 &&
+    !filterShowsNewStops(listFilter)
+
+  /**
    * Only alongside a result — a scan that ERRORED says so in its own line
    * below, and stacking "it failed" on "it fell back" describes two things
    * when one happened.
@@ -253,6 +285,27 @@ export function RescanCorridorButton({
           className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
         >
           {status}
+        </p>
+      )}
+      {/* Where the results went, when the list cannot show them. A count
+          the traveler cannot reconcile with what is on screen is worse than
+          no count — see the props above. */}
+      {foundButHidden && (
+        <p
+          data-testid="scan-results-hidden"
+          className="rounded bg-white/95 px-2 py-1 text-xs text-neutral-600 shadow-md backdrop-blur-sm dark:bg-neutral-900/95 dark:text-neutral-300"
+        >
+          They are in the list below, under &ldquo;
+          {CANDIDATE_FILTER_LABEL.unlocked}&rdquo; — the list is showing
+          &ldquo;{CANDIDATE_FILTER_LABEL[listFilter]}&rdquo; right now.{' '}
+          <button
+            type="button"
+            data-testid="show-scan-results"
+            className="link"
+            onClick={onShowNewStops}
+          >
+            Show them
+          </button>
         </p>
       )}
       {/* Which engine answered the last scan, when it was not the one asked

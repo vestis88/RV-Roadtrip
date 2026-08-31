@@ -611,3 +611,126 @@ test.describe('rebuilding the day list', () => {
     await expect(result).toHaveCount(0)
   })
 })
+
+/**
+ * Reported 2026-08-31 with a screenshot: "Used rescan this area. Said it
+ * found 7 results. Can't see any."
+ *
+ * They were written — the count a scan reports IS the number of documents it
+ * committed — into a list filtered to "Locked in", which a stop written
+ * seconds ago can never be. The scan says "found 7" on the map; the results
+ * land in the column below, behind a filter the scan knew nothing about.
+ */
+test.describe('a scan whose results the list is hiding', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('says where they went, and offers to show them', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const stops = adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+    await stops.add({
+      name: 'Paganella Bike Dolomites',
+      lat: 46.14,
+      lng: 11.0,
+      country: 'IT',
+      status: 'locked',
+      linkedDayIds: [],
+    })
+    // What a rescan writes once a plan exists: never locked, never done,
+    // no day, no priority.
+    const scanned = await stops.add({
+      name: 'Cascata del Varone',
+      lat: 45.9,
+      lng: 10.85,
+      country: 'IT',
+      status: 'proposed',
+      origin: 'traveler',
+      linkedDayIds: [],
+    })
+    // The trip's own record of the scan that just finished — the same
+    // fields runRescanCorridor writes, which is what the result line reads.
+    await adminDb.collection('trips').doc(tripId).update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 7,
+      'planMeta.rescanLastDroppedTooFar': 0,
+      'planMeta.rescanLastNotLocated': 0,
+      'planMeta.rescanLastRadiusKm': 26,
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('candidate-filter').waitFor()
+    await page.getByTestId('candidate-filter-locked').click()
+
+    // The complaint, exactly: a count on the map and nothing in the list.
+    await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+      'Found 7 new stops nearby',
+    )
+    await expect(
+      page.getByTestId(`explore-candidate-${scanned.id}`),
+    ).toHaveCount(0)
+
+    await expect(page.getByTestId('scan-results-hidden')).toContainText(
+      'Not locked',
+    )
+    await page.getByTestId('show-scan-results').click()
+
+    await expect(
+      page.getByTestId(`explore-candidate-${scanned.id}`),
+    ).toBeVisible()
+    // And the notice retires the moment it stops being true.
+    await expect(page.getByTestId('scan-results-hidden')).toHaveCount(0)
+  })
+
+  /**
+   * The root cause underneath the filter, and the reason "All" would not
+   * have helped either: a rescan writes `candidate` only while the trip has
+   * no plan, and `proposed` once it has one — and the board's list was built
+   * from `candidate` and `locked` alone. So on any trip past generation,
+   * "rescan this area" wrote to a collection nothing rendered.
+   */
+  test('shows a rescan find on a trip that already has a plan', async ({
+    page,
+  }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const scanned = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Cascata del Varone',
+        lat: 45.9,
+        lng: 10.85,
+        country: 'IT',
+        status: 'proposed',
+        origin: 'traveler',
+        linkedDayIds: [],
+      })
+
+    await page.getByTestId('nav-map').click()
+    await expect(
+      page.getByTestId(`explore-candidate-${scanned.id}`),
+    ).toBeVisible()
+    // With the action that makes it worth showing: a find you cannot keep is
+    // no better than a find you cannot see.
+    await expect(
+      page.getByTestId(`explore-candidate-lock-${scanned.id}`),
+    ).toBeVisible()
+  })
+})
