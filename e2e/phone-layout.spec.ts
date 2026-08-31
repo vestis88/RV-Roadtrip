@@ -734,6 +734,12 @@ test.describe('a scan whose results the list is hiding', () => {
     await expect(page.getByTestId('scan-results-hidden')).toContainText(
       'Not locked',
     )
+    // Switching to another bucket that ALSO hides them is not reading the
+    // message — it is the same problem again, so the message stays. ("No
+    // day yet" needs a locked stop, which the scan's finds can never be.)
+    await page.getByTestId('candidate-filter-no-day').click()
+    await expect(page.getByTestId('scan-results-hidden')).toBeVisible()
+
     await page.getByTestId('show-scan-results').click()
 
     await expect(
@@ -988,5 +994,115 @@ test.describe('days that keep themselves current', () => {
       .poll(async () => (await dayRef.get()).exists, { timeout: 15_000 })
       .toBe(true)
     expect((await dayRef.collection('activities').get()).size).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Reported 2026-08-31: *"The information about the 7 added stops still shows
+ * up. It should disappear after looking at any of the stops."*
+ *
+ * The result is written to the TRIP so it survives the phone that started
+ * the scan going to sleep — and that is exactly why it had no natural end:
+ * nothing in the trip document knows whether anyone has read it, so it sat
+ * across the map hours later describing a scan already acted on.
+ */
+test.describe('a scan result that has been read', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('goes when the traveller looks at what it found', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const scanned = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Cascata del Varone',
+        lat: 45.9,
+        lng: 10.85,
+        country: 'IT',
+        status: 'proposed',
+        origin: 'traveler',
+        linkedDayIds: [],
+      })
+    await adminDb.collection('trips').doc(tripId).update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': new Date().toISOString(),
+      'planMeta.rescanLastFoundCount': 7,
+      'planMeta.rescanLastDroppedTooFar': 0,
+      'planMeta.rescanLastNotLocated': 0,
+      'planMeta.rescanLastRadiusKm': 26,
+    })
+
+    await page.getByTestId('nav-map').click()
+    const status = page.getByTestId('rescan-corridor-status')
+    await expect(status).toContainText('Found 7 new stops nearby')
+
+    // Opening one of them is reading the message. Clicked near the card's
+    // corner rather than at its centre: the centre is one of the action
+    // buttons, and those stop propagation so a tap on "Lock in" is not also
+    // a tap on the card.
+    const card = page.getByTestId(`explore-candidate-${scanned.id}`)
+    await card.click({ position: { x: 8, y: 8 } })
+    await expect(card).toHaveAttribute('aria-pressed', 'true')
+    await expect(status).toHaveCount(0)
+
+    // And it stays read across a relaunch — a scan result that has been
+    // looked at is looked at for good, unlike the pacing banner's one say
+    // per app launch.
+    await page.reload()
+    await page.getByTestId('candidate-filter').waitFor()
+    await expect(page.getByTestId('rescan-corridor-status')).toHaveCount(0)
+  })
+
+  // The next scan is a new message, not the same one again.
+  test('comes back for the scan after it', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const tripRef = adminDb.collection('trips').doc(tripId)
+    const scanned = await tripRef.collection('corridorStops').add({
+      name: 'Cascata del Varone',
+      lat: 45.9,
+      lng: 10.85,
+      country: 'IT',
+      status: 'proposed',
+      origin: 'traveler',
+      linkedDayIds: [],
+    })
+    await tripRef.update({
+      'planMeta.rescanStatus': 'idle',
+      'planMeta.rescanLastRunAt': '2026-08-31T20:16:00.000Z',
+      'planMeta.rescanLastFoundCount': 7,
+      'planMeta.rescanLastDroppedTooFar': 0,
+      'planMeta.rescanLastNotLocated': 0,
+      'planMeta.rescanLastRadiusKm': 26,
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page
+      .getByTestId(`explore-candidate-${scanned.id}`)
+      .click({ position: { x: 8, y: 8 } })
+    await expect(page.getByTestId('rescan-corridor-status')).toHaveCount(0)
+
+    await tripRef.update({
+      'planMeta.rescanLastRunAt': '2026-08-31T21:40:00.000Z',
+      'planMeta.rescanLastFoundCount': 3,
+    })
+    await expect(page.getByTestId('rescan-corridor-status')).toContainText(
+      'Found 3 new stops nearby',
+      { timeout: 15_000 },
+    )
   })
 })

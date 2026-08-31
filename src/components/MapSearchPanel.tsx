@@ -62,6 +62,7 @@ export function MapSearchPanel({
   result,
   listFilter,
   onShowNewStops,
+  scanSeen,
 }: {
   tripId: string
   mapCenter: LatLng
@@ -82,6 +83,8 @@ export function MapSearchPanel({
   /** Passed straight to the scan — see RescanCorridorButton.listFilter. */
   listFilter: CandidateFilter
   onShowNewStops: () => void
+  /** Passed straight to the scan — see RescanCorridorButton.scanSeen. */
+  scanSeen: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -148,6 +151,7 @@ export function MapSearchPanel({
             onArmedChange={onArmedChange}
             listFilter={listFilter}
             onShowNewStops={onShowNewStops}
+            scanSeen={scanSeen}
           />
         ) : (
           // What the last scan had to say, without its controls. A result
@@ -162,6 +166,7 @@ export function MapSearchPanel({
             onArmedChange={onArmedChange}
             listFilter={listFilter}
             onShowNewStops={onShowNewStops}
+            scanSeen={scanSeen}
           />
         )}
       </div>
@@ -339,6 +344,7 @@ export function MapSearchPanel({
           onArmedChange={onArmedChange}
           listFilter={listFilter}
           onShowNewStops={onShowNewStops}
+          scanSeen={scanSeen}
         />
       </div>
     </div>

@@ -12,6 +12,7 @@ import {
   type Trip,
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
+import { readSeenScan, rememberSeenScan } from '../lib/scanAcknowledgement'
 import { useTripDays } from '../hooks/useTripDays'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
@@ -87,6 +88,7 @@ import {
   CANDIDATE_FILTER_ORDER,
   countByFilter,
   filterCandidates,
+  filterShowsNewStops,
   type CandidateFilter,
 } from '../lib/candidateFilter'
 import { quantisePosition, routeOriginFor } from '../lib/routeOrigin'
@@ -226,7 +228,37 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [changeRequestOpen, setChangeRequestOpen] = useState(false)
   const [morePlanActionsOpen, setMorePlanActionsOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedIdState] = useState<string | null>(null)
+
+  /**
+   * The scan whose result this device has already read.
+   *
+   * Reported 2026-08-31: *"The information about the 7 added stops still
+   * shows up. It should disappear after looking at any of the stops."* The
+   * result is written to the trip so it survives the phone that started the
+   * scan going to sleep, and that is exactly why it had no natural end —
+   * nothing in the trip document knows whether anyone has read it. Reading
+   * it is opening one of the stops, or moving the list to a bucket that
+   * holds them. See scanAcknowledgement.
+   */
+  const [seenScanAt, setSeenScanAt] = useState<string | null>(() =>
+    readSeenScan(tripId),
+  )
+  const lastScanAt = trip.planMeta.rescanLastRunAt
+  const markScanSeen = useCallback(() => {
+    if (!lastScanAt || lastScanAt === seenScanAt) return
+    setSeenScanAt(lastScanAt)
+    rememberSeenScan(tripId, lastScanAt)
+  }, [lastScanAt, seenScanAt, tripId])
+
+  /** Selecting a stop IS looking at it — see markScanSeen. */
+  const setSelectedId = useCallback(
+    (id: string | null) => {
+      if (id) markScanSeen()
+      setSelectedIdState(id)
+    },
+    [markScanSeen],
+  )
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -1507,13 +1539,17 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               onRadiusOverrideChange={setRadiusOverrideKm}
               armed={aimingSearch}
               onArmedChange={setAimingSearch}
+              scanSeen={!!lastScanAt && lastScanAt === seenScanAt}
               result={searchResult}
               onResult={setSearchResult}
               listFilter={listFilter}
               // Straight to the bucket a fresh scan result lands in, rather
               // than to 'all' — the traveler is looking for the seven new
               // ones, not for everything they have ever kept.
-              onShowNewStops={() => setChosenFilter('unlocked')}
+              onShowNewStops={() => {
+                markScanSeen()
+                setChosenFilter('unlocked')
+              }}
             />
           </div>
         </div>
@@ -1555,7 +1591,16 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                     role="radio"
                     aria-checked={listFilter === filter}
                     data-testid={`candidate-filter-${filter}`}
-                    onClick={() => setChosenFilter(filter)}
+                    onClick={() => {
+                      // Moving the list is the other way of looking at what
+                      // a scan found — but only into a bucket that actually
+                      // HOLDS what it found. Switching from "Locked in" to
+                      // "Must see" hides the new stops just as thoroughly,
+                      // and silencing the one message that says where they
+                      // went would be the opposite of reading it.
+                      if (filterShowsNewStops(filter)) markScanSeen()
+                      setChosenFilter(filter)
+                    }}
                     className={`chip px-2.5 py-1 ${
                       listFilter === filter ? 'chip-accent' : 'chip-neutral'
                     }`}

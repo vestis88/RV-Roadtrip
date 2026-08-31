@@ -50,6 +50,16 @@ interface RescanCorridorButtonProps {
   listFilter: CandidateFilter
   onShowNewStops: () => void
   /**
+   * Whether this device has already read the last scan's result.
+   *
+   * Reported 2026-08-31: *"The information about the 7 added stops still
+   * shows up. It should disappear after looking at any of the stops."* The
+   * result lives on the TRIP so it survives the phone that started the scan
+   * going to sleep, which is also why it had no natural end — see
+   * scanAcknowledgement for where the reading is recorded.
+   */
+  scanSeen: boolean
+  /**
    * Render only what the scan has to SAY — its elapsed counter, its result,
    * its durable error — and none of the controls.
    *
@@ -127,6 +137,7 @@ export function RescanCorridorButton({
   onArmedChange,
   listFilter,
   onShowNewStops,
+  scanSeen,
   statusOnly,
 }: RescanCorridorButtonProps) {
   const [submitting, setSubmitting] = useState(false)
@@ -192,7 +203,11 @@ export function RescanCorridorButton({
     ? 'Still scanning — this phone stopped following it, but the search is running on the server. Anything it finds appears on the map on its own; you can leave this screen.'
     : abandoned
     ? 'That scan stopped reporting back — it may have run out of time. Anything it did find is already on the map.'
-    : planMeta.rescanStatus !== 'generating' && !lastFailedFirst && planMeta.rescanLastRunAt
+    : planMeta.rescanStatus !== 'generating' &&
+        !lastFailedFirst &&
+        planMeta.rescanLastRunAt &&
+        // Read already, so it has said what it had to say.
+        !scanSeen
       ? describeResult(
           planMeta.rescanLastFoundCount ?? 0,
           planMeta.rescanLastDroppedTooFar ?? 0,

@@ -3531,6 +3531,50 @@ that survives keeps its activities.
 Verification: lint 0, build 0, frontend **446**, functions **664**, e2e
 **166** — all green.
 
+### 2026-08-31 — a scan result that has been read goes away
+
+*"The information about the 7 added stops still shows up. It should disappear
+after looking at any of the stops."*
+
+The result had **no natural end, by construction**. It is written to the TRIP
+— `planMeta.rescanLastRunAt` and friends — rather than held in component
+state, and deliberately so: a scan runs for minutes and its answer has to
+survive the phone that started it going to sleep. That was the fix for
+failures arriving with nothing attached. The cost, unnoticed until now, is
+that nothing in the trip document knows whether anyone has READ it, so the
+sentence sat across the map hours later describing a scan already acted on.
+
+The end is the reading, and there are exactly two ways to read it: open one
+of the stops it found, or move the list into a bucket that holds them. Both
+are deliberate acts on the results; scrolling past is not.
+
+**The narrower half of that rule is the one worth stating.** A filter change
+counts only when the new bucket actually shows new stops — `filterShowsNewStops`,
+the same predicate the "they are under Not locked" notice uses. Switching
+from "Locked in" to "Must see" hides the finds just as thoroughly, and
+silencing the one message that says where they went would be the opposite of
+reading it. An e2e pins that: the notice survives a move to "No day yet" and
+goes on "Show them".
+
+Kept per viewer in `localStorage` rather than on the trip. This is "I have
+seen it", which is true of one person on one device — writing it to Firestore
+would make one traveler's reading dismiss the message for everyone else in
+the van. And `localStorage` rather than the `sessionStorage` the pacing
+banner uses: that one earns one say per app launch, while a scan result that
+has been read is read for good. The run's timestamp is stored rather than a
+bare flag, so the NEXT scan is a new message rather than the same one again.
+
+**A test-construction error worth recording**, because it looked exactly like
+a wiring bug: the first version of the spec clicked the candidate card and
+the card did not select. Playwright clicks an element's centre, and the
+centre of that card is one of its action buttons — which call
+`stopPropagation`, correctly, so that "Lock in" is not also "select". Clicked
+near the corner instead. Nothing was wrong with the product; the assertion
+was aimed at the wrong pixel.
+
+Verification: lint 0, build 0, frontend **450**, functions **664**, e2e
+**168** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
