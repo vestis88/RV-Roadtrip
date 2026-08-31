@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { livePacingWarnings } from '../lib/livePacingWarnings'
 import type { Trip } from '@rv/shared'
@@ -201,12 +201,12 @@ export function PlanStrip({
    */
   /**
    * What pressing the button would actually cost, from the same function
-   * that will do the work — so the sentence and the write cannot disagree.
-   * null while the panel is shut, since planning a write nobody asked for
-   * is work for nothing.
+   * that will do the work — so what is said and what is done cannot
+   * disagree. null when the rebuild would not run at all (no stops, no
+   * dates), which is neither "free" nor "costly" and must not be treated as
+   * either.
    */
   const rebuildCost = useMemo(() => {
-    if (!rebuildOpen) return null
     const decision = planSkeleton({
       stops: routeStops,
       legs: routeLegs,
@@ -216,7 +216,7 @@ export function PlanStrip({
       rebuildOverDetail: true,
     })
     return decision.discardingDetail ?? null
-  }, [rebuildOpen, routeStops, routeLegs, days, trip.settings, trip.planMeta])
+  }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
 
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildResult, setRebuildResult] = useState<{
@@ -261,6 +261,39 @@ export function PlanStrip({
       setRebuilding(false)
     }
   }
+
+  /**
+   * A rebuild that costs nothing does not ask.
+   *
+   * Reported 2026-08-31, with the panel circled: *"This warning is still
+   * showing."* It was — two lines of reassurance at the top of the screen,
+   * saying nothing would be discarded. Which answers the question asked the
+   * day before ("does it have to warn?") with a warning that it is not
+   * warning about anything.
+   *
+   * The panel IS the warning. A confirmation step exists to let someone
+   * refuse, and there is nothing to refuse when the rebuild re-dates days
+   * and keeps every researched place. So a free rebuild simply runs, and
+   * the panel survives for the one case that earns it: a day whose place
+   * has left the route, whose research really does go with it.
+   *
+   * A ref rather than the open flag alone, so a re-render while the write
+   * is in flight cannot start a second one.
+   */
+  const autoRebuilt = useRef(false)
+  useEffect(() => {
+    if (!rebuildOpen) {
+      autoRebuilt.current = false
+      return
+    }
+    if (rebuildCost !== 0 || autoRebuilt.current) return
+    autoRebuilt.current = true
+    onRebuildOpenChange(false)
+    void rebuildDays()
+    // rebuildDays is redeclared every render; the ref above is what makes
+    // this run once per opening, so it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rebuildOpen, rebuildCost])
 
   const nextStop = routeStops[0]
   const today = new Date().toISOString().slice(0, 10)
@@ -400,6 +433,17 @@ export function PlanStrip({
         * cannot fix that on its own (those days carry researched detail, and
         * discarding it silently would be far worse), so the board says so
         * and offers the one button that can. */}
+      {/* Outside the panel, because a free rebuild never opens one — see
+        * the auto-rebuild effect above. */}
+      {rebuilding && (
+        <p
+          data-testid="rebuild-days-progress"
+          className="border-b border-neutral-200 p-2 text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+        >
+          Re-dating the days you keep and writing the new ones…
+        </p>
+      )}
+
       {rebuildResult && (
         <div
           data-testid="rebuild-days-result"
@@ -517,21 +561,14 @@ export function PlanStrip({
             data-testid="rebuild-days-cost"
             className="mt-1 text-neutral-600 dark:text-neutral-300"
           >
-            {rebuildCost === null
-              ? 'Days you have already researched keep their places; only their dates move.'
-              : rebuildCost === 0
-                ? 'Days you have already researched keep their places — nothing is discarded. Only their dates move.'
-                : `Days you have already researched keep their places. ${rebuildCost} day${rebuildCost === 1 ? '' : 's'} no longer on the route ${rebuildCost === 1 ? 'is' : 'are'} dropped, with the places researched on ${rebuildCost === 1 ? 'it' : 'them'}.`}
+            {/* Only ever shown when there is something to lose — a free
+              * rebuild never opens this panel at all. */}
+            Days you have already researched keep their places. {rebuildCost}{' '}
+            day{rebuildCost === 1 ? '' : 's'} no longer on the route{' '}
+            {rebuildCost === 1 ? 'is' : 'are'} dropped, with the places
+            researched on {rebuildCost === 1 ? 'it' : 'them'}.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {rebuilding && (
-              <p
-                data-testid="rebuild-days-progress"
-                className="w-full text-neutral-600 dark:text-neutral-300"
-              >
-                Re-dating the days you keep and writing the new ones…
-              </p>
-            )}
             <button
               type="button"
               data-testid="rebuild-days-confirm"

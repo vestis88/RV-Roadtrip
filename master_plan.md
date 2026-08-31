@@ -3433,6 +3433,40 @@ with no header photograph — the same call DiaryScreen's rows already make.
 Verification: lint 0, build 0, frontend **442**, functions **664**, e2e
 **164** — all green.
 
+### 2026-08-31 — a rebuild that costs nothing stops asking
+
+*"This warning is still showing."* — with the panel circled in red.
+
+It was, and the mistake was mine: asked that morning whether the rebuild had
+to warn, I made the warning *accurate* instead of making it *go away*. The
+panel then sat across the top of the screen saying "Days you have already
+researched keep their places — nothing is discarded. Only their dates move."
+Two lines of reassurance, occupying the same space, still stopping the
+traveler to press a second button. A warning about nothing is still a
+warning.
+
+**The panel IS the warning.** A confirmation step exists to let someone
+refuse, and there is nothing to refuse when the rebuild re-dates days and
+keeps every researched place. So a rebuild whose cost is zero simply runs —
+one tap, a progress line, the result banner — and the panel survives for the
+one case that earns it: a day whose place has left the route, whose research
+really does go with it. Its copy is a plain statement of the loss again,
+because that is now the only time it is shown.
+
+The cost is computed whether or not the panel is open (it was memoised on
+`rebuildOpen` before, which would have made this circular), and a ref guards
+the auto-run so a re-render mid-write cannot start a second one. The progress
+line moved out of the panel, since the path that skips the panel is now the
+usual one.
+
+Three e2e tests encoded the old flow and had to say what they actually mean:
+two now assert that a free rebuild produces a result with **no** panel, and
+the one about the two-triggers problem seeds a researched day off the route
+so there is something to confirm at all.
+
+Verification: lint 0, build 0, frontend **442**, functions **664**, e2e
+**164** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

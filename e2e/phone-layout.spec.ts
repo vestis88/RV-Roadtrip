@@ -269,8 +269,15 @@ test.describe('the day strip', () => {
     await expect(banner).toBeVisible({ timeout: 10_000 })
     await expect(banner).toContainText('earlier plan')
 
+    // The button does the thing rather than opening a confirmation: this
+    // fixture's days carry no research, so there is nothing to refuse
+    // (2026-08-31, "this warning is still showing"). The banner it was
+    // answering goes with it.
     await page.getByTestId('days-out-of-step-rebuild').click()
-    await expect(page.getByTestId('rebuild-days-panel')).toBeVisible()
+    await expect(page.getByTestId('rebuild-days-result')).toBeVisible({
+      timeout: 20_000,
+    })
+    await expect(banner).toHaveCount(0)
   })
 })
 
@@ -545,6 +552,16 @@ test.describe('opening the rebuild', () => {
         priority: 'must-see',
         rank: 0,
       })
+    // A researched day nowhere near the kept stop, so this rebuild really
+    // does cost something and the confirmation appears at all — a free one
+    // no longer asks (2026-08-31, "this warning is still showing").
+    const dayId = await getDayIdByDate(tripId, '2026-07-10')
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .doc(dayId)
+      .update({ detailStatus: 'ready' })
 
     await page.getByTestId('nav-map').click()
     await page.getByTestId('days-out-of-step-rebuild').waitFor()
@@ -596,7 +613,11 @@ test.describe('rebuilding the day list', () => {
     await page.getByTestId('nav-map').click()
     await page.getByTestId('days-out-of-step-rebuild').waitFor()
     await page.getByTestId('days-out-of-step-rebuild').click()
-    await page.getByTestId('rebuild-days-confirm').click()
+
+    // One tap. Nothing here is discarded — the fixture's days carry no
+    // research — so the rebuild does not stop to ask (2026-08-31, "this
+    // warning is still showing", against a panel warning about nothing).
+    await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)
 
     // In words, not by inference from a strip the traveler was already
     // unsure about.
@@ -794,12 +815,12 @@ test.describe('rebuilding without throwing away the research', () => {
     await page.getByTestId('days-out-of-step-rebuild').waitFor()
     await page.getByTestId('days-out-of-step-rebuild').click()
 
-    // The panel says what THIS rebuild costs rather than warning in general.
-    await expect(page.getByTestId('rebuild-days-cost')).toContainText(
-      'keep their places',
-    )
-    await page.getByTestId('rebuild-days-confirm').click()
-    await expect(page.getByTestId('rebuild-days-result')).toBeVisible()
+    // Nothing is discarded here, so nothing is asked: the confirmation
+    // exists to let someone refuse, and there is nothing to refuse.
+    await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)
+    await expect(page.getByTestId('rebuild-days-result')).toBeVisible({
+      timeout: 20_000,
+    })
 
     // Read back from the server, not the client's own optimistic view.
     await expect
