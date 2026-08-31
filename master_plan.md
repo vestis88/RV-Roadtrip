@@ -3402,6 +3402,37 @@ than none.
 Verification: lint 0, build 0, frontend **436**, functions **664**, e2e
 **163** — all green.
 
+### 2026-08-31 — the day wears the picture the traveler chose it by
+
+*"Also carry the overview pic from planning in as a header picture for day
+view."*
+
+The photo already existed and Day View simply never asked for it. It is the
+one on the stop's card in the planning list — fetched when the stop was
+curated, found by a rescan, or (since this morning) pinned by hand — so a day
+built around a place the traveler had been looking at a photograph of all
+week opened as a wall of text.
+
+`linkedDayIds` is the link: the stops that claim a day are the stops the day
+is FOR. Two rules where several claim it, and both exist because the
+alternative is visibly wrong:
+
+- **The one the day is built around wins**, matched against the day's own
+  overnight name (folded across the diacritics Places and Claude disagree
+  about). On a basecamp day claimed by the lake and the cable car, the lake
+  is the reason you are there.
+- **Otherwise the first by name.** Firestore returns documents in no order
+  the traveler can see, so without a tie-break the same day would show a
+  different picture on every load.
+
+Deliberately **not** falling back to an activity's photo when no stop carries
+one. Those are places inside the day rather than the reason for it, and a day
+headed by a photograph of its lunch restaurant is a worse answer than a day
+with no header photograph — the same call DiaryScreen's rows already make.
+
+Verification: lint 0, build 0, frontend **442**, functions **664**, e2e
+**164** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

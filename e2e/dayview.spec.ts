@@ -435,3 +435,50 @@ test('a measured drive leg carries no estimate caveat', async ({ page }) => {
   await expect(page.getByTestId('drive-card')).toBeVisible()
   await expect(page.getByTestId('drive-card-estimated')).toHaveCount(0)
 })
+
+/**
+ * Requested 2026-08-31: "Also carry the overview pic from planning in as a
+ * header picture for day view."
+ *
+ * The photo already existed — it is the one on the stop's card in the
+ * planning list. Day View simply never asked for it, so a day built around
+ * a place the traveler had been looking at a photograph of all week opened
+ * as a wall of text.
+ */
+test('a day wears the photo of the stop it was built around', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+  // The fixture's corridor stops carry no photo, the same way a trip
+  // curated before this existed does not.
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view-date').waitFor()
+  await expect(page.getByTestId('day-header-photo')).toHaveCount(0)
+
+  // The stop that claims this day, with the picture from the planning list.
+  const stops = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('corridorStops')
+    .where('linkedDayIds', 'array-contains', dayId)
+    .get()
+  expect(stops.empty).toBe(false)
+  await stops.docs[0].ref.update({
+    photoUrl: 'https://example.test/lillehammer.jpg',
+  })
+
+  const photo = page.getByTestId('day-header-photo')
+  await expect(photo).toBeVisible({ timeout: 15_000 })
+  await expect(photo).toHaveAttribute(
+    'src',
+    'https://example.test/lillehammer.jpg',
+  )
+  // Named rather than decorative: the header beside it says only "Day 1 —
+  // 2026-07-10", so nothing else on screen tells you what you are looking at.
+  await expect(photo).toHaveAttribute(
+    'alt',
+    stops.docs[0].data().name as string,
+  )
+})

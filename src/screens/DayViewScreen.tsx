@@ -7,6 +7,8 @@ import {
 import type { ActivityTimeOfDay, Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
+import { useCorridorStops } from '../hooks/useCorridorStops'
+import { dayHeaderPhoto } from '../lib/dayHeaderPhoto'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { DayDetailGate } from '../components/DayDetailGate'
 import { fillDaySection } from '../lib/dayDetailAction'
@@ -277,6 +279,7 @@ export function DayViewScreen() {
   const navigate = useNavigate()
   const { dayId } = useParams<{ dayId: string }>()
   const { days } = useTripDays(tripId)
+  const { corridorStops } = useCorridorStops(tripId)
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -348,6 +351,8 @@ export function DayViewScreen() {
   const detailGate = (
     <DayDetailGate tripId={tripId} dayId={dayId} day={day} />
   )
+
+  const headerPhoto = dayHeaderPhoto(dayId, day.overnight.name, corridorStops)
 
   const breakfast = restaurants.filter((r) => r.meal === 'breakfast')
   const lunch = restaurants.filter((r) => r.meal === 'lunch')
@@ -457,6 +462,20 @@ export function DayViewScreen() {
       </div>
 
       <div className="flex-1 overflow-y-auto bg-white text-left lg:w-1/2 dark:bg-neutral-900">
+        {/* The picture the traveler has been looking at all week on the
+          * planning list, requested 2026-08-31: "carry the overview pic from
+          * planning in as a header picture for day view." No placeholder
+          * when there is none — see dayHeaderPhoto for why an activity's
+          * photo is not borrowed to fill the gap. */}
+        {headerPhoto && (
+          <img
+            src={headerPhoto.url}
+            alt={headerPhoto.name}
+            decoding="async"
+            data-testid="day-header-photo"
+            className="h-32 w-full object-cover"
+          />
+        )}
         <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
           <button
             type="button"
