@@ -119,13 +119,6 @@ export function planSkeleton(input: {
   }
   if (!settings.startDate || !settings.endDate) return { skipped: 'no-dates' }
 
-  // Detail is expensive and was chosen by someone. A trip that has any
-  // belongs to runReconcileCorridor, which knows how to move days without
-  // discarding what is on them.
-  if (!input.rebuildOverDetail && existingDays.some(hasDetail)) {
-    return { skipped: 'has-detail' }
-  }
-
   // A stop with no country cannot become an overnight — the schema requires
   // a two-letter code — and writing a malformed day would surface a long way
   // from here.
@@ -143,7 +136,28 @@ export function planSkeleton(input: {
   const days = packed.map((day, index) =>
     toTripDay(day, index, settings, usable),
   )
-  if (!input.rebuildOverDetail && sameAs(existingDays, days)) {
+
+  /**
+   * The one question worth asking before writing on our own: would THIS
+   * rebuild throw away research?
+   *
+   * It used to ask a much cruder one — "does any day carry detail at all" —
+   * which was right when a rebuild deleted every day and every
+   * subcollection. Once days are reused by overnight (see
+   * planSkeletonWrite) that guard forbade the safe case along with the
+   * unsafe one, and froze the day list on every generated trip: nothing
+   * recomputed it from the board again, which is what left a traveler
+   * pressing "Rebuild day list" by hand to keep their own itinerary current
+   * (2026-08-31: "why do I need to rebuild the daylist?").
+   *
+   * Now the writer stands aside only when there is something to lose, and
+   * that is exactly the case the button exists to let someone approve.
+   */
+  const write = planSkeletonWrite(existingDays, days)
+  if (!input.rebuildOverDetail && write.discardingDetail > 0) {
+    return { skipped: 'has-detail' }
+  }
+  if (!input.rebuildOverDetail && sameAs(write, days)) {
     return { skipped: 'unchanged' }
   }
   // A parked day carries no `stops` of its own (the basecamp is on the first
@@ -155,10 +169,6 @@ export function planSkeleton(input: {
         ? [day.parkedAt.id]
         : [],
   )
-  // The same matching the writer will do, so the confirmation and the write
-  // cannot disagree about what is at stake — the discipline packStopsIntoDays
-  // and tripBudget already share.
-  const write = planSkeletonWrite(existingDays, days)
   return {
     days,
     stopIdsByDay,
@@ -179,7 +189,16 @@ export function planSkeleton(input: {
  * subcollection read, since planSkeleton runs on the client against day docs.
  */
 function hasDetail(day: TripDayWithId): boolean {
+  // ABSENT MEANS READY — tripDaySchema says so in as many words, because
+  // every day written before `detailStatus` existed carries its detail
+  // already, and generation still omits the field entirely on a day it
+  // detailed in the window (planPipeline writes it only when the day is
+  // NOT detailed). Reading absent as "no detail" was therefore backwards
+  // for exactly the days with the most research on them — harmless while
+  // this only gated a button, and not harmless at all now that the writer
+  // runs on its own (2026-08-31).
   return (
+    day.detailStatus === undefined ||
     day.detailStatus === 'ready' ||
     day.detailStatus === 'generating' ||
     (day.filledSections?.length ?? 0) > 0
@@ -218,7 +237,10 @@ function toTripDay(
           drive: {
             fromName: previous ?? 'Previous stop',
             toName: here.name,
-            distanceKm: 0,
+            // Real Google kilometres, from the same legs the minutes come
+            // from — see PackedDay.driveKm for why writing 0 here stopped
+            // being survivable once this ran unattended.
+            distanceKm: Math.round(packed.driveKm),
             durationMin: Math.round(packed.driveMinutes),
             slot: 'morning' as const,
           },
@@ -261,9 +283,8 @@ function summaryFor(
  * Garda"), which a name comparison calls a change forever — one pointless
  * rewrite per visit to the map.
  */
-function sameAs(existing: TripDayWithId[], next: TripDay[]): boolean {
-  if (existing.length !== next.length) return false
-  const plan = planSkeletonWrite(existing, next)
+function sameAs(plan: SkeletonWritePlan, next: TripDay[]): boolean {
+  if (plan.reuse.length !== next.length) return false
   if (plan.create.length > 0 || plan.removeIds.length > 0) return false
   return plan.reuse.every(
     ({ day, existing: was }) =>
@@ -332,7 +353,7 @@ export function planSkeletonWrite(
   const unclaimed = [...existing]
   const claim = (day: TripDay): TripDayWithId | undefined => {
     const byName = unclaimed.findIndex(
-      (old) => nameKey(old.overnight.name) === nameKey(day.overnight.name),
+      (old) => nameKey(old.overnight?.name) === nameKey(day.overnight?.name),
     )
     const index =
       byName >= 0
@@ -360,8 +381,20 @@ export function planSkeletonWrite(
   }
 }
 
-/** Folded the way normalizeStopName folds a stop name — see its own note. */
-function nameKey(name: string): string {
+/**
+ * Folded the way normalizeStopName folds a stop name — see its own note.
+ *
+ * Tolerates a day with no overnight at all. The schema requires one, so such
+ * a document should not exist; this used to run only behind the
+ * `has-detail` guard and now runs against every stored day on every render,
+ * where one malformed document would take the whole board down with a
+ * TypeError. Unmatchable rather than crashing — and since `hasDetail` reads
+ * a day with no `detailStatus` as researched, an unmatched one makes the
+ * automatic writer stand aside and ask rather than delete something nobody
+ * here understands.
+ */
+function nameKey(name: string | undefined): string {
+  if (!name) return '\u0000unmatchable'
   return name
     .toLowerCase()
     .normalize('NFD')
@@ -371,7 +404,10 @@ function nameKey(name: string): string {
 }
 
 /** ≈1 km, the same grid quantisePosition uses for the route origin. */
-function coordKey(point: { lat: number; lng: number }): string {
+function coordKey(point: { lat: number; lng: number } | undefined): string {
+  if (!point || typeof point.lat !== 'number' || typeof point.lng !== 'number') {
+    return '\u0000unmatchable'
+  }
   return `${point.lat.toFixed(2)}|${point.lng.toFixed(2)}`
 }
 
@@ -496,7 +532,13 @@ export async function writeSkeletonDays(
   }
   batch.update(doc(db, 'trips', tripId), {
     'planMeta.status': 'ready',
-    'planMeta.totalKm': 0,
+    // `totalKm` is deliberately NOT written here. It used to be set to 0,
+    // which was a placeholder standing in for "the skeleton does not know" —
+    // survivable while a rebuild was a deliberate act on a board-built trip,
+    // and a lie the moment this runs unattended on a generated one, where
+    // the number is real and the family's share link renders it.
+    // See PackedDay.driveKm: the per-day distances are known now, but the
+    // whole-trip total belongs to whoever measured the whole trip.
     // The pacing advice described the day list that was here a moment ago —
     // which days were overloaded, and by how much. Rebuilt days have not
     // been checked, so keeping the old sentences would be asserting

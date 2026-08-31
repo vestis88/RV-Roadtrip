@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { livePacingWarnings } from '../lib/livePacingWarnings'
 import type { Trip } from '@rv/shared'
@@ -57,6 +57,7 @@ export function PlanStrip({
   changeRequestOpen,
   onChangeRequestOpenChange,
   rebuildOpen,
+  rebuildCost,
   onRebuildOpenChange,
 }: {
   tripId: string
@@ -99,6 +100,14 @@ export function PlanStrip({
   changeRequestOpen: boolean
   onChangeRequestOpenChange: (open: boolean) => void
   rebuildOpen: boolean
+  /**
+   * How many researched days this rebuild would discard, or null when it
+   * would not run at all. Computed by the screen (see ExploreMapScreen) so
+   * the control that offers the rebuild and this panel cannot disagree
+   * about what it costs — and so a rebuild that costs nothing never opens
+   * this panel in the first place.
+   */
+  rebuildCost: number | null
   onRebuildOpenChange: (open: boolean) => void
 }) {
   const navigate = useNavigate()
@@ -199,24 +208,6 @@ export function PlanStrip({
    * — DayDetailGate refills a day when it is opened, so nothing is lost
    * permanently, but it is not free either.
    */
-  /**
-   * What pressing the button would actually cost, from the same function
-   * that will do the work — so what is said and what is done cannot
-   * disagree. null when the rebuild would not run at all (no stops, no
-   * dates), which is neither "free" nor "costly" and must not be treated as
-   * either.
-   */
-  const rebuildCost = useMemo(() => {
-    const decision = planSkeleton({
-      stops: routeStops,
-      legs: routeLegs,
-      existingDays: days,
-      settings: trip.settings,
-      planMeta: trip.planMeta,
-      rebuildOverDetail: true,
-    })
-    return decision.discardingDetail ?? null
-  }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
 
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildResult, setRebuildResult] = useState<{

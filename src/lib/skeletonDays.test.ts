@@ -45,22 +45,111 @@ describe('planSkeleton', () => {
   })
 
   /**
-   * The guard that matters most. Detail is expensive and was chosen by
-   * someone; a trip that has any belongs to runReconcileCorridor, which
-   * moves days without discarding what is on them.
+   * The guard that matters most, and it asks a narrower question than it
+   * used to (2026-08-31, "why do I need to rebuild the daylist?").
+   *
+   * It once refused whenever ANY day carried detail, which was right while a
+   * rebuild deleted every day and every subcollection. Once days are reused
+   * by overnight, that forbade the safe case along with the unsafe one and
+   * froze the day list on every generated trip. Now it refuses only when
+   * this particular rebuild would DISCARD research — a day whose place has
+   * left the route — which is the one thing worth stopping to ask about.
    */
-  it('refuses to touch an itinerary that has real detail', () => {
+  it('refuses when a researched day would be discarded', () => {
     const decision = planSkeleton({
-      stops: [stop()],
+      stops: [stop({ name: 'Otta' })],
       legs: [],
       existingDays: [
-        { id: 'd1', index: 0, detailStatus: 'ready' } as TripDayWithId,
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive',
+          // Nowhere near the kept stop, so nothing reuses it.
+          overnight: { name: 'Rothenburg', lat: 49.37, lng: 10.18, country: 'DE' },
+          summary: 'A researched day.',
+          detailStatus: 'ready',
+        } as unknown as TripDayWithId,
       ],
       settings: SETTINGS,
       planMeta: READY,
     })
     expect(decision.skipped).toBe('has-detail')
     expect(decision.days).toBeUndefined()
+  })
+
+  /**
+   * The behaviour the whole change is for: *"I want days to organically
+   * create themselves based on the planned activities and their duration
+   * continuously."*
+   *
+   * A researched day whose place is still on the route survives the
+   * rebuild, so there is nothing to approve and nothing to stop for. The
+   * old guard refused this outright, which is why the traveler had to keep
+   * pressing a button to keep their own itinerary current.
+   */
+  it('goes ahead on its own when every researched day survives', () => {
+    const decision = planSkeleton({
+      stops: [stop({ id: 'a', name: 'Otta' })],
+      legs: [],
+      existingDays: [
+        {
+          id: 'd1',
+          // A date the board no longer agrees with — the reason to rewrite.
+          index: 0,
+          date: '2026-06-01',
+          type: 'drive',
+          overnight: { name: 'Otta', lat: 61.77, lng: 9.54, country: 'NO' },
+          summary: 'Researched, and still on the route.',
+          detailStatus: 'ready',
+        } as unknown as TripDayWithId,
+      ],
+      settings: SETTINGS,
+      planMeta: READY,
+    })
+    expect(decision.skipped).toBeUndefined()
+    expect(decision.days?.[0].date).toBe('2026-07-01')
+    expect(decision.discardingDetail).toBe(0)
+  })
+
+  /**
+   * ABSENT MEANS READY — tripDaySchema says so, and generation omits the
+   * field entirely on a day it detailed in the window. Reading absent as
+   * "no detail" was backwards for exactly the days with the most research
+   * on them, and would have let the unattended writer drop one.
+   */
+  it('treats a day with no detailStatus as researched, not as bare', () => {
+    const decision = planSkeleton({
+      stops: [stop({ name: 'Otta' })],
+      legs: [],
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive',
+          overnight: { name: 'Rothenburg', lat: 49.37, lng: 10.18, country: 'DE' },
+          summary: 'Generated and detailed, with no status field at all.',
+        } as unknown as TripDayWithId,
+      ],
+      settings: SETTINGS,
+      planMeta: READY,
+    })
+    expect(decision.skipped).toBe('has-detail')
+  })
+
+  // One malformed document must not take the board down: this runs against
+  // every stored day on every render now, not behind a guard.
+  it('survives a day with no overnight at all', () => {
+    expect(() =>
+      planSkeleton({
+        stops: [stop()],
+        legs: [],
+        existingDays: [{ id: 'd1', index: 0 } as TripDayWithId],
+        settings: SETTINGS,
+        planMeta: READY,
+      }),
+    ).not.toThrow()
   })
 
   // Two writers in one collection is how days end up interleaved.
@@ -439,7 +528,11 @@ describe('reusing days a rebuild does not actually invalidate', () => {
         stored('gone', 1, '2026-09-02', 'Sirmione', {
           detailStatus: 'ready',
         } as Partial<TripDayWithId>),
-        stored('bare', 2, '2026-09-03', 'Verona'),
+        // `detailStatus: 'pending'` is what "nothing researched here" looks
+        // like on the wire — an ABSENT status means ready, per the schema.
+        stored('bare', 2, '2026-09-03', 'Verona', {
+          detailStatus: 'pending',
+        } as Partial<TripDayWithId>),
       ],
       [day(0, '2026-09-04', 'Riva del Garda')],
     )
@@ -476,7 +569,9 @@ describe('reusing days a rebuild does not actually invalidate', () => {
     const { reusedDayFields } = await import('./skeletonDays')
     const fields = reusedDayFields(
       day(1, '2026-09-05', 'Riva del Garda'),
-      stored('d1', 0, '2026-09-02', 'Riva del Garda'),
+      stored('d1', 0, '2026-09-02', 'Riva del Garda', {
+        detailStatus: 'pending',
+      } as Partial<TripDayWithId>),
     )
     expect(fields.summary).toBe('On to Riva del Garda.')
   })

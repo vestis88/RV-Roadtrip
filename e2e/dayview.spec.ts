@@ -471,6 +471,7 @@ test('a day wears the photo of the stop it was built around', async ({
 
   const photo = page.getByTestId('day-header-photo')
   await expect(photo).toBeVisible({ timeout: 15_000 })
+  await expect(photo).toHaveCount(1)
   await expect(photo).toHaveAttribute(
     'src',
     'https://example.test/lillehammer.jpg',
@@ -481,4 +482,55 @@ test('a day wears the photo of the stop it was built around', async ({
     'alt',
     stops.docs[0].data().name as string,
   )
+})
+
+/**
+ * Requested 2026-08-31: "For days with several activities, the header photo
+ * should be the activities next to oneother."
+ *
+ * A day built around a bike park AND a lake is two things, and picking one
+ * of them to stand for the day throws away what made it a full day.
+ */
+test('a day built around several places shows them side by side', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+
+  // Two stops claiming the same day, each with its own picture.
+  await stops.add({
+    name: 'Lillehammer Camping',
+    lat: 61.1153,
+    lng: 10.4662,
+    country: 'NO',
+    status: 'locked',
+    linkedDayIds: [dayId],
+    photoUrl: 'https://example.test/camping.jpg',
+  })
+  await stops.add({
+    name: 'Maihaugen',
+    lat: 61.1147,
+    lng: 10.4726,
+    country: 'NO',
+    status: 'locked',
+    linkedDayIds: [dayId],
+    photoUrl: 'https://example.test/maihaugen.jpg',
+  })
+
+  await page.goto(`/map/day/${dayId}`)
+  const photos = page.getByTestId('day-header-photo')
+  await expect(photos).toHaveCount(2, { timeout: 15_000 })
+
+  // The place the day is built around leads, so a glance still answers
+  // "where am I sleeping" first.
+  await expect(photos.first()).toHaveAttribute('alt', 'Lillehammer Camping')
+
+  // Side by side rather than stacked: same row, same top edge.
+  const first = await photos.first().boundingBox()
+  const second = await photos.nth(1).boundingBox()
+  expect(first).not.toBeNull()
+  expect(second).not.toBeNull()
+  expect(second!.x).toBeGreaterThan(first!.x)
+  expect(Math.abs(second!.y - first!.y)).toBeLessThan(2)
 })

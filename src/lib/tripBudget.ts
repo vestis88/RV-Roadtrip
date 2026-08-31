@@ -47,6 +47,18 @@ export interface PackedDay<T extends BudgetStop = BudgetStop> {
   stops: T[]
   /** Real driving minutes done on this day. */
   driveMinutes: number
+  /**
+   * Real driving distance done on this day, in km.
+   *
+   * Carried out alongside the minutes since 2026-08-31, when the day writer
+   * started running on its own: a skeleton day used to write
+   * `distanceKm: 0` because this was never tracked, which is harmless while
+   * a rebuild is a deliberate act on a board-built trip and a silent loss
+   * the moment it re-dates a generated day whose leg was measured at 180 km.
+   * The distances come in on the same legs the minutes do — they were simply
+   * dropped on the floor here.
+   */
+  driveKm: number
   /** Daylight the stops on this day ask for. */
   stayMinutes: number
   /**
@@ -141,7 +153,7 @@ export function tripBudget(input: {
  */
 export function packStopsIntoDays<T extends BudgetStop>(input: {
   stops: T[]
-  legs?: { durationMin: number }[]
+  legs?: { durationMin: number; distanceKm?: number }[]
   maxDriveHoursPerDay: number
 }): PackedDay<T>[] {
   const { stops, legs = [], maxDriveHoursPerDay } = input
@@ -158,23 +170,34 @@ export function packStopsIntoDays<T extends BudgetStop>(input: {
     }
   }
 
-  /** Splits a drive too long for one day, returning what is left of it. */
-  const spendLongDrive = (minutes: number): number => {
+  /**
+   * Splits a drive too long for one day, returning what is left of it.
+   *
+   * Distance is split in the same proportion as time — a constant-speed
+   * assumption over ONE leg, which is exactly what splitting that leg
+   * across days already assumes about the hours.
+   */
+  const spendLongDrive = (minutes: number, km: number): { minutes: number; km: number } => {
     let remaining = minutes
+    let remainingKm = km
     while (remaining > maxDriveMin) {
       const room = maxDriveMin - current.driveMinutes
+      const roomKm = remaining > 0 ? (remainingKm * room) / remaining : 0
       current.driveMinutes += room
+      current.driveKm += roomKm
       days.push(current)
       current = emptyDay<T>()
       remaining -= room
+      remainingKm -= roomKm
     }
-    return remaining
+    return { minutes: remaining, km: remainingKm }
   }
 
   stops.forEach((stop, index) => {
     const legMinutes = legs[index]?.durationMin ?? 0
+    const legKm = legs[index]?.distanceKm ?? 0
     const cost = stayCostOf(stop)
-    const remaining = spendLongDrive(legMinutes)
+    const remaining = spendLongDrive(legMinutes, legKm)
 
     if (cost.nights > 0) {
       // Its own block of days, arrival drive on the first.
@@ -182,7 +205,8 @@ export function packStopsIntoDays<T extends BudgetStop>(input: {
       for (let night = 0; night < cost.nights; night++) {
         days.push({
           stops: night === 0 ? [stop] : [],
-          driveMinutes: night === 0 ? remaining : 0,
+          driveMinutes: night === 0 ? remaining.minutes : 0,
+          driveKm: night === 0 ? remaining.km : 0,
           stayMinutes: 0,
           ...(night === 0 ? {} : { parkedAt: stop }),
         })
@@ -191,15 +215,16 @@ export function packStopsIntoDays<T extends BudgetStop>(input: {
     }
 
     const stayMinutes = cost.hours * 60
-    const overDrive = current.driveMinutes + remaining > maxDriveMin
+    const overDrive = current.driveMinutes + remaining.minutes > maxDriveMin
     const overDaylight =
-      current.driveMinutes + current.stayMinutes + remaining + stayMinutes >
+      current.driveMinutes + current.stayMinutes + remaining.minutes + stayMinutes >
       usableMin
     if (current.stops.length > 0 && (overDrive || overDaylight)) {
       days.push(current)
       current = emptyDay<T>()
     }
-    current.driveMinutes += remaining
+    current.driveMinutes += remaining.minutes
+    current.driveKm += remaining.km
     current.stayMinutes += stayMinutes
     current.stops.push(stop)
   })
@@ -207,12 +232,13 @@ export function packStopsIntoDays<T extends BudgetStop>(input: {
   // The run home. It has no stop on it but still costs days.
   const finalLeg = legs[stops.length]?.durationMin ?? 0
   if (finalLeg > 0) {
-    const remaining = spendLongDrive(finalLeg)
-    if (current.driveMinutes + remaining > maxDriveMin) {
+    const remaining = spendLongDrive(finalLeg, legs[stops.length]?.distanceKm ?? 0)
+    if (current.driveMinutes + remaining.minutes > maxDriveMin) {
       days.push(current)
       current = emptyDay<T>()
     }
-    current.driveMinutes += remaining
+    current.driveMinutes += remaining.minutes
+    current.driveKm += remaining.km
   }
 
   closeIfUsed()
@@ -220,7 +246,7 @@ export function packStopsIntoDays<T extends BudgetStop>(input: {
 }
 
 function emptyDay<T extends BudgetStop>(): PackedDay<T> {
-  return { stops: [], driveMinutes: 0, stayMinutes: 0 }
+  return { stops: [], driveMinutes: 0, driveKm: 0, stayMinutes: 0 }
 }
 
 /** Inclusive, so a trip that starts and ends on the same date is one day. */

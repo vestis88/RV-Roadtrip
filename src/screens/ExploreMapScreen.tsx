@@ -526,6 +526,28 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    * and the snapshot that comes back from the write would otherwise re-enter
    * this effect and write again.
    */
+  /**
+   * What a rebuild would discard, if anyone asked for one.
+   *
+   * Zero on almost every trip now that days are reused by overnight — which
+   * is the point: the writer below handles that case on its own, so the
+   * button and the banner only surface for the one case a person has to
+   * decide (2026-08-31: "remove having to rebuild days"). Computed here
+   * rather than in PlanStrip so the control that offers the rebuild and the
+   * panel that explains it read the same number.
+   */
+  const rebuildCost = useMemo(() => {
+    const decision = planSkeleton({
+      stops: routeStops,
+      legs: routeLegs ?? [],
+      existingDays: days,
+      settings: trip.settings,
+      planMeta: trip.planMeta,
+      rebuildOverDetail: true,
+    })
+    return decision.discardingDetail ?? null
+  }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
+
   const skeletonWritten = useRef<string | null>(null)
   useEffect(() => {
     const decision = planSkeleton({
@@ -913,6 +935,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           changeRequestOpen={changeRequestOpen}
           onChangeRequestOpenChange={setChangeRequestOpen}
           rebuildOpen={rebuildOpen}
+          rebuildCost={rebuildCost}
           onRebuildOpenChange={setRebuildOpen}
           onReorderOpenChange={setReorderOpen}
         />
@@ -1064,7 +1087,10 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                 * unpressed action and the traveler has to guess which one
                 * does it (2026-08-26: "Now there are two rebuild days on
                 * the same screen. Which to push?"). */}
-              {routeStops.length > 0 && !rebuildOpen && (
+              {/* Only when there is a decision to make. A rebuild that
+                * discards nothing runs itself (see the skeleton effect), so
+                * a button offering it is a button that does nothing. */}
+              {routeStops.length > 0 && !rebuildOpen && (rebuildCost ?? 0) > 0 && (
                 <button
                   type="button"
                   data-testid="rebuild-days-button"

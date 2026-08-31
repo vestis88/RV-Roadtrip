@@ -20,6 +20,11 @@
  * inside the day rather than the reason for it, and a day headed by a
  * photograph of its lunch restaurant is a worse answer than a day with no
  * header photograph at all — the same call DiaryScreen's rows make.
+ *
+ * All of them, not one: *"For days with several activities, the header photo
+ * should be the activities next to one another."* A day built around a bike
+ * park AND a lake is two things, and picking one of them to stand for the
+ * day throws away the fact that made it a full day in the first place.
  */
 export interface DayPhotoStop {
   id: string
@@ -28,22 +33,39 @@ export interface DayPhotoStop {
   linkedDayIds?: string[]
 }
 
-export function dayHeaderPhoto(
+export interface DayPhoto {
+  url: string
+  name: string
+}
+
+/**
+ * How many photographs a header can carry before each is too narrow to
+ * recognise. Four across a phone is already about 90px each.
+ */
+const MAX_HEADER_PHOTOS = 4
+
+export function dayHeaderPhotos(
   dayId: string,
   overnightName: string,
   stops: DayPhotoStop[],
-): { url: string; name: string } | undefined {
+): DayPhoto[] {
   const linked = stops
     .filter(
       (stop) => stop.photoUrl && (stop.linkedDayIds ?? []).includes(dayId),
     )
+    // Firestore returns documents in no order the traveler can see, so
+    // without this the same day would shuffle its own header on every load.
     .sort((a, b) => a.name.localeCompare(b.name))
-  if (linked.length === 0) return undefined
+  if (linked.length === 0) return []
 
+  // The stop the day is built around leads, so a glance at the strip still
+  // answers "where am I sleeping" first.
   const key = fold(overnightName)
-  const built = linked.find((stop) => fold(stop.name) === key)
-  const chosen = built ?? linked[0]
-  return { url: chosen.photoUrl!, name: chosen.name }
+  const built = linked.filter((stop) => fold(stop.name) === key)
+  const rest = linked.filter((stop) => fold(stop.name) !== key)
+  return [...built, ...rest]
+    .slice(0, MAX_HEADER_PHOTOS)
+    .map((stop) => ({ url: stop.photoUrl!, name: stop.name }))
 }
 
 /** Folded the way stop names are compared elsewhere — see normalizeStopName. */

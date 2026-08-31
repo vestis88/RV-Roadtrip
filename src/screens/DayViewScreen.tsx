@@ -8,7 +8,7 @@ import type { ActivityTimeOfDay, Meal } from '@rv/shared'
 import { useTripContext } from '../context/TripContext'
 import { useTripDays } from '../hooks/useTripDays'
 import { useCorridorStops } from '../hooks/useCorridorStops'
-import { dayHeaderPhoto } from '../lib/dayHeaderPhoto'
+import { dayHeaderPhotos } from '../lib/dayHeaderPhoto'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { DayDetailGate } from '../components/DayDetailGate'
 import { fillDaySection } from '../lib/dayDetailAction'
@@ -352,7 +352,7 @@ export function DayViewScreen() {
     <DayDetailGate tripId={tripId} dayId={dayId} day={day} />
   )
 
-  const headerPhoto = dayHeaderPhoto(dayId, day.overnight.name, corridorStops)
+  const headerPhotos = dayHeaderPhotos(dayId, day.overnight.name, corridorStops)
 
   const breakfast = restaurants.filter((r) => r.meal === 'breakfast')
   const lunch = restaurants.filter((r) => r.meal === 'lunch')
@@ -467,14 +467,25 @@ export function DayViewScreen() {
           * planning in as a header picture for day view." No placeholder
           * when there is none — see dayHeaderPhoto for why an activity's
           * photo is not borrowed to fill the gap. */}
-        {headerPhoto && (
-          <img
-            src={headerPhoto.url}
-            alt={headerPhoto.name}
-            decoding="async"
-            data-testid="day-header-photo"
-            className="h-32 w-full object-cover"
-          />
+        {headerPhotos.length > 0 && (
+          <div className="flex h-32 w-full gap-px" data-testid="day-header-photos">
+            {headerPhotos.map((photo) => (
+              <img
+                key={photo.url}
+                src={photo.url}
+                alt={photo.name}
+                title={photo.name}
+                decoding="async"
+                data-testid="day-header-photo"
+                // Equal shares of the row, each cropped to fill: a day with
+                // one place gets a full-width header, a day with three gets
+                // three thirds. `min-w-0` because a flex child will not
+                // shrink below its image's intrinsic width without it, and
+                // the row would scroll instead of dividing.
+                className="h-full min-w-0 flex-1 object-cover"
+              />
+            ))}
+          </div>
         )}
         <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
           <button

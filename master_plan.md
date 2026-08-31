@@ -3467,6 +3467,70 @@ so there is something to confirm at all.
 Verification: lint 0, build 0, frontend **442**, functions **664**, e2e
 **164** — all green.
 
+### 2026-08-31 — days that keep themselves current
+
+*"Fix it and remove having to rebuild days. I want days to organically create
+themselves based on the planned activities and their duration continuously.
+For days with several activities, the header photo should be the activities
+next to oneother."*
+
+**The guard was aimed at a problem that no longer existed.** The writer that
+derives days from the board refused whenever ANY day carried research —
+correct while a rebuild deleted every day and every subcollection, and wrong
+the moment days are reused by overnight, because it forbade the safe case
+along with the unsafe one. On a generated trip nothing recomputed the day
+list from the board ever again, which is why a traveler ended up pressing a
+button to keep their own itinerary current.
+
+It now asks the narrower question the confirmation panel already asked:
+**would this particular rebuild discard research?** Zero — the usual case —
+and it writes. More than zero, and it stands aside for the person to decide,
+which is the only thing the button and the "these days are from an earlier
+plan" banner are still for. Both disappear when there is nothing to approve.
+
+**Three things had to be made safe first, because this now runs unattended.**
+
+1. **`hasDetail` was backwards for the most researched days.** `tripDaySchema`
+   states that an ABSENT `detailStatus` means READY, and `planPipeline` writes
+   the field only on days it did NOT detail — so a fully-researched generated
+   day carried no status, and `hasDetail` read it as bare. Harmless while it
+   gated a button; a silent deletion once the writer runs on its own.
+2. **The skeleton wrote `distanceKm: 0`** on every drive leg, because
+   `packStopsIntoDays` tracked minutes and dropped the distances that arrived
+   on the same legs. A placeholder while a rebuild was deliberate, and a loss
+   the moment it re-dates a generated day whose leg was measured at 180 km.
+   `PackedDay` carries `driveKm` now, split proportionally when a long drive
+   spans days — a constant-speed assumption over one leg, which is exactly
+   what splitting that leg across days already assumes about the hours.
+3. **`planMeta.totalKm` is no longer set to 0.** Same placeholder, same
+   reasoning, except this one renders on the family's share link. The
+   skeleton knows each day's distance now but not the trip's measured total,
+   so it leaves that to whoever measured it.
+
+And one crash found by a test rather than by a traveler: `planSkeletonWrite`
+dereferenced `day.overnight.name` on every stored day. It used to run behind
+the `has-detail` guard; it now runs against every day on every render, where
+one malformed document would take the whole board down. Unmatchable rather
+than throwing — and since an unmatched day reads as researched, the writer
+stands aside and asks rather than deleting something nobody here understands.
+
+**The header photograph became photographs.** A day built around a bike park
+AND a lake is two things, and picking one to stand for the day throws away
+what made it a full day. All the day's stops that carry a picture, the one
+the day is built around leading so a glance still answers "where am I
+sleeping" first, capped at four — past that each is about 90px on a phone and
+recognisable as nothing.
+
+Four e2e specs had to say which path they meant, now that a fixture day with
+activities and no `detailStatus` correctly reads as researched: one asserts
+the confirmation (its days really would be lost), three mark their days
+`pending` to mean bare. A new one pins the headline: a locked stop reaches the
+day strip on a generated trip **with nothing pressed**, and the researched day
+that survives keeps its activities.
+
+Verification: lint 0, build 0, frontend **446**, functions **664**, e2e
+**166** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

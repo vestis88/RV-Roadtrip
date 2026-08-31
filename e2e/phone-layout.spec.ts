@@ -92,6 +92,32 @@ test.describe('on a tablet', () => {
  * Requested 2026-08-25: "There should be a filter for the list below the map.
  * Selecting only locked in, only must see, only not locked in or all."
  */
+/**
+ * Marks the seeded plan's days as carrying no research.
+ *
+ * The fixture writes activities and restaurants but no `detailStatus`, and
+ * an ABSENT status means READY (tripDaySchema says so) — so by default every
+ * fixture day now reads as researched, which is truthful. A spec about the
+ * free path has to say it means bare, rather than relying on a field being
+ * missing.
+ */
+async function markDaysUnresearched(
+  adminDb: FirebaseFirestore.Firestore,
+  tripId: string,
+  except: string[] = [],
+): Promise<void> {
+  const days = await adminDb
+    .collection('trips')
+    .doc(tripId)
+    .collection('days')
+    .get()
+  await Promise.all(
+    days.docs
+      .filter((day) => !except.includes(day.id))
+      .map((day) => day.ref.update({ detailStatus: 'pending' })),
+  )
+}
+
 test.describe('filtering the list', () => {
   test.use({ viewport: { width: 1180, height: 820 } })
 
@@ -269,15 +295,16 @@ test.describe('the day strip', () => {
     await expect(banner).toBeVisible({ timeout: 10_000 })
     await expect(banner).toContainText('earlier plan')
 
-    // The button does the thing rather than opening a confirmation: this
-    // fixture's days carry no research, so there is nothing to refuse
-    // (2026-08-31, "this warning is still showing"). The banner it was
-    // answering goes with it.
+    // The banner survives at all only because these days would be LOST:
+    // they carry activities and restaurants, none of them are anywhere near
+    // the kept stop, and the writer that would otherwise fix this silently
+    // stands aside rather than discard them. So this is the one case that
+    // still asks (2026-08-31, "remove having to rebuild days").
     await page.getByTestId('days-out-of-step-rebuild').click()
-    await expect(page.getByTestId('rebuild-days-result')).toBeVisible({
-      timeout: 20_000,
-    })
-    await expect(banner).toHaveCount(0)
+    await expect(page.getByTestId('rebuild-days-panel')).toBeVisible()
+    await expect(page.getByTestId('rebuild-days-cost')).toContainText(
+      'no longer on the route',
+    )
   })
 })
 
@@ -609,14 +636,15 @@ test.describe('rebuilding the day list', () => {
         priority: 'must-see',
         rank: 0,
       })
+    await markDaysUnresearched(adminDb, tripId)
 
     await page.getByTestId('nav-map').click()
     await page.getByTestId('days-out-of-step-rebuild').waitFor()
     await page.getByTestId('days-out-of-step-rebuild').click()
 
-    // One tap. Nothing here is discarded — the fixture's days carry no
-    // research — so the rebuild does not stop to ask (2026-08-31, "this
-    // warning is still showing", against a panel warning about nothing).
+    // One tap. Nothing here is discarded — the days carry no research — so
+    // the rebuild does not stop to ask (2026-08-31, "this warning is still
+    // showing", against a panel warning about nothing).
     await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)
 
     // In words, not by inference from a strip the traveler was already
@@ -798,6 +826,10 @@ test.describe('rebuilding without throwing away the research', () => {
     const dayId = await getDayIdByDate(tripId, '2026-07-10')
     const dayRef = tripRef.collection('days').doc(dayId)
     await dayRef.update({ detailStatus: 'ready' })
+    // The other seeded days go nowhere near the kept stop; left as
+    // researched they would be a real loss and the rebuild would rightly
+    // stop to ask. This spec is about the day that SURVIVES.
+    await markDaysUnresearched(adminDb, tripId, [dayId])
     const activityBefore = (
       await dayRef.collection('activities').limit(1).get()
     ).docs[0]
@@ -891,5 +923,70 @@ test.describe('pacing advice about days already driven', () => {
     await expect(banner).toContainText('second half of the trip')
     // The one about a day already behind them is gone.
     await expect(banner).not.toContainText('Rothenburg')
+  })
+})
+
+/**
+ * Requested 2026-08-31: *"Fix it and remove having to rebuild days. I want
+ * days to organically create themselves based on the planned activities and
+ * their duration continuously."*
+ *
+ * The writer that derives days from the board used to stand aside whenever
+ * ANY day carried research — right while a rebuild deleted every day, and
+ * wrong once days are reused by overnight, because it froze the day list on
+ * every generated trip and left the traveler pressing a button to keep their
+ * own itinerary current. It now stands aside only when a rebuild would
+ * DISCARD research, which is the one case worth a decision.
+ */
+test.describe('days that keep themselves current', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('follow a newly kept stop with nothing pressed', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    // The seeded plan, with its research still on the day that survives —
+    // this is a generated trip, which is exactly the case that used to be
+    // frozen.
+    const keptDayId = await getDayIdByDate(tripId, '2026-07-10')
+    await markDaysUnresearched(adminDb, tripId, [keptDayId])
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Lillehammer Camping',
+        lat: 61.1153,
+        lng: 10.4662,
+        country: 'NO',
+        status: 'locked',
+        linkedDayIds: [],
+      })
+
+    await page.getByTestId('nav-map').click()
+
+    // No banner to answer and no button to press: the day list has already
+    // caught up with the board by the time anyone looks at it.
+    await expect(page.getByTestId('day-strip')).toContainText('Lillehammer', {
+      timeout: 20_000,
+    })
+    await expect(page.getByTestId('days-out-of-step-banner')).toHaveCount(0)
+    await expect(page.getByTestId('rebuild-days-button')).toHaveCount(0)
+
+    // And the research on the day that survived is still there.
+    const dayRef = adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('days')
+      .doc(keptDayId)
+    await expect
+      .poll(async () => (await dayRef.get()).exists, { timeout: 15_000 })
+      .toBe(true)
+    expect((await dayRef.collection('activities').get()).size).toBeGreaterThan(0)
   })
 })
