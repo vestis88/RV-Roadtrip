@@ -1,12 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { useMapsLibrary } from '@vis.gl/react-google-maps'
 import type { NamedPoint } from '@rv/shared'
+import type { GooglePlaceDetails } from '../lib/googlePlaceDetails'
 
 interface PlaceAutocompleteInputProps {
   label: string
   value: NamedPoint
   onChange: (point: NamedPoint) => void
   testId: string
+  /**
+   * The rest of what Google knows about the place — its photo, its editorial
+   * blurb, its rating and its listing link.
+   *
+   * Opt-in, and requested 2026-08-31 for one caller: *"when adding a stop
+   * ourselves through add stop from a google location, add its photo and
+   * brief description as well."* A start or end point in Trip setup wants
+   * none of it, and the extra fields are billed per lookup, so they are
+   * asked for only when somebody is going to use them. Called with null when
+   * the field is edited away from a resolved place, so details can never
+   * outlive the place they described — the same rule the coordinates follow.
+   */
+  onDetails?: (details: GooglePlaceDetails | null) => void
 }
 
 export function PlaceAutocompleteInput({
@@ -14,6 +28,7 @@ export function PlaceAutocompleteInput({
   value,
   onChange,
   testId,
+  onDetails,
 }: PlaceAutocompleteInputProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const elementRef = useRef<google.maps.places.PlaceAutocompleteElement | null>(
@@ -27,9 +42,11 @@ export function PlaceAutocompleteInput({
   // when the effect last ran.
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
+  const onDetailsRef = useRef(onDetails)
   useEffect(() => {
     valueRef.current = value
     onChangeRef.current = onChange
+    onDetailsRef.current = onDetails
   })
 
   // Push external value changes (e.g. loaded from Firestore) into the
@@ -40,6 +57,36 @@ export function PlaceAutocompleteInput({
 
   useEffect(() => {
     if (!placesLibrary || !containerRef.current) return
+
+    // Asked for only when a caller wants them: `photos`, `editorialSummary`,
+    // `rating` and `userRatingCount` sit in a dearer Places billing tier
+    // than the three fields every caller needs, and Trip setup's start and
+    // end points have no use for a photograph.
+    const wantsDetails = !!onDetailsRef.current
+    const fields = [
+      'displayName',
+      'formattedAddress',
+      'location',
+      ...(wantsDetails
+        ? ['photos', 'editorialSummary', 'rating', 'userRatingCount', 'googleMapsURI']
+        : []),
+    ]
+
+    function readDetails(place: google.maps.places.Place): void {
+      if (!onDetailsRef.current) return
+      // Every field is optional on the way out — a place with no photo and
+      // no blurb is the common case, not a failure.
+      const photo = place.photos?.[0]
+      onDetailsRef.current({
+        ...(photo ? { photoUrl: photo.getURI({ maxWidth: 800 }) } : {}),
+        ...(place.editorialSummary ? { summary: place.editorialSummary } : {}),
+        ...(place.rating != null ? { rating: place.rating } : {}),
+        ...(place.userRatingCount != null
+          ? { ratingCount: place.userRatingCount }
+          : {}),
+        ...(place.googleMapsURI ? { googleMapsUrl: place.googleMapsURI } : {}),
+      })
+    }
 
     const element = new placesLibrary.PlaceAutocompleteElement({
       placeholder: 'City, country',
@@ -54,9 +101,7 @@ export function PlaceAutocompleteInput({
         event as google.maps.places.PlacePredictionSelectEvent
       ).placePrediction.toPlace()
       place
-        .fetchFields({
-          fields: ['displayName', 'formattedAddress', 'location'],
-        })
+        .fetchFields({ fields })
         .then(() => {
           const location = place.location
           if (!location) return
@@ -66,6 +111,7 @@ export function PlaceAutocompleteInput({
             lat: location.lat(),
             lng: location.lng(),
           })
+          readDetails(place)
         })
         .catch((error: unknown) =>
           console.error('Place fetchFields failed', error),
@@ -93,7 +139,7 @@ export function PlaceAutocompleteInput({
         const prediction = suggestions[0]?.placePrediction
         if (!prediction) return
         const place = prediction.toPlace()
-        await place.fetchFields({ fields: ['formattedAddress', 'displayName', 'location'] })
+        await place.fetchFields({ fields })
         const location = place.location
         if (!location) return
         // The traveler may have kept typing while this was in flight —
@@ -105,6 +151,7 @@ export function PlaceAutocompleteInput({
           lat: location.lat(),
           lng: location.lng(),
         })
+        readDetails(place)
       } catch (error) {
         console.error('Could not resolve typed place name', error)
       }
@@ -117,6 +164,9 @@ export function PlaceAutocompleteInput({
       // on the network, and drop the now-mismatched coordinates rather than
       // letting them outlive the place they described.
       onChangeRef.current({ name: currentValue, lat: 0, lng: 0 })
+      // Dropped with the coordinates, and for the same reason: a photograph
+      // of the place you just typed over is worse than none.
+      onDetailsRef.current?.(null)
       if (currentValue.trim()) void resolveTypedName(currentValue)
     }
 

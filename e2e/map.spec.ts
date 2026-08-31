@@ -136,12 +136,18 @@ test('map tab flags a back-loaded trip, and lets the notice be dismissed', async
   page,
 }) => {
   const tripId = await createTripWithPlan(page)
+  // Dated ahead rather than hardcoded: pacing advice about a day already
+  // driven expires (2026-08-31, "this list on top seems completely
+  // obsolete!"), and the fixture's own July dates are long past. What this
+  // test is about — a back-loaded trip being flagged and the notice staying
+  // dismissed — is unchanged by which day it names.
+  const nextWeek = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
   await adminDb
     .collection('trips')
     .doc(tripId)
     .update({
       'planMeta.pacingWarnings': [
-        'By the end of day 2 (2026-07-11) this trip still has 320 km a day left to drive across its remaining 3 driving days — well above the 206 km a day it needs on average.',
+        `By the end of day 2 (${nextWeek}) this trip still has 320 km a day left to drive across its remaining 3 driving days — well above the 206 km a day it needs on average.`,
       ],
     })
 

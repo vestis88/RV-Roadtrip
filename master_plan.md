@@ -3351,6 +3351,57 @@ Verification: lint 0, build 0, frontend **425**, functions **664**, e2e
 **162** — all green, including `dayview.spec.ts:140`, which has flaked
 before.
 
+### 2026-08-31 — advice about days already driven, and a pin worth looking at
+
+*"This list on top seems completely obsolete!"* — and *"when adding a stop
+ourselves through add stop from a google location, add its photo and brief
+description as well. Do not overwrite our own description!"*
+
+**The pacing advice had no idea time had passed.** Five warnings about Day 1
+(2026-08-20, Rothenburg ob der Tauber), Day 2 (Neuschwanstein), Day 6 (Lake
+Lucerne), read from a campsite in the Dolomites on the 31st. Every one was
+true when it was written and every one described a day the traveler had
+driven past a week and a half earlier, on a route through Germany.
+`planMeta.pacingWarnings` is written once by generation and then simply
+persists.
+
+What makes them expire rather than merely age is what pacing advice IS: a
+decision — *"either the drive moves to another day or the sight does"* —
+and that decision can only be taken before the day happens. Afterwards the
+same sentence is asking the traveler to rearrange the past. So a warning
+naming a date behind us is dropped, today still counts (the day is being
+lived, and moving this afternoon's sight to tomorrow is a real option), and
+a warning naming NO date is kept — the whole-trip observations ("the second
+half carries most of the driving") never went stale, and guessing at a
+sentence we cannot read would throw away the useful ones to be tidy. A
+rebuild also clears the list outright, since the days those sentences
+measured no longer exist and keeping them would assert something nobody
+measured.
+
+One e2e had to change with it, and was wrong in the same way: it seeded a
+warning dated 2026-07-11 and asserted the banner appears. Dated ahead now —
+what that test is about, a back-loaded trip being flagged and the notice
+staying dismissed, is unchanged by which day it names.
+
+**A pin dropped by hand carried nothing.** Name and coordinates, sitting in
+the list beside researched candidates that each show a photo and a
+paragraph — visibly the poor relation, for no reason other than that nobody
+had asked Places for the rest of what the same lookup already had in hand.
+The autocomplete now also reads the photo, Google's editorial blurb, the
+rating and the listing link, and the stop is written with all four.
+
+The emphasis in the request is the rule, so it is named and tested by name:
+`stopDescription` returns whatever the traveler typed, untouched, and
+consults Google only for a field left genuinely empty. The extra fields are
+opt-in per call site — they sit in a dearer Places billing tier, and Trip
+setup's start and end points have no use for a photograph — and they are
+dropped alongside the coordinates when the field is edited away from a
+resolved place, since a photograph of the place you just typed over is worse
+than none.
+
+Verification: lint 0, build 0, frontend **436**, functions **664**, e2e
+**163** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

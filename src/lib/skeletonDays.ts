@@ -497,6 +497,14 @@ export async function writeSkeletonDays(
   batch.update(doc(db, 'trips', tripId), {
     'planMeta.status': 'ready',
     'planMeta.totalKm': 0,
+    // The pacing advice described the day list that was here a moment ago —
+    // which days were overloaded, and by how much. Rebuilt days have not
+    // been checked, so keeping the old sentences would be asserting
+    // something nobody measured. Reported 2026-08-31 as advice about days
+    // eleven days behind the traveler; expiring them at render is the wider
+    // fix (see livePacingWarnings), and this stops the rebuild carrying
+    // them forward at all.
+    'planMeta.pacingWarnings': [],
   })
   await batch.commit()
 }

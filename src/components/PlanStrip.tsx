@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { livePacingWarnings } from '../lib/livePacingWarnings'
 import type { Trip } from '@rv/shared'
 import type { TripDayWithId } from '../hooks/useTripDays'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
@@ -126,7 +127,14 @@ export function PlanStrip({
   // not what dismissing something means. A session is the right unit: the
   // banner gets one say per app launch, and every navigation after that
   // respects the answer.
-  const pacingWarnings = trip.planMeta.pacingWarnings ?? []
+  // Only the advice that still describes a day ahead. Reported 2026-08-31
+  // as "this list on top seems completely obsolete!" — see
+  // livePacingWarnings for why a dated warning expires and an undated one
+  // does not.
+  const pacingWarnings = livePacingWarnings(
+    trip.planMeta.pacingWarnings,
+    new Date().toISOString().slice(0, 10),
+  )
   const pacingWarningKey = pacingWarnings.join('\n')
   const [dismissedPacingKey, setDismissedPacingKey] = useState<string | null>(
     () => readDismissedPacing(tripId),

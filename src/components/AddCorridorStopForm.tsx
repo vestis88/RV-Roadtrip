@@ -6,6 +6,10 @@ import { RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorActio
 import { describeExploreHighlightsError } from '../lib/exploreCandidateActions'
 import { reverseGeocodeName } from '../lib/reverseGeocode'
 import { PlaceAutocompleteInput } from './PlaceAutocompleteInput'
+import {
+  stopDescription,
+  type GooglePlaceDetails,
+} from '../lib/googlePlaceDetails'
 
 interface AddCorridorStopFormProps {
   tripId: string
@@ -62,6 +66,17 @@ export function AddCorridorStopForm({
   const [name, setName] = useState('')
   const [location, setLocation] = useState<NamedPoint>(defaultLocation)
   const [why, setWhy] = useState('')
+  /**
+   * The photo, blurb, rating and listing link of the place picked above.
+   *
+   * Requested 2026-08-31: "add its photo and brief description as well. Do
+   * not overwrite our own description!" — so this is only ever a FALLBACK
+   * for `why`, never a replacement, and the photo and link are added
+   * outright since the traveler has no field for either.
+   */
+  const [placeDetails, setPlaceDetails] = useState<GooglePlaceDetails | null>(
+    null,
+  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,6 +89,7 @@ export function AddCorridorStopForm({
     setName('')
     setLocation(defaultLocation)
     setWhy('')
+    setPlaceDetails(null)
     setQuery('')
     setSearchStatus(null)
     setSearchError(null)
@@ -87,11 +103,21 @@ export function AddCorridorStopForm({
     }
     setSubmitting(true)
     try {
+      // The traveler's own words win outright; Google's blurb only ever
+      // fills a field they left empty. A stop pinned by hand otherwise sat
+      // in the list beside researched candidates with no photo and no
+      // sentence, for no reason other than that nobody asked Places for the
+      // rest of what the same lookup already returned.
+      const description = stopDescription(why, placeDetails)
       const stop = corridorStopSchema.parse({
         name: name.trim(),
         lat: location.lat,
         lng: location.lng,
-        ...(why.trim() ? { why: why.trim() } : {}),
+        ...(description ? { why: description } : {}),
+        ...(placeDetails?.photoUrl ? { photoUrl: placeDetails.photoUrl } : {}),
+        ...(placeDetails?.googleMapsUrl
+          ? { googleMapsUrl: placeDetails.googleMapsUrl }
+          : {}),
         status: 'locked',
         // A pin the traveler dropped by hand is research too — and it writes
         // exactly the fields generation's own overnight-town stops write, so
@@ -222,6 +248,7 @@ export function AddCorridorStopForm({
             testId="corridor-stop-location"
             value={location}
             onChange={setLocation}
+            onDetails={setPlaceDetails}
           />
 
           <label className="block">

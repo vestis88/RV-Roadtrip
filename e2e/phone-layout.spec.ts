@@ -820,3 +820,55 @@ test.describe('rebuilding without throwing away the research', () => {
     expect(after.data()?.index).toBe(0)
   })
 })
+
+/**
+ * Reported 2026-08-31 with a screenshot: *"This list on top seems completely
+ * obsolete!"* — five pacing warnings about Day 1 (2026-08-20, Rothenburg ob
+ * der Tauber), Day 2 (Neuschwanstein), Day 6 (Lake Lucerne), read from a
+ * campsite in the Dolomites on the 31st.
+ *
+ * Every one was true when written and every one described a day the traveler
+ * had driven past a week and a half earlier. Pacing advice is about a
+ * decision — "either the drive moves to another day or the sight does" —
+ * which can only be taken before the day happens.
+ */
+test.describe('pacing advice about days already driven', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('expires, while advice about the days ahead stays', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const yesterday = new Date(Date.now() - 86_400_000)
+      .toISOString()
+      .slice(0, 10)
+    const nextWeek = new Date(Date.now() + 7 * 86_400_000)
+      .toISOString()
+      .slice(0, 10)
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .update({
+        'planMeta.pacingWarnings': [
+          `Day 1 (${yesterday}) drives 581 km and is also the day for Rothenburg ob der Tauber, a half-day sight.`,
+          `Day 20 (${nextWeek}) drives 264 km and is also the day for il Mercato Centrale Firenze.`,
+          'The second half of the trip carries most of the driving.',
+        ],
+      })
+
+    await page.getByTestId('nav-map').click()
+    const banner = page.getByTestId('pacing-warning-banner')
+    await banner.waitFor()
+
+    await expect(banner).toContainText('Mercato Centrale')
+    // The whole-trip warning names no day and never went stale.
+    await expect(banner).toContainText('second half of the trip')
+    // The one about a day already behind them is gone.
+    await expect(banner).not.toContainText('Rothenburg')
+  })
+})
