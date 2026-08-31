@@ -53,8 +53,15 @@ test('the day list can be rebuilt from the board without going through the day v
   await page.getByTestId('day-strip').waitFor()
 
   await page.getByTestId('rebuild-days-button').click()
-  await expect(page.getByTestId('rebuild-days-panel')).toContainText(
-    'discarded',
+  // The panel names what THIS rebuild costs rather than warning in general
+  // (2026-08-31, "Does it have to warn? What does it have to discard?").
+  // Here the fixture's Lillehammer day is genuinely off the route, so there
+  // is a real cost and it is stated in days.
+  await expect(page.getByTestId('rebuild-days-cost')).toContainText(
+    'no longer on the route',
+  )
+  await expect(page.getByTestId('rebuild-days-cost')).toContainText(
+    'keep their places',
   )
   await page.getByTestId('rebuild-days-confirm').click()
   await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)

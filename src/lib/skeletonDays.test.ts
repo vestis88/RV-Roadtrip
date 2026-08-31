@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { planSkeleton } from './skeletonDays'
+import type { TripDay } from '@rv/shared'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import type { TripDayWithId } from '../hooks/useTripDays'
 
@@ -346,5 +347,200 @@ describe('protecting hand-filled sections', () => {
       ],
     })
     expect(decision.skipped).toBeUndefined()
+  })
+})
+
+/**
+ * Asked on 2026-08-31: *"What's up with this rebuilding warning? Does it
+ * have to warn? What does it have to discard? Can it not just keep already
+ * generated days available, if they would be done at a later point in
+ * time?"*
+ *
+ * It does not have to discard much. A day's researched activities and
+ * restaurants belong to the PLACE it is spent in, not the date it was given
+ * — a lunch spot in Riva del Garda is still one when the day moves from the
+ * 2nd to the 4th. The old rebuild deleted every day because it matched them
+ * by nothing at all.
+ */
+describe('reusing days a rebuild does not actually invalidate', () => {
+  const day = (index: number, date: string, name: string): TripDay =>
+    ({
+      index,
+      date,
+      type: 'drive',
+      overnight: { name, lat: 45.88, lng: 10.84, country: 'IT' },
+      summary: `On to ${name}.`,
+    }) as TripDay
+
+  const stored = (
+    id: string,
+    index: number,
+    date: string,
+    name: string,
+    over: Partial<TripDayWithId> = {},
+  ): TripDayWithId =>
+    ({ id, ...day(index, date, name), ...over }) as TripDayWithId
+
+  it('re-dates a day in place rather than deleting and rewriting it', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [stored('d1', 0, '2026-09-02', 'Riva del Garda')],
+      [day(0, '2026-09-04', 'Riva del Garda')],
+    )
+    expect(plan.reuse.map((entry) => entry.id)).toEqual(['d1'])
+    expect(plan.create).toHaveLength(0)
+    expect(plan.removeIds).toHaveLength(0)
+    // Which is what makes the warning unnecessary: nothing researched is lost.
+    expect(plan.discardingDetail).toBe(0)
+  })
+
+  /**
+   * The case the name key alone would miss: a generated day's overnight
+   * moves off the town centre onto an actual campsite and takes the site's
+   * name with it, while the skeleton names the stop. Same place, different
+   * label — so the coordinates decide.
+   */
+  it('matches a campsite overnight to the town the skeleton names', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [stored('d1', 0, '2026-09-02', 'Camping Bavaria Riva')],
+      [day(0, '2026-09-04', 'Riva del Garda')],
+    )
+    expect(plan.reuse.map((entry) => entry.id)).toEqual(['d1'])
+  })
+
+  // Claimed at most once, or a basecamp's three nights would all reuse the
+  // same stored day and two of them would quietly vanish.
+  it('gives a basecamp’s nights a day each', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [
+        stored('d1', 0, '2026-09-01', 'Molveno'),
+        stored('d2', 1, '2026-09-02', 'Molveno'),
+      ],
+      [
+        day(0, '2026-09-03', 'Molveno'),
+        day(1, '2026-09-04', 'Molveno'),
+        day(2, '2026-09-05', 'Molveno'),
+      ],
+    )
+    expect(plan.reuse.map((entry) => entry.id)).toEqual(['d1', 'd2'])
+    expect(plan.create.map((entry) => entry.dayIndex)).toEqual([2])
+    expect(plan.removeIds).toHaveLength(0)
+  })
+
+  // A stop taken off the route really is gone, and its research goes with
+  // it — this is the only case the panel has anything to say about.
+  it('drops a day whose place is no longer on the route, and counts it', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [
+        stored('keep', 0, '2026-09-01', 'Riva del Garda'),
+        stored('gone', 1, '2026-09-02', 'Sirmione', {
+          detailStatus: 'ready',
+        } as Partial<TripDayWithId>),
+        stored('bare', 2, '2026-09-03', 'Verona'),
+      ],
+      [day(0, '2026-09-04', 'Riva del Garda')],
+    )
+    expect(plan.removeIds.sort()).toEqual(['bare', 'gone'])
+    // Only the researched one is worth mentioning; a bare skeleton day is
+    // not a loss and saying so would make the warning noise again.
+    expect(plan.discardingDetail).toBe(1)
+  })
+
+  /**
+   * What a reused day takes, and what it keeps. The overnight is the half
+   * that matters: the stored one may carry a campsite suggestion or a
+   * free-camping rule the skeleton has never heard of, and it is the same
+   * place by construction.
+   */
+  it('takes the new dates and keeps the researched overnight and summary', async () => {
+    const { reusedDayFields } = await import('./skeletonDays')
+    const was = stored('d1', 0, '2026-09-02', 'Camping Bavaria Riva', {
+      detailStatus: 'ready',
+      summary: 'A long lunch on the lakefront, then the Ponale path.',
+    } as Partial<TripDayWithId>)
+    const fields = reusedDayFields(day(3, '2026-09-05', 'Riva del Garda'), was)
+
+    expect(fields.date).toBe('2026-09-05')
+    expect(fields.index).toBe(3)
+    expect(fields).not.toHaveProperty('overnight')
+    expect(fields).not.toHaveProperty('summary')
+    // Never mentioned, so never overwritten — the whole point.
+    expect(fields).not.toHaveProperty('detailStatus')
+    expect(fields).not.toHaveProperty('filledSections')
+  })
+
+  it('gives a day with no research the new summary', async () => {
+    const { reusedDayFields } = await import('./skeletonDays')
+    const fields = reusedDayFields(
+      day(1, '2026-09-05', 'Riva del Garda'),
+      stored('d1', 0, '2026-09-02', 'Riva del Garda'),
+    )
+    expect(fields.summary).toBe('On to Riva del Garda.')
+  })
+})
+
+/**
+ * The "unchanged" check and the writer have to agree on what the same day
+ * IS, or the automatic writer rewrites a reused day on every visit to the
+ * map: it keeps the campsite name it was researched under while the
+ * skeleton names the stop, and a name comparison calls that a change
+ * forever.
+ */
+describe('recognising an itinerary that already says this', () => {
+  const settings = { ...SETTINGS, startDate: '2026-07-01' }
+
+  it('leaves a reused day alone when only its label differs', () => {
+    const decision = planSkeleton({
+      stops: [stop({ id: 'a', name: 'Riva del Garda' })],
+      legs: [],
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-07-01',
+          type: 'drive',
+          // The campsite the day was researched under, 400 m from the stop.
+          overnight: {
+            name: 'Camping Bavaria Riva',
+            lat: 61.77,
+            lng: 9.54,
+            country: 'NO',
+          },
+          summary: 'A day by the lake.',
+        } as unknown as TripDayWithId,
+      ],
+      settings,
+      planMeta: READY,
+    })
+    expect(decision.skipped).toBe('unchanged')
+  })
+
+  // And still notices a real move, which is the whole point of the check.
+  it('still sees a date that has actually changed', () => {
+    const decision = planSkeleton({
+      stops: [stop({ id: 'a', name: 'Riva del Garda' })],
+      legs: [],
+      existingDays: [
+        {
+          id: 'd1',
+          index: 0,
+          date: '2026-06-20',
+          type: 'drive',
+          overnight: {
+            name: 'Riva del Garda',
+            lat: 61.77,
+            lng: 9.54,
+            country: 'NO',
+          },
+          summary: 'A day by the lake.',
+        } as unknown as TripDayWithId,
+      ],
+      settings,
+      planMeta: READY,
+    })
+    expect(decision.days).toBeDefined()
   })
 })

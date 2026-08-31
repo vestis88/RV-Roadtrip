@@ -1,4 +1,10 @@
-import { collection, doc, getDocs, writeBatch } from 'firebase/firestore'
+import {
+  collection,
+  deleteField,
+  doc,
+  getDocs,
+  writeBatch,
+} from 'firebase/firestore'
 import type { PlanMeta, TripDay, TripSettings } from '@rv/shared'
 import { db } from './firebase'
 import { packStopsIntoDays, type PackedDay } from './tripBudget'
@@ -58,6 +64,18 @@ export interface SkeletonDecision {
    * having done nothing (2026-08-26).
    */
   stopIdsByDay?: string[][]
+  /**
+   * What a rebuild would cost, so the confirmation can state it rather than
+   * warn in general terms.
+   *
+   * Asked on 2026-08-31 — *"Does it have to warn? What does it have to
+   * discard?"* — and the answer is now usually "nothing": a day whose
+   * overnight survives the rebuild keeps its research (see
+   * planSkeletonWrite), so a plain reorder discards no detail at all and
+   * the panel has nothing to warn about.
+   */
+  reusing?: number
+  discardingDetail?: number
 }
 
 /**
@@ -137,7 +155,16 @@ export function planSkeleton(input: {
         ? [day.parkedAt.id]
         : [],
   )
-  return { days, stopIdsByDay }
+  // The same matching the writer will do, so the confirmation and the write
+  // cannot disagree about what is at stake — the discipline packStopsIntoDays
+  // and tripBudget already share.
+  const write = planSkeletonWrite(existingDays, days)
+  return {
+    days,
+    stopIdsByDay,
+    reusing: write.reuse.length,
+    discardingDetail: write.discardingDetail,
+  }
 }
 
 /**
@@ -225,19 +252,25 @@ function summaryFor(
  * skeleton actually decides — date, order and where the night is — so a day
  * that has since gained an overnight CHOICE or a note is not rewritten over
  * a difference this function never made.
+ *
+ * Asked through the same matcher the WRITER uses, so the two agree on what
+ * "the same day" means. Comparing overnight names directly was right while
+ * every day was rewritten from scratch and wrong the moment days could be
+ * reused: a reused day keeps the campsite name it was researched under
+ * ("Camping Bavaria Riva") against a skeleton that names the stop ("Riva del
+ * Garda"), which a name comparison calls a change forever — one pointless
+ * rewrite per visit to the map.
  */
 function sameAs(existing: TripDayWithId[], next: TripDay[]): boolean {
   if (existing.length !== next.length) return false
-  const byIndex = [...existing].sort((a, b) => a.index - b.index)
-  return next.every((day, i) => {
-    const was = byIndex[i]
-    return (
-      was &&
+  const plan = planSkeletonWrite(existing, next)
+  if (plan.create.length > 0 || plan.removeIds.length > 0) return false
+  return plan.reuse.every(
+    ({ day, existing: was }) =>
       was.date === day.date &&
       was.type === day.type &&
-      was.overnight.name === day.overnight.name
-    )
-  })
+      was.index === day.index,
+  )
 }
 
 /** Adds `n` days to a YYYY-MM-DD string, in UTC — see dateShift.addDays. */
@@ -248,14 +281,146 @@ function addDays(date: string, n: number): string {
   return next.toISOString().slice(0, 10)
 }
 
+
 /**
- * Writes the skeleton, replacing any dayless-and-detail-free itinerary that
- * was there before.
+ * Which existing day, if any, each rebuilt day should REUSE.
+ *
+ * Asked on 2026-08-31, and it is the right question: *"What does it have to
+ * discard? Can it not just keep already generated days available, if they
+ * would be done at a later point in time?"*
+ *
+ * It does not have to discard much. A day's researched activities and
+ * restaurants belong to the PLACE it is spent in, not to the date it was
+ * given — a lunch spot in Riva del Garda is still a lunch spot in Riva del
+ * Garda when the day moves from the 2nd to the 4th. The old rebuild deleted
+ * every day and every subcollection because it matched days by nothing at
+ * all; matched by their overnight instead, most days survive a reorder
+ * intact.
+ *
+ * Two keys, tried in order, because the two halves of a day's identity can
+ * each go missing:
+ *
+ *  - the overnight's NAME, folded the way `normalizeStopName` folds a stop's
+ *    — the usual case, and stable across a re-pack.
+ *  - its COORDINATES at 2dp (≈1 km) — for the generated day whose overnight
+ *    moved off the town centre onto an actual campsite and took the site's
+ *    name with it ("Lillehammer Camping" against a stop called
+ *    "Lillehammer"). The place is the same; only the label differs.
+ *
+ * Claimed greedily and at most once, so a basecamp's three nights match
+ * three separate old days rather than all three claiming one.
+ */
+export interface SkeletonWritePlan {
+  /** Existing days that keep their content, re-dated in place. */
+  reuse: { id: string; dayIndex: number; day: TripDay; existing: TripDayWithId }[]
+  /** Days with no counterpart to reuse. */
+  create: { dayIndex: number; day: TripDay }[]
+  /** Existing days nothing matched. Deleted, with their subcollections. */
+  removeIds: string[]
+  /**
+   * How many of those carried research — the only number the traveler
+   * actually needs before pressing a destructive-sounding button, and
+   * usually zero.
+   */
+  discardingDetail: number
+}
+
+export function planSkeletonWrite(
+  existing: TripDayWithId[],
+  next: TripDay[],
+): SkeletonWritePlan {
+  const unclaimed = [...existing]
+  const claim = (day: TripDay): TripDayWithId | undefined => {
+    const byName = unclaimed.findIndex(
+      (old) => nameKey(old.overnight.name) === nameKey(day.overnight.name),
+    )
+    const index =
+      byName >= 0
+        ? byName
+        : unclaimed.findIndex(
+            (old) => coordKey(old.overnight) === coordKey(day.overnight),
+          )
+    if (index < 0) return undefined
+    return unclaimed.splice(index, 1)[0]
+  }
+
+  const reuse: SkeletonWritePlan['reuse'] = []
+  const create: SkeletonWritePlan['create'] = []
+  next.forEach((day, dayIndex) => {
+    const existingDay = claim(day)
+    if (existingDay) reuse.push({ id: existingDay.id, dayIndex, day, existing: existingDay })
+    else create.push({ dayIndex, day })
+  })
+
+  return {
+    reuse,
+    create,
+    removeIds: unclaimed.map((day) => day.id),
+    discardingDetail: unclaimed.filter(hasDetail).length,
+  }
+}
+
+/** Folded the way normalizeStopName folds a stop name — see its own note. */
+function nameKey(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/** ≈1 km, the same grid quantisePosition uses for the route origin. */
+function coordKey(point: { lat: number; lng: number }): string {
+  return `${point.lat.toFixed(2)}|${point.lng.toFixed(2)}`
+}
+
+/**
+ * What a reused day takes from the rebuild, and what it keeps.
+ *
+ * Takes: where it sits in the itinerary — `index`, `date`, `type`, and the
+ * drive leg into it. Those are exactly what a re-pack decides.
+ *
+ * Keeps: its `overnight`, because the old one is the same place and may
+ * carry a campsite suggestion or a free-camping rule the skeleton knows
+ * nothing about; its `summary`, when the day has detail, because that
+ * sentence describes the research rather than the route; and everything
+ * else on the document — `detailStatus`, `filledSections`, `townAnchor`,
+ * `sights` — by not being mentioned here at all. Its activities and
+ * restaurants live in subcollections and are simply never touched.
+ */
+export function reusedDayFields(
+  day: TripDay,
+  existing: TripDayWithId,
+): Record<string, unknown> {
+  return {
+    index: day.index,
+    date: day.date,
+    type: day.type,
+    // A day that was researched keeps the sentence written about it; a bare
+    // skeleton day takes the new one, which at least names where it goes.
+    ...(hasDetail(existing) ? {} : { summary: day.summary }),
+    // Deleted rather than left stale: a day that no longer has a drive into
+    // it must not keep describing one from the plan before.
+    drive: day.drive ?? deleteField(),
+  }
+}
+
+/**
+ * Writes the skeleton, REUSING every day whose overnight survives the
+ * rebuild and deleting only the ones nothing matched.
  *
  * One batch, so the collection is never briefly half-rewritten — the same
- * reasoning as shiftPlanDates. The old days are deleted rather than merged
- * because their ids carry no meaning here: nothing links to a skeleton day
- * that has never been opened.
+ * reasoning as shiftPlanDates.
+ *
+ * It used to delete all of them, on the grounds that "their ids carry no
+ * meaning here". That was true of a skeleton day nobody had opened and
+ * false of everything else, and the cost was the warning the rebuild had to
+ * show: researched activities and restaurants thrown away on every reorder,
+ * and — because Firestore ids are what a diary entry's `refPath` points at
+ * — any diary entry written against one of those places left dangling.
+ * Matched by overnight, a reorder now keeps the research, keeps the diary,
+ * and moves the dates. See planSkeletonWrite.
  */
 export async function writeSkeletonDays(
   tripId: string,
@@ -269,15 +434,22 @@ export async function writeSkeletonDays(
   stopIdsByDay: string[][] = [],
 ): Promise<void> {
   const daysRef = collection(db, 'trips', tripId, 'days')
-  const existing = await getDocs(daysRef)
+  const existingSnap = await getDocs(daysRef)
+  const existing = existingSnap.docs.map(
+    (day) => ({ id: day.id, ...day.data() }) as TripDayWithId,
+  )
+  const plan = planSkeletonWrite(existing, days)
 
   // Firestore does not cascade. Deleting a day document leaves its
   // activities, restaurants and overnight options addressable forever —
-  // found 2026-08-25, and every rebuild until now orphaned them. The same
-  // delete-the-contents-first shape applyDayCleanup and generatePlan's
-  // writeGeneratedDays already use.
+  // found 2026-08-25, and every rebuild until then orphaned them. Read only
+  // for the days actually being removed now, which on a plain reorder is
+  // none of them.
+  const removed = existingSnap.docs.filter((day) =>
+    plan.removeIds.includes(day.id),
+  )
   const contents = await Promise.all(
-    existing.docs.map(async (day) => {
+    removed.map(async (day) => {
       const [activities, restaurants, overnightOptions] = await Promise.all([
         getDocs(collection(day.ref, 'activities')),
         getDocs(collection(day.ref, 'restaurants')),
@@ -293,18 +465,27 @@ export async function writeSkeletonDays(
       snap.docs.forEach((entry) => batch.delete(entry.ref))
     }
   }
-  for (const old of existing.docs) batch.delete(old.ref)
-  // The links, built as the day refs are created — the ids do not exist
-  // until now, and both halves have to land in the same batch or the board
-  // briefly shows days that no stop claims.
+  for (const old of removed) batch.delete(old.ref)
+
+  // The links, built as each day's ref is settled — a reused day keeps its
+  // id, a new one gets one here, and both halves have to land in the same
+  // batch or the board briefly shows days that no stop claims.
   const dayIdsByStop = new Map<string, string[]>()
-  days.forEach((day, index) => {
+  const linkStops = (dayIndex: number, dayId: string) => {
+    for (const stopId of stopIdsByDay[dayIndex] ?? []) {
+      dayIdsByStop.set(stopId, [...(dayIdsByStop.get(stopId) ?? []), dayId])
+    }
+  }
+  for (const { id, dayIndex, day, existing: was } of plan.reuse) {
+    batch.update(doc(daysRef, id), reusedDayFields(day, was))
+    linkStops(dayIndex, id)
+  }
+  for (const { dayIndex, day } of plan.create) {
     const ref = doc(daysRef)
     batch.set(ref, day)
-    for (const stopId of stopIdsByDay[index] ?? []) {
-      dayIdsByStop.set(stopId, [...(dayIdsByStop.get(stopId) ?? []), ref.id])
-    }
-  })
+    linkStops(dayIndex, ref.id)
+  }
+
   // Every stop that was packed gets its new days; a stop that was packed
   // onto nothing is cleared rather than left pointing at a deleted day.
   const packedStopIds = new Set(stopIdsByDay.flat())

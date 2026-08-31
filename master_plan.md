@@ -3293,6 +3293,64 @@ last week's dates with next week's in one row.
 Verification: lint 0, build 0, frontend **417**, functions **664**, e2e
 **161** — all green.
 
+### 2026-08-31 — the rebuild stops throwing away the research
+
+*"What's up with this rebuilding warning? Does it have to warn? What does it
+have to discard? Can it not just keep already generated days available, if
+they would be done at a later point in time?"*
+
+The warning was honest — the code really did delete every day and every
+subcollection — but the code was destroying things it had no reason to
+touch. **A day's researched activities and restaurants belong to the PLACE
+the day is spent in, not to the date it was given.** A lunch spot in Riva del
+Garda is still a lunch spot in Riva del Garda when the day moves from the 2nd
+to the 4th. The old rebuild deleted everything because it matched old days to
+new ones by nothing at all — it had no notion of "the same day" — so a
+reorder read as a total replacement.
+
+`planSkeletonWrite` matches them by overnight, on two keys tried in order:
+the name, folded the way stop names are folded; then coordinates at 2dp
+(≈1 km), for the generated day whose overnight moved off the town centre onto
+a campsite and took the site's name with it — "Lillehammer Camping" against a
+stop called "Lillehammer" is the same place wearing a different label.
+Claimed greedily and at most once, so a basecamp's three nights match three
+stored days rather than all three claiming one.
+
+A reused day **takes** its place in the itinerary — `index`, `date`, `type`,
+the drive leg into it — and **keeps** everything else by the write never
+mentioning it: `detailStatus`, `filledSections`, `townAnchor`, `sights`, its
+activities and restaurants, and its `overnight`, which may carry a campsite
+suggestion or a free-camping rule the skeleton has never heard of. Its
+summary survives too when the day has detail, because that sentence describes
+the research rather than the route.
+
+**And it keeps the diary.** Firestore ids are what a log entry's `refPath`
+points at, so every id-churning rebuild silently left diary entries dangling
+at addresses nothing occupied. A reused day keeps its id, so the entry keeps
+its subject — asserted end to end rather than argued.
+
+Only days whose place is genuinely off the route are deleted, with their
+subcollections, and the panel now says what THIS rebuild costs instead of
+warning in general: nothing at all for a plain reorder, and "1 day no longer
+on the route is dropped" when there is something to drop. The count comes
+from the same function that does the write, so the sentence and the write
+cannot disagree — the discipline `packStopsIntoDays` and `tripBudget`
+already share.
+
+**One consequence worth stating**, found while writing it: the "unchanged"
+check had to move to the same matcher. Comparing overnight names directly was
+right while every day was rewritten from scratch and wrong the moment days
+could be reused — a day reused under its campsite name reads as changed
+forever, which is one pointless rewrite per visit to the map.
+
+The day view already carries the per-section fills (activity, breakfast,
+lunch, dinner) and the overnight picker; what was missing was a way to reach
+a usable day without paying for the rebuild first. That is what this removes.
+
+Verification: lint 0, build 0, frontend **425**, functions **664**, e2e
+**162** — all green, including `dayview.spec.ts:140`, which has flaked
+before.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

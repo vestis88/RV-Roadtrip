@@ -1,5 +1,8 @@
 import { expect, test } from './fixtures.js'
-import { createTripWithPlan } from './helpers/seedFixturePlan.js'
+import {
+  createTripWithPlan,
+  getDayIdByDate,
+} from './helpers/seedFixturePlan.js'
 
 /**
  * Reported 2026-08-24 from an iPhone: "The iPhone view is now very limited
@@ -732,5 +735,88 @@ test.describe('a scan whose results the list is hiding', () => {
     await expect(
       page.getByTestId(`explore-candidate-lock-${scanned.id}`),
     ).toBeVisible()
+  })
+})
+
+/**
+ * Asked on 2026-08-31: *"What does it have to discard? Can it not just keep
+ * already generated days available?"*
+ *
+ * Mostly it does not have to. A day's researched activities and restaurants
+ * belong to the place it is spent in, not to the date it was given, so a day
+ * whose overnight survives the rebuild keeps them and only its dates move.
+ * Firestore ids are also what a diary entry's `refPath` points at, so
+ * keeping the day keeps the diary.
+ */
+test.describe('rebuilding without throwing away the research', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('keeps a kept stop’s day, its places and its diary entry', async ({
+    page,
+  }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const tripRef = adminDb.collection('trips').doc(tripId)
+
+    // A locked stop standing exactly where one of the seeded days sleeps —
+    // so the rebuild packs a day onto the same place the stored one has.
+    await tripRef.collection('corridorStops').add({
+      name: 'Lillehammer Camping',
+      lat: 61.1153,
+      lng: 10.4662,
+      country: 'NO',
+      status: 'locked',
+      linkedDayIds: [],
+    })
+    const dayId = await getDayIdByDate(tripId, '2026-07-10')
+    const dayRef = tripRef.collection('days').doc(dayId)
+    await dayRef.update({ detailStatus: 'ready' })
+    const activityBefore = (
+      await dayRef.collection('activities').limit(1).get()
+    ).docs[0]
+    // A diary entry against that activity — the thing an id-churning rebuild
+    // silently orphaned.
+    await tripRef.collection('log').add({
+      date: '2026-07-10',
+      refType: 'activity',
+      refPath: activityBefore.ref.path,
+      note: 'Rained all afternoon, still worth it.',
+      createdAt: new Date().toISOString(),
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('days-out-of-step-rebuild').waitFor()
+    await page.getByTestId('days-out-of-step-rebuild').click()
+
+    // The panel says what THIS rebuild costs rather than warning in general.
+    await expect(page.getByTestId('rebuild-days-cost')).toContainText(
+      'keep their places',
+    )
+    await page.getByTestId('rebuild-days-confirm').click()
+    await expect(page.getByTestId('rebuild-days-result')).toBeVisible()
+
+    // Read back from the server, not the client's own optimistic view.
+    await expect
+      .poll(async () => (await dayRef.get()).exists, { timeout: 15_000 })
+      .toBe(true)
+    const after = await dayRef.get()
+    // Its research is untouched...
+    expect(after.data()?.detailStatus).toBe('ready')
+    expect((await dayRef.collection('activities').get()).size).toBeGreaterThan(0)
+    expect((await activityBefore.ref.get()).exists).toBe(true)
+    // ...and the diary entry still points at something that exists.
+    const logged = await tripRef.collection('log').get()
+    expect(logged.docs).toHaveLength(1)
+    expect(
+      (await adminDb.doc(logged.docs[0].data().refPath).get()).exists,
+    ).toBe(true)
+    // The one thing that DID change: where it sits in the itinerary.
+    expect(after.data()?.index).toBe(0)
   })
 })

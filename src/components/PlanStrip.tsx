@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Trip } from '@rv/shared'
 import type { TripDayWithId } from '../hooks/useTripDays'
@@ -191,6 +191,25 @@ export function PlanStrip({
    * — DayDetailGate refills a day when it is opened, so nothing is lost
    * permanently, but it is not free either.
    */
+  /**
+   * What pressing the button would actually cost, from the same function
+   * that will do the work — so the sentence and the write cannot disagree.
+   * null while the panel is shut, since planning a write nobody asked for
+   * is work for nothing.
+   */
+  const rebuildCost = useMemo(() => {
+    if (!rebuildOpen) return null
+    const decision = planSkeleton({
+      stops: routeStops,
+      legs: routeLegs,
+      existingDays: days,
+      settings: trip.settings,
+      planMeta: trip.planMeta,
+      rebuildOverDetail: true,
+    })
+    return decision.discardingDetail ?? null
+  }, [rebuildOpen, routeStops, routeLegs, days, trip.settings, trip.planMeta])
+
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildResult, setRebuildResult] = useState<{
     days: number
@@ -478,13 +497,23 @@ export function PlanStrip({
           className="border-b border-neutral-200 bg-white p-4 text-sm dark:border-neutral-800 dark:bg-neutral-900"
         >
           <p>
-            This replaces the day list with one built from your {routeStops.length}{' '}
-            kept stop{routeStops.length === 1 ? '' : 's'}, in their current
-            order.
+            This rebuilds the day list from your {routeStops.length} kept stop
+            {routeStops.length === 1 ? '' : 's'}, in their current order.
           </p>
-          <p className="mt-1 text-neutral-600 dark:text-neutral-300">
-            Researched activities and restaurants on the existing days are
-            discarded. Each new day fills itself in again when you open it.
+          {/* Asked on 2026-08-31: "Does it have to warn? What does it have
+            * to discard?" It usually has nothing to discard — a day whose
+            * overnight survives the rebuild keeps its researched places and
+            * its date moves — so the panel says what THIS rebuild costs
+            * instead of warning in general. See planSkeletonWrite. */}
+          <p
+            data-testid="rebuild-days-cost"
+            className="mt-1 text-neutral-600 dark:text-neutral-300"
+          >
+            {rebuildCost === null
+              ? 'Days you have already researched keep their places; only their dates move.'
+              : rebuildCost === 0
+                ? 'Days you have already researched keep their places — nothing is discarded. Only their dates move.'
+                : `Days you have already researched keep their places. ${rebuildCost} day${rebuildCost === 1 ? '' : 's'} no longer on the route ${rebuildCost === 1 ? 'is' : 'are'} dropped, with the places researched on ${rebuildCost === 1 ? 'it' : 'them'}.`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {rebuilding && (
@@ -492,7 +521,7 @@ export function PlanStrip({
                 data-testid="rebuild-days-progress"
                 className="w-full text-neutral-600 dark:text-neutral-300"
               >
-                Clearing the old days and writing the new ones…
+                Re-dating the days you keep and writing the new ones…
               </p>
             )}
             <button
