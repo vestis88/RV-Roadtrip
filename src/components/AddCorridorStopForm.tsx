@@ -113,6 +113,11 @@ export function AddCorridorStopForm({
         name: name.trim(),
         lat: location.lat,
         lng: location.lng,
+        // Without this the stop is invisible to the day packer for good:
+        // planSkeleton drops anything whose country is not two letters,
+        // because a day's overnight must carry one. Every pin placed by hand
+        // was in that state until 2026-08-31 — see stopCountries.
+        ...(placeDetails?.country ? { country: placeDetails.country } : {}),
         ...(description ? { why: description } : {}),
         ...(placeDetails?.photoUrl ? { photoUrl: placeDetails.photoUrl } : {}),
         ...(placeDetails?.googleMapsUrl

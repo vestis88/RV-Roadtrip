@@ -13,6 +13,10 @@ import {
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
 import { readSeenScan, rememberSeenScan } from '../lib/scanAcknowledgement'
+import {
+  fillMissingCountries,
+  stopsNeedingCountry,
+} from '../lib/stopCountries'
 import { useTripDays } from '../hooks/useTripDays'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
@@ -568,7 +572,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    * rather than in PlanStrip so the control that offers the rebuild and the
    * panel that explains it read the same number.
    */
-  const rebuildCost = useMemo(() => {
+  const rebuildOutlook = useMemo(() => {
     const decision = planSkeleton({
       stops: routeStops,
       legs: routeLegs ?? [],
@@ -577,8 +581,37 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       planMeta: trip.planMeta,
       rebuildOverDetail: true,
     })
-    return decision.discardingDetail ?? null
+    return {
+      cost: decision.discardingDetail ?? null,
+      undatable: decision.undatable ?? 0,
+    }
   }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
+  const rebuildCost = rebuildOutlook.cost
+
+  /**
+   * Give a hand-placed pin the country it was saved without.
+   *
+   * Reported 2026-08-31: rebuilds that changed nothing and days that could
+   * not be opened, both from stops the packer had been silently discarding
+   * since the day they were pinned. Runs itself because there is nothing the
+   * traveler could press to fix it — see stopCountries.
+   */
+  const countriesFilled = useRef<string | null>(null)
+  useEffect(() => {
+    const needing = stopsNeedingCountry(corridorStops)
+    if (needing.length === 0) return
+    const signature = needing.map((stop) => stop.id).join('|')
+    if (countriesFilled.current === signature) return
+    countriesFilled.current = signature
+    void fillMissingCountries(tripId, corridorStops).catch(
+      (error: unknown) => {
+        console.error('Filling in missing stop countries failed', error)
+        // Retried on the next change rather than leaving the stops
+        // permanently undatable.
+        countriesFilled.current = null
+      },
+    )
+  }, [tripId, corridorStops])
 
   const skeletonWritten = useRef<string | null>(null)
   useEffect(() => {
@@ -968,6 +1001,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           onChangeRequestOpenChange={setChangeRequestOpen}
           rebuildOpen={rebuildOpen}
           rebuildCost={rebuildCost}
+          undatableStops={rebuildOutlook.undatable}
           onRebuildOpenChange={setRebuildOpen}
           onReorderOpenChange={setReorderOpen}
         />

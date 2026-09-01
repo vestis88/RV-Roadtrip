@@ -76,6 +76,17 @@ export interface SkeletonDecision {
    */
   reusing?: number
   discardingDetail?: number
+  /**
+   * Kept stops that could not be dated at all, because their country is
+   * missing or malformed and a day's overnight must carry one.
+   *
+   * Reported as a rebuild that "seems to not respond" (2026-08-31): these
+   * were dropped in silence, so the board went on counting them as stops
+   * with no day while offering a button that could never give them one.
+   * stopCountries repairs them; this is here so the next thing that cannot
+   * be packed says so rather than disappearing.
+   */
+  undatable?: number
 }
 
 /**
@@ -123,7 +134,8 @@ export function planSkeleton(input: {
   // a two-letter code — and writing a malformed day would surface a long way
   // from here.
   const usable = stops.filter((stop) => stop.country?.length === 2)
-  if (usable.length === 0) return { skipped: 'no-stops' }
+  const undatable = stops.length - usable.length
+  if (usable.length === 0) return { skipped: 'no-stops', undatable }
 
   const packed = packStopsIntoDays({
     stops: usable,
@@ -155,10 +167,10 @@ export function planSkeleton(input: {
    */
   const write = planSkeletonWrite(existingDays, days)
   if (!input.rebuildOverDetail && write.discardingDetail > 0) {
-    return { skipped: 'has-detail' }
+    return { skipped: 'has-detail', undatable }
   }
   if (!input.rebuildOverDetail && sameAs(write, days)) {
-    return { skipped: 'unchanged' }
+    return { skipped: 'unchanged', undatable }
   }
   // A parked day carries no `stops` of its own (the basecamp is on the first
   // of its nights), so `parkedAt` is what links the rest of them.
@@ -174,6 +186,7 @@ export function planSkeleton(input: {
     stopIdsByDay,
     reusing: write.reuse.length,
     discardingDetail: write.discardingDetail,
+    undatable,
   }
 }
 

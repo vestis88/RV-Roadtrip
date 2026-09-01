@@ -68,7 +68,16 @@ export function PlaceAutocompleteInput({
       'formattedAddress',
       'location',
       ...(wantsDetails
-        ? ['photos', 'editorialSummary', 'rating', 'userRatingCount', 'googleMapsURI']
+        ? [
+            'photos',
+            'editorialSummary',
+            'rating',
+            'userRatingCount',
+            'googleMapsURI',
+            // The two-letter country, without which a stop is invisible to
+            // the day packer forever — see stopCountries.
+            'addressComponents',
+          ]
         : []),
     ]
 
@@ -77,7 +86,11 @@ export function PlaceAutocompleteInput({
       // Every field is optional on the way out — a place with no photo and
       // no blurb is the common case, not a failure.
       const photo = place.photos?.[0]
+      const country = place.addressComponents?.find((part) =>
+        part.types.includes('country'),
+      )?.shortText
       onDetailsRef.current({
+        ...(country?.length === 2 ? { country: country.toUpperCase() } : {}),
         ...(photo ? { photoUrl: photo.getURI({ maxWidth: 800 }) } : {}),
         ...(place.editorialSummary ? { summary: place.editorialSummary } : {}),
         ...(place.rating != null ? { rating: place.rating } : {}),

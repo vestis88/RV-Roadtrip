@@ -3575,6 +3575,55 @@ was aimed at the wrong pixel.
 Verification: lint 0, build 0, frontend **450**, functions **664**, e2e
 **168** — all green.
 
+### 2026-09-01 — the pin that could never be given a day
+
+*"Seems to not respond to any rebuilds. And I think we decided to remove all
+rebuilds?! I can't enter any days either!"* — with a green *"Day list rebuilt
+— 4 days from your 6 kept stops"* sitting directly above an amber *"3 kept
+stops are not in them"*.
+
+**Both banners were telling the truth.** `planSkeleton` drops any stop whose
+`country` is not exactly two letters, because `overnightStopSchema` requires
+one and writing a malformed day would surface a long way from here. That
+filter is right. What was wrong is that **`AddCorridorStopForm` never wrote a
+country at all** — a hand-placed pin got a name, coordinates, and nothing
+else.
+
+So every stop the traveler pinned themselves was invisible to the day packer
+for good. It could never be given a day; `stopsAddableToRoute` counted it
+forever; the "these days are from an earlier plan" banner therefore never
+cleared; the day strip stayed *derived* rather than reading real days, which
+is why no day could be opened; and the button the banner offered could not
+possibly help, because the stop was discarded before the packing began. One
+missing field produced every symptom in that message.
+
+Three changes, and the middle one is the one that matters tonight:
+
+1. **The form writes a country.** `addressComponents` comes back on the same
+   Places lookup the autocomplete already makes, so this costs no extra call.
+2. **Stops already saved without one are repaired.** Nothing the traveler
+   could press would fix those, so the board reverse-geocodes them — the Maps
+   JS API is already loaded for the map — and writes the field back. Narrow
+   on purpose: locked and not done (the only stops the day list packs), five
+   per pass, one field, and only when the lookup actually succeeded. A
+   failure leaves the stop untouched to be retried rather than stamped with a
+   guess.
+3. **The drop is no longer silent.** `planSkeleton` reports how many stops it
+   could not date, and while any remain the banner says so instead of
+   offering a rebuild — *"3 of them are still having their country looked
+   up"*. A button that provably cannot do the thing it names is worse than no
+   button, and this one had been there since hand-placed pins existed.
+
+On *"I think we decided to remove all rebuilds"* — the automatic writer does
+handle every case where nothing would be lost, and did here. What it could
+not handle was stops it had never been allowed to see. The rebuild button
+remains only for the one case a person has to approve: a researched day whose
+place has left the route.
+
+Verification: lint 0, build 0, frontend **456**, functions **664**, e2e
+**170** — all green (`corridor.spec.ts:142` flaked once in a full run and
+passes in isolation and on re-run).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

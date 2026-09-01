@@ -15,6 +15,14 @@
  */
 export interface GooglePlaceDetails {
   photoUrl?: string
+  /**
+   * The two-letter country code, from the same lookup.
+   *
+   * Not cosmetic: `planSkeleton` drops any stop whose country is not exactly
+   * two letters, so a stop saved without one can never be given a day. Every
+   * hand-placed pin was in that state until 2026-08-31 — see stopCountries.
+   */
+  country?: string
   /** Google's own editorial blurb, where it has one. Most places have none. */
   summary?: string
   rating?: number

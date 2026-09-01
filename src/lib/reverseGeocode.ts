@@ -33,6 +33,51 @@ function timeout(ms: number): Promise<undefined> {
   return new Promise((resolve) => setTimeout(() => resolve(undefined), ms))
 }
 
+/**
+ * The two-letter country a point sits in.
+ *
+ * Reported 2026-08-31 as a day list that would not respond to rebuilds and
+ * days that could not be opened. The cause was upstream of both:
+ * `planSkeleton` drops any stop whose `country` is not exactly two letters,
+ * because `overnightStopSchema` requires one — and a stop pinned by hand
+ * never had a country written at all. So every hand-added stop was invisible
+ * to the packer forever: it could never be given a day, the "these days are
+ * from an earlier plan" banner counted it forever, and the rebuild it
+ * offered could not possibly help.
+ *
+ * Resolved here for the same reason the name above is: the Maps JS API is
+ * already loaded for the map itself, so this costs no new key. Undefined on
+ * failure, and the caller simply leaves the stop as it was.
+ */
+export async function reverseGeocodeCountry(
+  point: { lat: number; lng: number },
+): Promise<string | undefined> {
+  return Promise.race([resolveCountry(point), timeout(NAME_LOOKUP_TIMEOUT_MS)])
+}
+
+async function resolveCountry(
+  point: { lat: number; lng: number },
+): Promise<string | undefined> {
+  try {
+    const { Geocoder } = (await google.maps.importLibrary(
+      'geocoding',
+    )) as google.maps.GeocodingLibrary
+    const { results } = await new Geocoder().geocode({ location: point })
+    for (const result of results) {
+      const country = result.address_components.find((part) =>
+        part.types.includes('country'),
+      )?.short_name
+      // Exactly two letters, because that is what the schema accepts and a
+      // longer "country" here would fail the same way a missing one does.
+      if (country && country.length === 2) return country.toUpperCase()
+    }
+    return undefined
+  } catch (error) {
+    console.warn('Reverse geocoding a country failed', error)
+    return undefined
+  }
+}
+
 export async function reverseGeocodeName(
   point: { lat: number; lng: number },
 ): Promise<string | undefined> {

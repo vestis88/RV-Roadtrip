@@ -1106,3 +1106,95 @@ test.describe('a scan result that has been read', () => {
     )
   })
 })
+
+/**
+ * Reported 2026-08-31: *"Seems to not respond to any rebuilds… I can't enter
+ * any days either!"* — with a green "Day list rebuilt — 4 days from your 6
+ * kept stops" sitting directly above an amber "3 kept stops are not in them".
+ *
+ * Both were true. `planSkeleton` drops any stop whose country is not exactly
+ * two letters, because a day's overnight must carry one — and a stop pinned
+ * by hand never had a country written at all. So every traveler-placed pin
+ * was invisible to the packer for good: no day, a banner counting it
+ * forever, and a rebuild that could not possibly help.
+ */
+test.describe('a stop that was pinned without a country', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('is not offered a rebuild that cannot place it', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    // Exactly what AddCorridorStopForm used to write: a name, a position,
+    // the traveller's own words, and no country.
+    await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Ciclopista del Garda',
+        lat: 45.88,
+        lng: 10.84,
+        status: 'locked',
+        origin: 'traveler',
+        why: 'Cool bicycle path!',
+        linkedDayIds: [],
+      })
+
+    await page.getByTestId('nav-map').click()
+    const banner = page.getByTestId('days-out-of-step-banner')
+    await expect(banner).toBeVisible({ timeout: 10_000 })
+
+    // It says why, instead of offering a button that provably will not work.
+    // (Maps is unreachable in this sandbox, so the lookup that repairs this
+    // never lands — which is exactly the state the message describes.)
+    await expect(page.getByTestId('undatable-stops')).toContainText(
+      'country looked up',
+    )
+    await expect(page.getByTestId('days-out-of-step-rebuild')).toHaveCount(0)
+  })
+
+  // And once the country is there, it is an ordinary stop: packed, dated,
+  // and the banner has nothing left to report.
+  test('joins the day list as soon as it has one', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    await markDaysUnresearched(adminDb, tripId)
+    const stopRef = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Ciclopista del Garda',
+        lat: 45.88,
+        lng: 10.84,
+        status: 'locked',
+        origin: 'traveler',
+        linkedDayIds: [],
+      })
+
+    await page.getByTestId('nav-map').click()
+    await expect(page.getByTestId('undatable-stops')).toBeVisible({
+      timeout: 10_000,
+    })
+
+    // What the geocode would have written.
+    await stopRef.update({ country: 'IT' })
+
+    await expect(page.getByTestId('day-strip')).toContainText('Ciclopista', {
+      timeout: 20_000,
+    })
+    await expect(page.getByTestId('days-out-of-step-banner')).toHaveCount(0)
+  })
+})

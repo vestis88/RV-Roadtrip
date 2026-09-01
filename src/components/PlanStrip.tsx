@@ -58,6 +58,7 @@ export function PlanStrip({
   onChangeRequestOpenChange,
   rebuildOpen,
   rebuildCost,
+  undatableStops,
   onRebuildOpenChange,
 }: {
   tripId: string
@@ -108,6 +109,17 @@ export function PlanStrip({
    * this panel in the first place.
    */
   rebuildCost: number | null
+  /**
+   * Kept stops that cannot be given a day at all, because their country is
+   * missing or malformed — see planSkeleton and stopCountries.
+   *
+   * Reported 2026-08-31 as a rebuild that "seems to not respond": these were
+   * dropped in silence, so the board counted them as stops with no day and
+   * offered a button that could never give them one. It is being repaired
+   * automatically; the banner just has to stop promising otherwise while it
+   * is.
+   */
+  undatableStops: number
   onRebuildOpenChange: (open: boolean) => void
 }) {
   const navigate = useNavigate()
@@ -466,14 +478,25 @@ export function PlanStrip({
             These days are from an earlier plan — {daysMissingKeptStops} kept
             stop{daysMissingKeptStops === 1 ? ' is' : 's are'} not in them.
           </p>
-          <button
-            type="button"
-            data-testid="days-out-of-step-rebuild"
-            className="btn btn-sm btn-outline mt-1.5"
-            onClick={() => onRebuildOpenChange(true)}
-          >
-            Rebuild day list
-          </button>
+          {/* A rebuild cannot place a stop with no country, so offering one
+            * would be promising something that provably will not happen.
+            * The lookup runs on its own — see stopCountries. */}
+          {undatableStops > 0 ? (
+            <p className="mt-1" data-testid="undatable-stops">
+              {undatableStops === 1
+                ? 'One of them is still having its country looked up — it can be given a day once that lands.'
+                : `${undatableStops} of them are still having their country looked up — they can be given days once that lands.`}
+            </p>
+          ) : (
+            <button
+              type="button"
+              data-testid="days-out-of-step-rebuild"
+              className="btn btn-sm btn-outline mt-1.5"
+              onClick={() => onRebuildOpenChange(true)}
+            >
+              Rebuild day list
+            </button>
+          )}
         </div>
       )}
 
