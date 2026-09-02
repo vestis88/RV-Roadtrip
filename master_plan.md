@@ -3658,6 +3658,40 @@ and falls back to the rebuild only where it genuinely does not.
 Verification: lint 0, build 0, frontend **456**, functions **664**, e2e
 **171** — all green.
 
+### 2026-09-01 — stop depending on the network for the field that decides everything
+
+*"Clicking the first of today yields the same error. The second today gets me
+into the day… Also, the banners. Why are they there?"*
+
+**Two attempts at the same repair had both leaned on a network call**, and the
+banner was still on screen an hour later. First the effect ran before
+`google.maps` existed — caught, resolved having written nothing, ref stuck.
+Then gating it on `useMapsLibrary('geocoding')` fixed that race and
+introduced a worse one: a phone that never gets the geocoder never repairs
+anything at all, and a phone at an Italian campsite is exactly that phone.
+
+The mistake was the dependency, not the timing. **The stops around a pin
+already answer the question.** A hand-dropped pin sits among the stops it was
+dropped between, and on a road trip those are in the same country as it. So
+the geocode is tried where it is available and `countryFromNeighbours` answers
+where it is not — nearest stop with a known country, within 50 km, which is
+close enough to be confident and far enough to span the gap between two stops
+on one leg. A wrong flag on an overnight is a small cost; a stop that can
+never be given a day is not.
+
+**And the chips explain both banners.** The strip reads the board while any
+kept stop lacks a day, and a chip with no day behind it opened the rebuild.
+Tapping the first "Today" therefore fired a rebuild that could not place that
+stop — it had no country — wrote a green *"Day list rebuilt"* on the way past,
+and returned the traveler to the identical screen. That is the whole of "seems
+to reload something, then goes back to same", and the whole of why two banners
+were stacked at the top of the map. Such a chip is now inert and visibly so.
+A control that cannot do the thing it appears to do is worse than one that is
+plainly not ready.
+
+Verification: lint 0, build 0, frontend **460**, functions **664**, e2e
+**172** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

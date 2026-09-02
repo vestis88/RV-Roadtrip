@@ -391,14 +391,25 @@ export function PlanStrip({
                 key={`stop:${chip.stop.id}`}
                 type="button"
                 data-testid={`day-strip-stop-${chip.stop.id}`}
-                onClick={() =>
-                  dayId ? navigate(`/map/day/${dayId}`) : onRebuildOpenChange(true)
+                // A chip with no day behind it does NOTHING rather than
+                // opening a rebuild. Reported 2026-09-01: tapping the first
+                // "Today" "seems to reload something, then goes back to
+                // same" — it fired a rebuild that could not place that stop
+                // (its country is missing, see the banner below), left a
+                // green "Day list rebuilt" behind, and returned the
+                // traveler to the identical screen. A control that cannot
+                // do the thing it appears to do is worse than one that is
+                // visibly not ready.
+                disabled={!dayId}
+                title={
+                  dayId ? undefined : 'No day for this stop yet — see the note below.'
                 }
+                onClick={() => dayId && navigate(`/map/day/${dayId}`)}
                 className={`chip shrink-0 px-3 py-1 text-xs whitespace-nowrap ${
                   chip.label === 'Today'
                     ? 'chip-accent'
                     : 'chip-neutral hover:bg-neutral-200 dark:hover:bg-neutral-700'
-                }`}
+                } ${dayId ? '' : 'cursor-default opacity-50'}`}
               >
                 <span className="font-medium">{chip.label}</span>
                 <span className="ml-1.5 text-neutral-500 dark:text-neutral-400">

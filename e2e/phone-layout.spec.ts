@@ -1254,4 +1254,46 @@ test.describe('a day strip reading the board', () => {
     await expect(page).toHaveURL(new RegExp(`/map/day/${dayId}$`))
     await expect(page.getByTestId('day-view-date')).toBeVisible()
   })
+
+  /**
+   * And a chip with no day does nothing at all rather than firing a rebuild
+   * that cannot place its stop. Reported 2026-09-01: tapping the first
+   * "Today" "seems to reload something, then goes back to same" — a rebuild
+   * ran, left a green "Day list rebuilt" behind, and changed nothing.
+   */
+  test('leaves a stop with no day inert rather than misleading', async ({
+    page,
+  }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const undatable = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .add({
+        name: 'Ciclopista del Garda',
+        lat: 45.88,
+        lng: 10.84,
+        status: 'locked',
+        origin: 'traveler',
+        linkedDayIds: [],
+      })
+
+    await page.getByTestId('nav-map').click()
+    const chip = page.getByTestId(`day-strip-stop-${undatable.id}`)
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toBeDisabled()
+
+    // force, because a disabled control is exactly what a fingertip meets.
+    await chip.click({ force: true })
+    await expect(page.getByTestId('rebuild-days-panel')).toHaveCount(0)
+    await expect(page.getByTestId('rebuild-days-result')).toHaveCount(0)
+    await expect(page).not.toHaveURL(/\/map\/day\//)
+  })
 })
