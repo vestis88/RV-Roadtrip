@@ -3775,6 +3775,48 @@ the finds outlived the tab:
 Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
 **174** — all green.
 
+### 2026-09-01 — what the packer actually does, measured
+
+*"I have 3 four hour activities that should go into today. 1 is dropped and
+one is put at day 6, after many things that are a lot further away."*
+
+Probed rather than reasoned about. Three four-hour stops a few minutes apart,
+`maxDriveHoursPerDay` 5:
+
+    day 1 — stops a, b · drive 25 min · stay 480 min
+    day 2 — stop c    · drive 15 min · stay 240 min
+
+So two facts, both verifiable:
+
+- **The packer never drops a stop.** Every stop it is handed lands on a day.
+  A kept stop with no day was therefore dropped BEFORE the packing — the only
+  filter there is `usable`, which requires a two-letter country. That is the
+  same fault as this morning's, and it is still the only way a stop can
+  vanish.
+- **The packer never pushes a stop to "day 6".** It fills days in the order
+  it is given, so a spill lands on the NEXT day. A nearby stop appearing on
+  day 6 is a statement about the route ORDER, which comes from Google's
+  optimisation across the whole remaining trip — including the run home — and
+  not from the day assignment at all.
+
+And the third fact is the one nobody wants: `USABLE_HOURS_PER_DAY` is 10, so
+**three four-hour activities do not fit in one day** by 2 hours. The split is
+the app telling the truth about a plan, not losing anything.
+
+The change made here is diagnostic, because every report about this has had
+to begin with a guess: the out-of-step banner now NAMES the kept stops that
+have no day rather than counting them. "1 is dropped" was unanswerable from
+that screen; "Ciclopista del Garda is not in them" is not.
+
+**Left open deliberately**, because the two readings lead to different work
+and it is the traveler's call: whether the durations should give (three
+four-hour sights in one day is 12 hours), or whether "what am I doing today"
+should be driven by proximity to where the van is now rather than by a
+whole-trip driving optimisation.
+
+Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
+**174** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

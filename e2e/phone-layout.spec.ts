@@ -1156,6 +1156,11 @@ test.describe('a stop that was pinned without a country', () => {
     await expect(page.getByTestId('undatable-stops')).toContainText(
       'country looked up',
     )
+    // Named, not counted — reported 2026-09-01 as "1 is dropped", which was
+    // not answerable from this screen.
+    await expect(page.getByTestId('days-missing-names')).toContainText(
+      'Ciclopista del Garda',
+    )
     await expect(page.getByTestId('days-out-of-step-rebuild')).toHaveCount(0)
   })
 

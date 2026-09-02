@@ -502,7 +502,20 @@ export function PlanStrip({
         >
           <p>
             These days are from an earlier plan — {daysMissingKeptStops} kept
-            stop{daysMissingKeptStops === 1 ? ' is' : 's are'} not in them.
+            stop{daysMissingKeptStops === 1 ? ' is' : 's are'} not in them:{' '}
+            {/* Named, not counted. Reported 2026-09-01 as "1 is dropped" —
+              * which stop, and why, was not answerable from this screen, so
+              * every report about it had to start with a guess. */}
+            <span data-testid="days-missing-names">
+              {stopsAddableToRoute(corridorStops)
+                .slice(0, 4)
+                .map((stop) => stop.name)
+                .join(', ')}
+              {daysMissingKeptStops > 4
+                ? ` and ${daysMissingKeptStops - 4} more`
+                : ''}
+            </span>
+            .
           </p>
           {/* A rebuild cannot place a stop with no country, so offering one
             * would be promising something that provably will not happen.
