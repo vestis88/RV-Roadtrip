@@ -1198,3 +1198,60 @@ test.describe('a stop that was pinned without a country', () => {
     await expect(page.getByTestId('days-out-of-step-banner')).toHaveCount(0)
   })
 })
+
+/**
+ * Reported 2026-09-01: *"Still can't open days. When I click it seems to
+ * reload something, then goes back to same."*
+ *
+ * The strip reads the board rather than the stored days whenever ANY kept
+ * stop is missing one, and every chip on it opened the rebuild — written
+ * when a derived strip meant no stop had a day at all. Once some stops could
+ * be packed and others could not, that sent a traveler whose day existed
+ * into a rebuild that changed nothing it could change and returned them to
+ * the same screen.
+ */
+test.describe('a day strip reading the board', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('opens the day of a stop that has one', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const tripRef = adminDb.collection('trips').doc(tripId)
+    const dayId = await getDayIdByDate(tripId, '2026-07-10')
+
+    // One kept stop WITH a day...
+    const dated = await tripRef.collection('corridorStops').add({
+      name: 'Lillehammer Camping',
+      lat: 61.1153,
+      lng: 10.4662,
+      country: 'NO',
+      status: 'locked',
+      linkedDayIds: [dayId],
+    })
+    // ...and one that can never be packed, which is what keeps the strip
+    // reading the board rather than the days.
+    await tripRef.collection('corridorStops').add({
+      name: 'Ciclopista del Garda',
+      lat: 45.88,
+      lng: 10.84,
+      status: 'locked',
+      origin: 'traveler',
+      linkedDayIds: [],
+    })
+
+    await page.getByTestId('nav-map').click()
+    const chip = page.getByTestId(`day-strip-stop-${dated.id}`)
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+
+    await chip.click()
+    // The day itself, not a rebuild panel and not the same screen again.
+    await expect(page).toHaveURL(new RegExp(`/map/day/${dayId}$`))
+    await expect(page.getByTestId('day-view-date')).toBeVisible()
+  })
+})

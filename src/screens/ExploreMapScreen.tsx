@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AdvancedMarker,
   Map as GoogleMap,
+  useMapsLibrary,
   type MapCameraChangedEvent,
 } from '@vis.gl/react-google-maps'
 import {
@@ -588,6 +589,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
   const rebuildCost = rebuildOutlook.cost
 
+  /** Present once the Maps geocoder is loaded — see the effect below. */
+  const geocoding = useMapsLibrary('geocoding')
+
   /**
    * Give a hand-placed pin the country it was saved without.
    *
@@ -598,20 +602,32 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
    */
   const countriesFilled = useRef<string | null>(null)
   useEffect(() => {
+    // Waits for the geocoder to actually EXIST.
+    //
+    // The first version of this fired on mount and asked `google.maps` for a
+    // library that had not loaded yet. That throws, the throw is caught, and
+    // `fillMissingCountries` then RESOLVES having written nothing — so the
+    // ref below stayed set and the repair never ran again for the life of
+    // the page. Reported 2026-09-01 as "3 of them are still having their
+    // country looked up" sitting there indefinitely: the lookup had not
+    // failed, it had never been attempted.
+    if (!geocoding) return
     const needing = stopsNeedingCountry(corridorStops)
     if (needing.length === 0) return
     const signature = needing.map((stop) => stop.id).join('|')
     if (countriesFilled.current === signature) return
     countriesFilled.current = signature
-    void fillMissingCountries(tripId, corridorStops).catch(
-      (error: unknown) => {
+    void fillMissingCountries(tripId, corridorStops)
+      .then((written) => {
+        // Nothing resolved is not the same as nothing to do: let the next
+        // change try again rather than giving up on the trip.
+        if (written === 0) countriesFilled.current = null
+      })
+      .catch((error: unknown) => {
         console.error('Filling in missing stop countries failed', error)
-        // Retried on the next change rather than leaving the stops
-        // permanently undatable.
         countriesFilled.current = null
-      },
-    )
-  }, [tripId, corridorStops])
+      })
+  }, [tripId, corridorStops, geocoding])
 
   const skeletonWritten = useRef<string | null>(null)
   useEffect(() => {

@@ -3624,6 +3624,40 @@ Verification: lint 0, build 0, frontend **456**, functions **664**, e2e
 **170** — all green (`corridor.spec.ts:142` flaked once in a full run and
 passes in isolation and on re-run).
 
+### 2026-09-01 — a repair that was never attempted, and a chip that led nowhere
+
+*"Still can't open days. When I click it seems to reload something, then goes
+back to same."* — with *"3 of them are still having their country looked up"*
+still on screen hours after it shipped.
+
+**The lookup had not failed. It had never been attempted.** The effect that
+repairs a missing country fired on mount and asked `google.maps` for the
+geocoding library before the Maps script had loaded. That throws; the throw
+is caught inside `reverseGeocodeCountry`; and `fillMissingCountries` then
+*resolves*, having written nothing. The guard ref — which only cleared on a
+rejected promise — stayed set, so the repair never ran again for the life of
+the page. A silent success is a worse failure mode than an error, and this
+one was invisible from both ends: no console error, and a banner truthfully
+reporting a state nothing was working to leave.
+
+Two fixes, and the first is the general lesson: **wait for the thing you
+depend on to exist** rather than trying and hoping. `useMapsLibrary('geocoding')`
+is exactly that signal, and it re-runs the effect when the library arrives.
+Second, a pass that resolves with nothing written now clears the ref, so
+"nothing resolved" is retried rather than treated as "nothing to do".
+
+**And the day chips led nowhere.** The strip reads the board rather than the
+stored days whenever ANY kept stop is missing one, and every chip on it
+opened the rebuild — written when a derived strip meant no stop had a day at
+all. Once some stops could be packed and others could not, that sent a
+traveler whose day existed into a rebuild that changed nothing it could
+change and returned them to the same screen: precisely "reload something,
+then goes back to same". A chip now opens its stop's day where it has one,
+and falls back to the rebuild only where it genuinely does not.
+
+Verification: lint 0, build 0, frontend **456**, functions **664**, e2e
+**171** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

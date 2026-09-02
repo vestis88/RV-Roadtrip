@@ -371,15 +371,29 @@ export function PlanStrip({
           </button>
         )}
         {daysMissingKeptStops > 0
-          ? // The stored days do not describe these stops, so the strip
-            // reads the board instead — see derivedDayStrip. Tapping one
-            // offers the rebuild, because there is no day behind it to open.
-            derivedDayStrip(routeStops, arrivals, today).map((chip) => (
+          ? // The stored days do not describe ALL these stops, so the strip
+            // reads the board instead — see derivedDayStrip.
+            //
+            // Tapping one opens its day where it HAS one. It used to open
+            // the rebuild unconditionally, on the assumption that a derived
+            // strip meant no stop had a day — which stopped being true once
+            // some stops could be packed and others could not. Reported
+            // 2026-09-01: "Still can't open days. When I click it seems to
+            // reload something, then goes back to same" — the rebuild ran,
+            // changed nothing it could change, and returned you to the same
+            // screen.
+            derivedDayStrip(routeStops, arrivals, today).map((chip) => {
+              const dayId = (chip.stop.linkedDayIds ?? []).find((id) =>
+                days.some((day) => day.id === id),
+              )
+              return (
               <button
                 key={`stop:${chip.stop.id}`}
                 type="button"
                 data-testid={`day-strip-stop-${chip.stop.id}`}
-                onClick={() => onRebuildOpenChange(true)}
+                onClick={() =>
+                  dayId ? navigate(`/map/day/${dayId}`) : onRebuildOpenChange(true)
+                }
                 className={`chip shrink-0 px-3 py-1 text-xs whitespace-nowrap ${
                   chip.label === 'Today'
                     ? 'chip-accent'
@@ -391,7 +405,8 @@ export function PlanStrip({
                   {chip.stop.name}
                 </span>
               </button>
-            ))
+              )
+            })
           : (showPastDays ? [...strip.past, ...strip.upcoming] : strip.upcoming).map(
           (chip) => (
             <button
