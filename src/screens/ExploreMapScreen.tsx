@@ -63,7 +63,8 @@ import { AddCorridorStopForm } from '../components/AddCorridorStopForm'
 import { MapSearchPanel, type SearchAnchor } from '../components/MapSearchPanel'
 import { addFindToTrip } from '../lib/addFind'
 import { SearchFindCard } from '../components/SearchFindCard'
-import type { LiveFind, LiveResult } from '../lib/liveSearch'
+import { dropFindFromScratch, type LiveFind, type LiveResult } from '../lib/liveSearch'
+import { useSearchScratch } from '../hooks/useSearchScratch'
 import { SearchAreaCircle } from '../components/SearchAreaCircle'
 import { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
@@ -171,10 +172,33 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [radiusOverrideKm, setRadiusOverrideKm] = useState<number | null>(null)
   const [searchAnchor, setSearchAnchor] = useState<SearchAnchor>('map')
   /** Ephemeral finds — see MapSearchPanel on why these are never written. */
-  const [searchResult, setSearchResult] = useState<LiveResult | null>(null)
-  // The finds themselves, which is all the map and the list want. The engine
-  // that produced them travels alongside — see searchSourceNote.
-  const finds = searchResult?.finds ?? null
+  /**
+   * The last search, read off the TRIP rather than held here.
+   *
+   * Requested 2026-09-01: "Make sure both rescan on map and day plans are
+   * saved." Held in state, the finds died with the tab — and a search still
+   * running had nothing to report on the way back. See useSearchScratch.
+   */
+  const { search } = useSearchScratch(tripId)
+  /**
+   * Only a FINISHED search is a result.
+   *
+   * A search that broke must never read as a search that found nothing —
+   * the rule from 2026-08-24, and the saved scratch document makes it easy
+   * to break, since a failed run leaves a real document with an empty
+   * `finds`. Its failure is reported as a failure instead; see the panel.
+   */
+  const searchResult: LiveResult | null =
+    search?.status === 'done'
+      ? {
+          finds: search.finds,
+          ...(search.source ? { source: search.source } : {}),
+          ...(search.claudeFailure
+            ? { claudeFailure: search.claudeFailure }
+            : {}),
+        }
+      : null
+  const finds = search?.status === 'done' ? search.finds : null
   const [addedFindNames, setAddedFindNames] = useState<Set<string>>(new Set())
   /** Which find's pin was tapped — the same idea as selectedId, for finds. */
   const [selectedFind, setSelectedFind] = useState<string | null>(null)
@@ -964,16 +988,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
     setAddedFindNames((held) => new Set(held).add(find.name))
     try {
       await addFindToTrip(tripId, find)
-      // The find leaves the scratch list; which engine produced it does not
-      // change by one of them being kept.
-      setSearchResult((current) =>
-        current
-          ? {
-              ...current,
-              finds: current.finds.filter((f) => f.name !== find.name),
-            }
-          : current,
-      )
+      // The find leaves the scratch list, which now lives on the trip — so
+      // it is gone on every device, and stays gone across a restart.
+      await dropFindFromScratch(tripId, find.name)
       if (selectedFind === find.name) setSelectedFind(null)
     } catch (error) {
       console.error('Adding a find failed', error)
@@ -1594,7 +1611,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               onArmedChange={setAimingSearch}
               scanSeen={!!lastScanAt && lastScanAt === seenScanAt}
               result={searchResult}
-              onResult={setSearchResult}
+              searching={search?.status === 'searching'}
+              savedError={search?.status === 'failed' ? search.error : undefined}
               listFilter={listFilter}
               // Straight to the bucket a fresh scan result lands in, rather
               // than to 'all' — the traveler is looking for the seven new
@@ -1614,6 +1632,35 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           className="min-h-0 flex-1 overflow-y-auto p-3 lg:landscape:w-96 lg:landscape:flex-none lg:landscape:border-l lg:landscape:border-neutral-200 dark:lg:landscape:border-neutral-800"
           data-testid="explore-candidate-list"
         >
+          <div className="space-y-2">
+            {/* Search results, ABOVE the empty-state branch rather than
+              * inside the list's else.
+              *
+              * They used to sit inside it, so a trip with no curated stops
+              * — a fresh one, which is exactly when someone searches —
+              * rendered the "nothing here yet" paragraph and drew the finds
+              * nowhere at all. Found 2026-09-01 by a test written for the
+              * saved search; the results were on the map and in the trip,
+              * and the one place a traveler would look for them was the one
+              * place they were not. */}
+            {(finds ?? []).map((find) => (
+              <SearchFindCard
+                key={`find:${find.name}`}
+                find={find}
+                added={addedFindNames.has(find.name)}
+                highlighted={selectedFind === find.name}
+                innerRef={(element) => {
+                  findRefs.current[find.name] = element
+                }}
+                onSelect={() =>
+                  setSelectedFind((current) =>
+                    current === find.name ? null : find.name,
+                  )
+                }
+                onAdd={() => void saveFind(find)}
+              />
+            ))}
+          </div>
           {candidates.length === 0 ? (
             <p
               className="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400"
@@ -1670,26 +1717,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   No stops match that filter.
                 </p>
               )}
-              {/* Search results first, and in the list rather than in the
-                * map overlay — see SearchFindCard. They sit above the stops
-                * because they are the answer to the question just asked. */}
-              {(finds ?? []).map((find) => (
-                <SearchFindCard
-                  key={`find:${find.name}`}
-                  find={find}
-                  added={addedFindNames.has(find.name)}
-                  highlighted={selectedFind === find.name}
-                  innerRef={(element) => {
-                    findRefs.current[find.name] = element
-                  }}
-                  onSelect={() =>
-                    setSelectedFind((current) =>
-                      current === find.name ? null : find.name,
-                    )
-                  }
-                  onAdd={() => void saveFind(find)}
-                />
-              ))}
               {listedCandidates.map((stop) => (
                 <div key={stop.id}>
                   {legIntoStop.has(stop.id) && (

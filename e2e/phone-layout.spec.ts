@@ -1297,3 +1297,84 @@ test.describe('a day strip reading the board', () => {
     await expect(page).not.toHaveURL(/\/map\/day\//)
   })
 })
+
+/**
+ * Requested 2026-09-01: *"Make sure both rescan on map and day plans are
+ * saved."*
+ *
+ * Two of the three already were: "Rescan this area" writes its finds into
+ * `corridorStops`, and a day-section fill commits its places before the
+ * callable returns. The map's preset and free-text search was the odd one
+ * out — it returned its finds to the caller and wrote nothing, so locking
+ * the phone during a ten-second Claude turn threw the answer away.
+ */
+test.describe('a search that survives the app closing', () => {
+  test.use({ viewport: { width: 1180, height: 820 } })
+
+  test('is waiting on the map when you come back', async ({ page }) => {
+    const { getFirestore } = await import('firebase-admin/firestore')
+    const { getApps, initializeApp } = await import('firebase-admin/app')
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+    if (getApps().length === 0)
+      initializeApp({ projectId: 'demo-rv-trip-planner' })
+    const adminDb = getFirestore()
+
+    const tripId = await createTripWithPlan(page)
+    const scratchRef = adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('scratch')
+      .doc('lastSearch')
+
+    // What the callable writes the moment it starts, before it thinks.
+    await scratchRef.set({
+      query: 'a good dinner place nearby',
+      status: 'searching',
+      startedAt: new Date().toISOString(),
+      center: { lat: 45.88, lng: 10.84 },
+      radiusKm: 25,
+      finds: [],
+    })
+
+    await page.getByTestId('nav-map').click()
+    await page.getByTestId('open-map-search').click()
+    // A cold load reports the run someone else's connection started.
+    await expect(page.getByTestId('live-searching')).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // And its answer, written by the server rather than returned to a tab
+    // that may be long gone.
+    await scratchRef.set(
+      {
+        status: 'done',
+        finishedAt: new Date().toISOString(),
+        source: 'claude',
+        finds: [
+          {
+            name: 'Osteria Le Servite',
+            lat: 45.87,
+            lng: 10.85,
+            country: 'IT',
+            why: 'A quiet garden terrace above the lake.',
+          },
+        ],
+      },
+      { merge: true },
+    )
+
+    await expect(page.getByTestId('live-ephemeral-note')).toContainText('1 on the map')
+    await expect(
+      page.getByTestId('search-find-Osteria Le Servite'),
+    ).toBeVisible({ timeout: 15_000 })
+
+    // Still a scratch list: it has not become one of the trip's stops.
+    const stops = await adminDb
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+      .where('name', '==', 'Osteria Le Servite')
+      .get()
+    expect(stops.empty).toBe(true)
+  })
+})

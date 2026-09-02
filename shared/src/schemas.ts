@@ -447,6 +447,57 @@ export const driveLegSchema = z.object({
   estimated: z.boolean().optional(),
 })
 
+/**
+ * The last search run from the map, kept where it survives the app closing.
+ *
+ * Requested 2026-09-01: *"Make sure both rescan on map and day plans are
+ * saved."* Two of the three already were — "Rescan this area" writes its
+ * finds straight into `corridorStops`, and a day-section fill commits its
+ * places before the callable returns, so both land whether or not the phone
+ * is still watching. The map's preset and free-text search did not: it
+ * returned its finds to the caller and wrote nothing, so a traveler who
+ * asked for dinner and locked their phone came back to an empty panel.
+ *
+ * Written to `trips/{tripId}/scratch/lastSearch`, deliberately NOT to
+ * `corridorStops`. The rule from 2026-08-23 stands — *"the results are a
+ * scratch list for right now; nothing is saved unless you tap Add"* — and it
+ * is a rule about the traveler's STOPS, not about forgetting the answer to
+ * the question they just paid for. Someone looking for lunch three times a
+ * day still fills their corridor with nothing.
+ *
+ * It also carries the run's own status, for the same reason
+ * `planMeta.rescanLastError` and `tripDay.sectionStatus` do: a request that
+ * outlives the connection that started it has to leave its account of itself
+ * somewhere the trip can be read back.
+ */
+export const searchScratchSchema = z.object({
+  query: z.string(),
+  status: z.enum(['searching', 'done', 'failed']),
+  startedAt: isoDateTime,
+  finishedAt: isoDateTime.optional(),
+  center: latLngSchema,
+  radiusKm: z.number().positive(),
+  /** Which engine answered — see functions/src/querySearch.ts. */
+  source: z.enum(['claude', 'places']).optional(),
+  claudeFailure: z
+    .enum(['credit', 'auth', 'rate-limit', 'timeout', 'other'])
+    .optional(),
+  error: z.string().optional(),
+  finds: z
+    .array(
+      z.object({
+        name: z.string(),
+        lat: z.number(),
+        lng: z.number(),
+        country: z.string(),
+        why: z.string(),
+        googleMapsUrl: z.string().url().optional(),
+        photoUrl: z.string().url().optional(),
+      }),
+    )
+    .default([]),
+})
+
 export const tripDaySchema = z.object({
   index: z.number().int().nonnegative(),
   date: isoDate,
@@ -1143,6 +1194,7 @@ export type CountryGuideSection = z.infer<typeof countryGuideSectionSchema>
 /** One fillable part of a day — see tripDay.filledSections. */
 export type DaySection = NonNullable<TripDay['filledSections']>[number]
 
+export type SearchScratch = z.infer<typeof searchScratchSchema>
 export type LogEntry = z.infer<typeof logEntrySchema>
 export type SharedTripPlace = z.infer<typeof sharedTripPlaceSchema>
 export type SharedTripDay = z.infer<typeof sharedTripDaySchema>

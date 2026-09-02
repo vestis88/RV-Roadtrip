@@ -56,6 +56,13 @@ service cloud.firestore {
       match /log/{entryId} {
         allow read, write: if hasAccess() && isMember(tripId);
       }
+
+      // The map's last search, kept so it survives the app closing — see
+      // searchScratchSchema. Written by the callable and cleared by the
+      // client as finds are added, so members need both.
+      match /scratch/{docId} {
+        allow read, write: if hasAccess() && isMember(tripId);
+      }
     }
 
     match /shareCodes/{code} {

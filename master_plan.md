@@ -3732,6 +3732,49 @@ Three details worth keeping:
 Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
 **173** — all green.
 
+### 2026-09-01 — the third path finally saves its work too
+
+*"Make sure both rescan on map and day plans are saved."*
+
+Audited rather than assumed, and two of the three already were:
+
+- **"Rescan this area"** writes its finds straight into `corridorStops`
+  server-side, and reports itself through `planMeta.rescanLast*`.
+- **A day-section fill** commits its places before the callable returns, and
+  since this morning records `sectionStatus` / `sectionLastError` as well.
+
+**The map's preset and free-text search was the odd one out.** It returned
+its finds to the caller and wrote nothing at all, so locking the phone during
+a ten-second Claude turn threw the answer away, and a search still running
+had nothing to report on the way back. It now writes to
+`trips/{tripId}/scratch/lastSearch`: the query, the status, the finds, which
+engine answered, and why it failed when it did.
+
+**Deliberately not to `corridorStops`.** The rule from 2026-08-23 stands —
+*"the results are a scratch list for right now; nothing is saved unless you
+tap Add"* — because it is a rule about the traveler's STOPS, not about
+forgetting the answer to a question they just paid for. Adding a find removes
+it from the scratch list, on every device.
+
+**Two real bugs fell out of writing the test for it**, both invisible until
+the finds outlived the tab:
+
+1. **Search results rendered nowhere when the stop list was empty.** The
+   whole sidebar body sat inside `candidates.length === 0 ? empty : list`,
+   and the finds were in the `else`. So a fresh trip — exactly when someone
+   searches — drew the "nothing here yet" paragraph and put the results
+   nowhere. They were on the map and in the trip, and the one place a
+   traveler would look was the one place they were not.
+2. **A failed search read as a search that found nothing.** A failure now
+   leaves a real document with an empty `finds`, which the panel happily
+   summarised as "Nothing found in that circle" — the exact thing
+   `querySearch` was corrected for on 2026-08-24, re-created from the other
+   end. Only a `done` search is a result; a `failed` one reports its reason,
+   which now also survives the app closing.
+
+Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
+**174** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

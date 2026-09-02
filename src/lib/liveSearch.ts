@@ -1,4 +1,6 @@
 import { httpsCallable } from 'firebase/functions'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { db } from './firebase'
 import type { LatLng } from '@rv/shared'
 import { functions } from './firebase'
 import type { ClaudeFailureKind, SearchSource } from './searchSourceNote'
@@ -75,6 +77,24 @@ export async function searchAroundUs(
     ...(data.source ? { source: data.source } : {}),
     ...(data.claudeFailure ? { claudeFailure: data.claudeFailure } : {}),
   }
+}
+
+/**
+ * Removes a find from the saved scratch list.
+ *
+ * Called when a find is added to the trip: it has stopped being a
+ * suggestion and become a stop, and leaving it in both places would offer
+ * the traveler the chance to add it twice.
+ */
+export async function dropFindFromScratch(
+  tripId: string,
+  name: string,
+): Promise<void> {
+  const ref = doc(db, 'trips', tripId, 'scratch', 'lastSearch')
+  const snap = await getDoc(ref)
+  if (!snap.exists()) return
+  const finds = (snap.data() as { finds?: { name: string }[] }).finds ?? []
+  await updateDoc(ref, { finds: finds.filter((find) => find.name !== name) })
 }
 
 /**

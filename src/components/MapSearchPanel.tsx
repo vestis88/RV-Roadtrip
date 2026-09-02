@@ -58,8 +58,9 @@ export function MapSearchPanel({
   onRadiusOverrideChange,
   armed,
   onArmedChange,
-  onResult,
   result,
+  searching,
+  savedError,
   listFilter,
   onShowNewStops,
   scanSeen,
@@ -77,9 +78,20 @@ export function MapSearchPanel({
   onRadiusOverrideChange: (km: number | null) => void
   armed: boolean
   onArmedChange: (armed: boolean) => void
-  /** Ephemeral finds, lifted so the map can draw them. */
-  onResult: (result: LiveResult | null) => void
+  /**
+   * The last search, read off the trip — see useSearchScratch. Not lifted
+   * component state any more: the finds have to survive the app closing
+   * (2026-09-01, "make sure both rescan on map and day plans are saved").
+   */
   result: LiveResult | null
+  /** A search the server is still working on, from the same document. */
+  searching: boolean
+  /**
+   * Why the last search failed, from the trip rather than from this
+   * screen's state — so the reason survives the app closing, the same as
+   * everything else a request leaves behind (2026-09-01).
+   */
+  savedError?: string
   /** Passed straight to the scan — see RescanCorridorButton.listFilter. */
   listFilter: CandidateFilter
   onShowNewStops: () => void
@@ -105,11 +117,12 @@ export function MapSearchPanel({
   async function runNearby(id: string, query: string) {
     setBusy(id)
     setError(null)
-    onResult(null)
     try {
-      onResult(
-        await searchAroundUs(tripId, searchCentre, query, area.radiusKm),
-      )
+      // The result is deliberately ignored: the callable writes it to the
+      // trip and the panel reads it back from there, so the answer is the
+      // same whether this promise resolved or the phone was locked halfway
+      // through — the shape RescanCorridorButton already uses.
+      await searchAroundUs(tripId, searchCentre, query, area.radiusKm)
     } catch (err) {
       console.error('Nearby search failed', err)
       setError(describeExploreHighlightsError(err))
@@ -248,10 +261,12 @@ export function MapSearchPanel({
             type="button"
             data-testid={`live-preset-${preset.id}`}
             className="btn btn-sm btn-outline disabled:opacity-40"
-            disabled={busy !== null}
+            disabled={busy !== null || searching}
             onClick={() => void runNearby(preset.id, preset.query)}
           >
-            {busy === preset.id ? 'Looking…' : preset.label}
+            {busy === preset.id || (searching && busy === null)
+              ? 'Looking…'
+              : preset.label}
           </button>
         ))}
       </div>
@@ -280,9 +295,12 @@ export function MapSearchPanel({
         </button>
       </form>
 
-      {error && (
+      {/* This screen's own rejection when it has one, the trip's record of
+        * the failure otherwise — the latter is what survives a phone that
+        * was locked while the search ran. */}
+      {(error ?? savedError) && (
         <p data-testid="live-error" className="mt-1 text-red-600 dark:text-red-400">
-          {error}
+          {error ?? `That search failed: ${savedError}`}
         </p>
       )}
 
@@ -293,7 +311,18 @@ export function MapSearchPanel({
         * suits this trip, and this overlay is a few hundred pixels wide —
         * so it kept the controls and gave the results back to the column
         * that was built for exactly this shape of card. */}
-      {result && (
+      {/* A search the server is still working on, which outlives this
+        * screen — see useSearchScratch. */}
+      {searching && (
+        <p
+          data-testid="live-searching"
+          className="mt-2 text-xs text-neutral-500 dark:text-neutral-400"
+        >
+          Still looking — this keeps going if you leave.
+        </p>
+      )}
+
+      {result && !searching && (
         <p className="mt-2 text-neutral-500 dark:text-neutral-400" data-testid="live-finds">
           {result.finds.length === 0 ? (
             <span data-testid="live-empty">

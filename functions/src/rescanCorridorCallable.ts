@@ -286,21 +286,84 @@ export const searchNearby = onCall(
     }
     await requireTripMember(tripId, request.auth.uid)
 
-    const tripSnap = await getFirestore().collection('trips').doc(tripId).get()
+    const tripRef = getFirestore().collection('trips').doc(tripId)
+    const tripSnap = await tripRef.get()
     const trip = tripSnap.data() as Trip | undefined
     if (!trip) throw new HttpsError('not-found', 'Trip not found')
+
+    /**
+     * The scratch list, written where it survives the app closing.
+     *
+     * Requested 2026-09-01: "Make sure both rescan on map and day plans are
+     * saved." This one was the odd path out — it returned its finds to the
+     * caller and wrote nothing, so locking the phone during a ten-second
+     * Claude turn threw the answer away.
+     *
+     * NOT written to corridorStops: the 2026-08-23 rule that nothing enters
+     * the traveler's stops until they tap Add is about their stops, not
+     * about forgetting what they just asked for. See searchScratchSchema.
+     */
+    const scratchRef = tripRef.collection('scratch').doc('lastSearch')
+    await scratchRef.set({
+      query,
+      status: 'searching',
+      startedAt: new Date().toISOString(),
+      center,
+      radiusKm,
+      finds: [],
+    })
 
     // The traveler's own notes and interests steer this exactly as they
     // steer a rescan — "cozy over mainstream" means the same thing whether
     // it is asked three months out or from a lay-by.
-    const { finds, source, claudeFailure } = await findStopsForQuery({
-      query,
-      center,
-      radiusKm,
-      notesFreeText: trip.notes.freeText,
-      interests: trip.settings.interests,
-      tripId,
-    })
+    let finds
+    let source
+    let claudeFailure
+    try {
+      ;({ finds, source, claudeFailure } = await findStopsForQuery({
+        query,
+        center,
+        radiusKm,
+        notesFreeText: trip.notes.freeText,
+        interests: trip.settings.interests,
+        tripId,
+      }))
+    } catch (error) {
+      const cause = describeCause(error)
+      await scratchRef
+        .set(
+          {
+            status: 'failed',
+            error: cause,
+            finishedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        )
+        .catch((writeError: unknown) =>
+          console.warn('Recording the search failure failed', writeError),
+        )
+      throw new HttpsError('internal', `Could not search: ${cause}`)
+    }
+
+    const saved = finds.map((find) => ({
+      name: find.name,
+      lat: find.lat,
+      lng: find.lng,
+      country: find.country,
+      why: find.why,
+      ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
+      ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
+    }))
+    await scratchRef.set(
+      {
+        status: 'done',
+        finishedAt: new Date().toISOString(),
+        source,
+        ...(claudeFailure ? { claudeFailure } : {}),
+        finds: saved,
+      },
+      { merge: true },
+    )
 
     return {
       // Which engine actually answered, said out loud — see
@@ -308,15 +371,7 @@ export const searchNearby = onCall(
       // from the regression it looks like.
       source,
       ...(claudeFailure ? { claudeFailure } : {}),
-      finds: finds.map((find) => ({
-        name: find.name,
-        lat: find.lat,
-        lng: find.lng,
-        country: find.country,
-        why: find.why,
-        ...(find.googleMapsUrl ? { googleMapsUrl: find.googleMapsUrl } : {}),
-        ...(find.photoUrl ? { photoUrl: find.photoUrl } : {}),
-      })),
+      finds: saved,
     }
   },
 )
