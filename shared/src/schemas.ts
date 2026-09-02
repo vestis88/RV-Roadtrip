@@ -522,6 +522,37 @@ export const tripDaySchema = z.object({
   filledSections: z
     .array(z.enum(['activity', 'breakfast', 'lunch', 'dinner']))
     .optional(),
+  /**
+   * A section fill that is running, and the one that last failed.
+   *
+   * Reported 2026-09-01: *"Searched for dinner stops inside today. Closed
+   * app, expecting results when I came back. Still nothing. No status."*
+   *
+   * There was nothing to come back to. The fill wrote `filledSections` at
+   * the END and nothing at all before it, so a request in flight existed
+   * only as a promise held by one screen — and its failure existed only as
+   * a string in that screen's component state. Close the app and both are
+   * gone: no results, and no account of why.
+   *
+   * This is the same lesson `planMeta.rescanLastError` learned on 2026-08-16
+   * ("three rescan failures in a row were diagnosed by guesswork"), applied
+   * to the one path that never got it. A request that outlives the
+   * connection that started it has to leave its state where the trip can be
+   * read back, not where the tab can be closed.
+   */
+  sectionStatus: z
+    .object({
+      section: z.enum(['activity', 'breakfast', 'lunch', 'dinner']),
+      startedAt: isoDateTime,
+    })
+    .optional(),
+  sectionLastError: z
+    .object({
+      section: z.enum(['activity', 'breakfast', 'lunch', 'dinner']),
+      message: z.string(),
+      failedAt: isoDateTime,
+    })
+    .optional(),
 })
 
 // Persistent, always-editable route corridor (2026-07-29): one entry per

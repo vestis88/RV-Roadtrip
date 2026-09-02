@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import {
   createTripWithPlan,
   getDayIdByDate,
@@ -533,4 +533,52 @@ test('a day built around several places shows them side by side', async ({
   expect(second).not.toBeNull()
   expect(second!.x).toBeGreaterThan(first!.x)
   expect(Math.abs(second!.y - first!.y)).toBeLessThan(2)
+})
+
+/**
+ * Reported 2026-09-01: *"Searched for dinner stops inside today. Closed app,
+ * expecting results when I came back. Still nothing. No status."*
+ *
+ * There was nothing to come back to. The fill wrote its results at the end
+ * and nothing before, so a request in flight existed only as a promise held
+ * by one screen, and its failure only as a string in that screen's state.
+ * Both die with the tab.
+ */
+test('a section fill reports itself after the app is closed and reopened', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  const dayRef = adminDb.collection('trips').doc(tripId).collection('days').doc(dayId)
+  // An empty section is what offers the fill in the first place.
+  const dinners = await dayRef.collection('restaurants').where('meal', '==', 'dinner').get()
+  await Promise.all(dinners.docs.map((doc) => doc.ref.delete()))
+
+  // What the callable writes before it starts thinking.
+  await dayRef.update({
+    sectionStatus: { section: 'dinner', startedAt: new Date().toISOString() },
+  })
+
+  // A cold load, exactly like coming back to the app.
+  await page.goto(`/map/day/${dayId}`)
+  await expect(page.getByTestId('dinner-row-fill-running')).toBeVisible({
+    timeout: 15_000,
+  })
+  // And it cannot be asked again while it is already running.
+  await expect(page.getByTestId('dinner-row-fill')).toBeDisabled()
+
+  // Now the failure that actually happened — the API account out of credit.
+  await dayRef.update({
+    sectionStatus: FieldValue.delete(),
+    sectionLastError: {
+      section: 'dinner',
+      message: 'Your credit balance is too low to access the Anthropic API.',
+      failedAt: new Date().toISOString(),
+    },
+  })
+
+  const error = page.getByTestId('dinner-row-fill-error')
+  await expect(error).toContainText('credit balance', { timeout: 15_000 })
+  // One section's trouble stays out of another's.
+  await expect(page.getByTestId('lunch-row-fill-error')).toHaveCount(0)
 })

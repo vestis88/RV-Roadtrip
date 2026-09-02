@@ -139,6 +139,24 @@ export async function runDetailDaySection(
       ...restaurantsSnap.docs.map((d) => String(d.data().name)),
     ]
 
+    /**
+     * Says it is running BEFORE it runs.
+     *
+     * Reported 2026-09-01: "Searched for dinner stops inside today. Closed
+     * app, expecting results when I came back. Still nothing. No status."
+     * There was nothing to come back to — this wrote only at the end, so a
+     * request in flight lived solely as a promise held by one screen, and
+     * its failure lived solely as a string in that screen's state. Both die
+     * with the tab. Same reasoning as planMeta.rescanLastError, applied to
+     * the one path that never got it.
+     */
+    await target.ref.set(
+      {
+        sectionStatus: { section, startedAt: new Date().toISOString() },
+      },
+      { merge: true },
+    )
+
     const client = new Anthropic({ apiKey: claudeApiKey.value() })
     let proposed
     try {
@@ -156,10 +174,27 @@ export async function runDetailDaySection(
       )
     } catch (error) {
       console.error(`detailDaySection failed for trip ${tripId}`, error)
-      throw new HttpsError(
-        'internal',
-        `Could not fill that in: ${describeCause(error)}`,
-      )
+      // Written where it survives the connection that asked for it. The
+      // cause matters more here than almost anywhere: the commonest failure
+      // is the API account being out of credit, which is a fact about the
+      // trip's owner and not about the day.
+      const cause = describeCause(error)
+      await target.ref
+        .set(
+          {
+            sectionStatus: FieldValue.delete(),
+            sectionLastError: {
+              section,
+              message: cause,
+              failedAt: new Date().toISOString(),
+            },
+          },
+          { merge: true },
+        )
+        .catch((writeError: unknown) =>
+          console.warn('Recording the section failure failed', writeError),
+        )
+      throw new HttpsError('internal', `Could not fill that in: ${cause}`)
     }
 
     // Verified through Places exactly as the whole-day path is — which is
@@ -217,6 +252,9 @@ export async function runDetailDaySection(
       data: {
         filledSections: FieldValue.arrayUnion(section),
         detailError: FieldValue.delete(),
+        // A run that worked answers the last one that did not.
+        sectionStatus: FieldValue.delete(),
+        sectionLastError: FieldValue.delete(),
       },
     })
 

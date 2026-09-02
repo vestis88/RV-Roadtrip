@@ -81,3 +81,57 @@ export function dayDetailState(
   if (!Number.isFinite(beat)) return 'working'
   return now - beat > STALE_HEARTBEAT_MS ? 'stalled' : 'working'
 }
+
+/**
+ * What a single section of a day is doing, read off the DAY rather than
+ * remembered by the screen.
+ *
+ * Reported 2026-09-01: *"Searched for dinner stops inside today. Closed app,
+ * expecting results when I came back. Still nothing. No status."*
+ *
+ * There was nothing to come back to. The fill wrote its results at the end
+ * and nothing before, so a request in flight existed only as a promise held
+ * by one component, and its failure only as a string in that component's
+ * state — both destroyed by closing the tab. The trip is where a request
+ * that outlives its connection has to leave its account of itself; the
+ * rescan learned this on 2026-08-16 and this path never did.
+ */
+export type SectionFill =
+  | { kind: 'idle' }
+  | { kind: 'working'; startedAt: string }
+  | { kind: 'stalled'; startedAt: string }
+  | { kind: 'failed'; message: string }
+
+/**
+ * How long a section fill may run before it is presumed dead.
+ *
+ * Generous: the Claude turn plus per-place verification is tens of seconds,
+ * and a container killed mid-run leaves `sectionStatus` behind with nobody
+ * to clear it. Being wrong in the impatient direction costs a second paid
+ * call, so this waits.
+ */
+const SECTION_STALE_MS = 5 * 60_000
+
+export function sectionFill(
+  day: Pick<TripDay, 'sectionStatus' | 'sectionLastError'>,
+  section: DaySection,
+  now: number,
+): SectionFill {
+  const running = day.sectionStatus
+  if (running?.section === section) {
+    const started = new Date(running.startedAt).getTime()
+    // An unreadable timestamp is trusted rather than declared dead, for the
+    // same reason dayDetailState trusts a missing heartbeat.
+    if (!Number.isFinite(started) || now - started <= SECTION_STALE_MS) {
+      return { kind: 'working', startedAt: running.startedAt }
+    }
+    return { kind: 'stalled', startedAt: running.startedAt }
+  }
+  // A failure outranks nothing-happening, and only for the section it
+  // belongs to: a dinner that failed says nothing about lunch.
+  const failure = day.sectionLastError
+  if (failure?.section === section) {
+    return { kind: 'failed', message: failure.message }
+  }
+  return { kind: 'idle' }
+}

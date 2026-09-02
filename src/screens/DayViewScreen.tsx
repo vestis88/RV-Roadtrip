@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AdvancedMarker,
@@ -11,7 +11,11 @@ import { useCorridorStops } from '../hooks/useCorridorStops'
 import { dayHeaderPhotos } from '../lib/dayHeaderPhoto'
 import { useDayDetail, type ActivityWithId, type RestaurantWithId } from '../hooks/useDayDetail'
 import { DayDetailGate } from '../components/DayDetailGate'
-import { fillDaySection } from '../lib/dayDetailAction'
+import {
+  fillDaySection,
+  sectionFill,
+  type SectionFill,
+} from '../lib/dayDetailAction'
 import { buildDayRoutePoints } from '../lib/buildOverviewRoute'
 import { CardRow } from '../components/CardRow'
 import { FitToPoints } from '../components/FitToPoints'
@@ -76,12 +80,20 @@ function PlaceCardSection({
   date,
   selectedPlaceId,
   onSelect,
+  persisted,
 }: {
   title: string
   rowTestId: string
   cardIdPrefix: string
   kind: PlaceKind
   meal?: Meal
+  /**
+   * What the DAY says this section is doing — a fill in flight, or the one
+   * that last failed. Reported 2026-09-01: "Searched for dinner stops inside
+   * today. Closed app… Still nothing. No status." Local state cannot answer
+   * that; see sectionFill.
+   */
+  persisted: SectionFill
   entries: IndexedPlace[]
   tripId: string
   dayId: string
@@ -156,21 +168,43 @@ function PlaceCardSection({
               type="button"
               data-testid={`${rowTestId}-fill`}
               className="btn btn-sm btn-secondary disabled:opacity-40"
-              disabled={filling}
+              disabled={filling || persisted.kind === 'working'}
               onClick={() => void fill()}
             >
-              {filling
+              {filling || persisted.kind === 'working'
                 ? 'Finding…'
                 : kind === 'activity'
                   ? 'Find things to do'
                   : `Find ${meal}`}
             </button>
-            {fillError && (
+            {/* The day's own account of itself, which is the half that
+              * survives the app being closed. Local state still covers the
+              * moment between the tap and the first write. */}
+            {persisted.kind === 'working' && (
+              <span
+                data-testid={`${rowTestId}-fill-running`}
+                className="text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                Still looking — this keeps going if you leave.
+              </span>
+            )}
+            {persisted.kind === 'stalled' && (
+              <span
+                data-testid={`${rowTestId}-fill-stalled`}
+                className="text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                That attempt stopped reporting back — try again.
+              </span>
+            )}
+            {(fillError || persisted.kind === 'failed') && (
               <span
                 data-testid={`${rowTestId}-fill-error`}
                 className="text-xs text-red-600 dark:text-red-400"
               >
-                {fillError}
+                {fillError ??
+                  (persisted.kind === 'failed'
+                    ? `That failed: ${persisted.message}`
+                    : null)}
               </span>
             )}
           </div>
@@ -280,6 +314,17 @@ export function DayViewScreen() {
   const { dayId } = useParams<{ dayId: string }>()
   const { days } = useTripDays(tripId)
   const { corridorStops } = useCorridorStops(tripId)
+
+  /**
+   * A ticking clock, so a fill that stops reporting back becomes visibly
+   * stalled instead of spinning forever — the same shape DayDetailGate
+   * uses. Half a minute is plenty: nothing here changes second by second.
+   */
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
   const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -662,6 +707,7 @@ export function DayViewScreen() {
           date={day.date}
           selectedPlaceId={selectedPlace?.id}
           onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+          persisted={sectionFill(day, 'activity', now)}
         />
 
         <PlaceCardSection
@@ -676,6 +722,7 @@ export function DayViewScreen() {
           date={day.date}
           selectedPlaceId={selectedPlace?.id}
           onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+          persisted={sectionFill(day, 'breakfast', now)}
         />
 
         <PlaceCardSection
@@ -690,6 +737,7 @@ export function DayViewScreen() {
           date={day.date}
           selectedPlaceId={selectedPlace?.id}
           onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+          persisted={sectionFill(day, 'lunch', now)}
         />
 
         <PlaceCardSection
@@ -704,6 +752,7 @@ export function DayViewScreen() {
           date={day.date}
           selectedPlaceId={selectedPlace?.id}
           onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
+          persisted={sectionFill(day, 'dinner', now)}
         />
       </div>
     </div>

@@ -3692,6 +3692,46 @@ plainly not ready.
 Verification: lint 0, build 0, frontend **460**, functions **664**, e2e
 **172** — all green.
 
+### 2026-09-01 — a request that outlives the screen has to say so
+
+*"Searched for dinner stops inside today. Closed app, expecting results when
+I came back. Still nothing. No status."*
+
+**There was nothing to come back to.** `detailDaySection` wrote its results at
+the END — `filledSections`, the restaurant documents — and nothing at all
+before that. So a fill in flight existed only as a promise held by one
+component, and its failure only as a string in that component's state. Close
+the app and both are destroyed: no results, and no account of why.
+
+This is exactly the lesson `planMeta.rescanLastError` learned on 2026-08-16
+— *"three rescan failures in a row were diagnosed by guesswork"* — applied to
+the one path that never got it. The day now carries `sectionStatus` (which
+section is running, and since when) and `sectionLastError` (which section
+failed, why, and when), written before the expensive call and cleared by the
+run that succeeds.
+
+**And it matters most right now for a reason that is not a code bug**: the
+commonest failure this week is the Anthropic account being out of credit, so
+the dinner request failed within a second, said so to a screen that was then
+closed, and left the traveler with silence. The message will now be waiting:
+*"That failed: Your credit balance is too low…"* — a fact about the account,
+not about the day, and one nobody could have guessed from an empty section.
+
+Three details worth keeping:
+
+- **A dinner that failed says nothing about lunch.** Both fields are keyed by
+  section, so one section's trouble stays out of another's.
+- **A run in flight outranks an older failure** for the same section, or a
+  retry would report the previous attempt's error while working.
+- **A container killed mid-run leaves `sectionStatus` behind with nobody to
+  clear it**, so a fill older than five minutes reads as stalled rather than
+  spinning forever. Generous on purpose: being wrong in the impatient
+  direction costs a second paid call. The screen carries a ticking clock so
+  that transition happens while the traveler is looking at it.
+
+Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
+**173** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
