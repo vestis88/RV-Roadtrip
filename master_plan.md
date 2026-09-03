@@ -3980,6 +3980,39 @@ a choice made underneath it.
 Verification: lint 0, build 0, frontend **471**, functions **664**, e2e
 **173** — all green.
 
+### 2026-09-02 — a day that did not know what came before it
+
+*"There is also mentions of the origin being the trip origin for the first
+night."* — under a card in the Dolomites reading **"Lüneburg, Tyskland →
+Folgaride bike park · 42 km · 59 min"**.
+
+The distance and the time were the real leg from the previous Italian stop.
+The NAME was the trip's start point, a thousand kilometres north. Both came
+from `toTripDay`, which was handed an index and a settings object and
+**nothing at all about the day before it**:
+
+    const previous = index === 0 ? settings.startPoint.name : undefined
+    …
+    drive: { fromName: previous ?? 'Previous stop', … }
+
+So the first day named the start point however far away the route had since
+moved, and every later day wrote the literal placeholder *"Previous stop"*.
+
+The same blindness had a second consequence, and it is the other half of how
+a night in Italy came to be labelled with a town in Germany: `lastStopBefore`
+returned `allStops[0]` — the first stop of the whole trip — as the overnight
+of any day that reached no stop. A pure driving day between two far-apart
+stops therefore slept, on paper, wherever the trip had begun.
+
+Days are built in sequence now, each one handed the night before it. A drive
+leaves from last night's overnight; the first leaves from where the route
+actually starts, which on the road is the van and not a start point left
+behind weeks ago. A day that reaches no stop keeps last night's overnight,
+because it has not moved the night anywhere. `lastStopBefore` is gone.
+
+Verification: lint 0, build 0, frontend **474**, functions **664**, e2e
+**173** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

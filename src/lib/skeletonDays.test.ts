@@ -732,3 +732,90 @@ describe('a day whose overnight has been moved off its town', () => {
     expect(plan.removeIds).toEqual(['d1'])
   })
 })
+
+/**
+ * Reported 2026-09-02, on a day in the Dolomites: *"Lüneburg, Tyskland →
+ * Folgaride bike park · 42 km · 59 min"*, with the note *"there is also
+ * mentions of the origin being the trip origin for the first night."*
+ *
+ * The distance and the time were the real leg from the previous Italian
+ * stop; the NAME was the trip's start point, a thousand kilometres north.
+ * `toTripDay` was handed an index and a settings object and nothing about
+ * the day before it.
+ */
+describe('what a day says it drove from', () => {
+  const stopAt = (id: string, name: string): CorridorStopWithId =>
+    ({
+      id,
+      name,
+      lat: 46 + Number(id.slice(1)) / 100,
+      lng: 11,
+      country: 'IT',
+      status: 'locked',
+      linkedDayIds: [],
+      timeNeeded: 'half-day',
+    }) as CorridorStopWithId
+
+  it('names the night before, not the start of the trip', () => {
+    const { days } = planSkeleton({
+      stops: [stopAt('s1', 'Molveno'), stopAt('s2', 'Folgaride bike park')],
+      legs: [
+        { durationMin: 120, distanceKm: 90 },
+        { durationMin: 59, distanceKm: 42 },
+      ],
+      existingDays: [],
+      settings: SETTINGS,
+      planMeta: READY,
+      originName: 'Lüneburg, Tyskland',
+    })
+    // The first day genuinely does leave from where the route starts.
+    expect(days![0].drive?.fromName).toBe('Lüneburg, Tyskland')
+    // Every later one leaves from where it slept, and never from the
+    // placeholder "Previous stop" this used to write.
+    expect(days![1].drive?.fromName).toBe('Molveno')
+    expect(days![1].drive?.toName).toBe('Folgaride bike park')
+    expect(days![1].drive?.distanceKm).toBe(42)
+  })
+
+  // On the road the route starts from the van, and the first day has to say
+  // so rather than naming a start point left behind weeks ago.
+  it('leaves from where the route actually starts', () => {
+    const { days } = planSkeleton({
+      stops: [stopAt('s1', 'Molveno')],
+      legs: [{ durationMin: 30, distanceKm: 20 }],
+      existingDays: [],
+      settings: SETTINGS,
+      planMeta: READY,
+      originName: 'Where we are',
+    })
+    expect(days![0].drive?.fromName).toBe('Where we are')
+  })
+
+  /**
+   * And a day that reaches no stop has not moved the night anywhere. It used
+   * to take `allStops[0]` — the first stop of the whole trip — which is the
+   * other half of how a night in Italy got labelled with a town in Germany.
+   */
+  it('keeps last night’s overnight through a pure driving day', () => {
+    const { days } = planSkeleton({
+      stops: [stopAt('s1', 'Molveno'), stopAt('s2', 'Rome')],
+      // Two days of driving between them, so a day in the middle reaches
+      // nothing at all.
+      legs: [
+        { durationMin: 60, distanceKm: 40 },
+        { durationMin: 900, distanceKm: 800 },
+      ],
+      existingDays: [],
+      settings: SETTINGS,
+      planMeta: READY,
+      originName: 'Lüneburg, Tyskland',
+    })
+    const driveOnly = days!.filter(
+      (day) => day.overnight.name === 'Molveno' && day.index > 0,
+    )
+    expect(driveOnly.length).toBeGreaterThan(0)
+    expect(days!.some((day) => day.drive?.fromName === 'Previous stop')).toBe(
+      false,
+    )
+  })
+})

@@ -51,6 +51,7 @@ export function PlanStrip({
   routeLegs,
   reorderOpen,
   routeOrderIsManual,
+  originName,
   onMoveStop,
   onResetOrder,
   onReorderOpenChange,
@@ -88,6 +89,8 @@ export function PlanStrip({
   reorderOpen: boolean
   /** Whether the route order is the traveler's rather than Google's. */
   routeOrderIsManual: boolean
+  /** What the first day's drive leaves from — see ExploreMapScreen. */
+  originName: string
   onMoveStop: (stopId: string, delta: -1 | 1) => void
   onResetOrder: () => void
   onReorderOpenChange: (open: boolean) => void
@@ -242,6 +245,7 @@ export function PlanStrip({
         existingDays: days,
         settings: trip.settings,
         planMeta: trip.planMeta,
+        originName,
         rebuildOverDetail: true,
       })
       if (!decision.days) {

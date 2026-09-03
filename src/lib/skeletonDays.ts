@@ -107,6 +107,12 @@ export function planSkeleton(input: {
   >
   planMeta: Pick<PlanMeta, 'status'>
   /**
+   * Where the route actually starts from — the van while the trip is
+   * running, the trip's start point otherwise. Names the first day's drive,
+   * which used to claim the start point however far away it was.
+   */
+  originName?: string
+  /**
    * Rebuild even over days that carry researched detail.
    *
    * Never set by the automatic effect — only by the traveler pressing
@@ -145,9 +151,33 @@ export function planSkeleton(input: {
   if (packed.length === 0) return { skipped: 'no-stops' }
   if (packed.length > MAX_SKELETON_DAYS) return { skipped: 'too-many-days' }
 
-  const days = packed.map((day, index) =>
-    toTripDay(day, index, settings, usable),
-  )
+  /**
+   * Built in sequence, because a day cannot describe itself alone.
+   *
+   * Reported 2026-09-02, on a day in the Dolomites: *"Lüneburg, Tyskland →
+   * Folgaride bike park · 42 km · 59 min"*. The distance and the time were
+   * the real leg from the previous Italian stop; the NAME was the trip's
+   * start point, a thousand kilometres north. `toTripDay` was handed an
+   * index and a settings object and nothing about the day before it, so the
+   * first day named `settings.startPoint` and every later one said the
+   * literal placeholder "Previous stop".
+   *
+   * The same blindness put the first stop of the whole trip on a pure
+   * driving day as its overnight (`lastStopBefore` returned `allStops[0]`),
+   * which is how a night in Italy could be labelled with a town in Germany.
+   */
+  const days: TripDay[] = []
+  let previousNight:
+    | { name: string; lat: number; lng: number; country: string }
+    | undefined
+  packed.forEach((day, index) => {
+    const built = toTripDay(day, index, settings, {
+      previousNight,
+      originName: input.originName ?? settings.startPoint.name,
+    })
+    days.push(built)
+    previousNight = built.overnight
+  })
 
   /**
    * The one question worth asking before writing on our own: would THIS
@@ -222,14 +252,18 @@ function toTripDay(
   packed: PackedDay<CorridorStopWithId>,
   index: number,
   settings: Pick<TripSettings, 'startDate' | 'startPoint'>,
-  allStops: CorridorStopWithId[],
+  context: {
+    /** Where the night before was spent — absent only on the first day. */
+    previousNight?: { name: string; lat: number; lng: number; country: string }
+    /** Where the route sets off from. */
+    originName: string
+  },
 ): TripDay {
-  // Where the night is spent: the last stop reached today, or the stop we
-  // are parked at, or — on a pure driving day — wherever we last were.
+  // Where the night is spent: the last stop reached today, the stop we are
+  // parked at, or — on a pure driving day — exactly where we slept last,
+  // because a day that reaches no stop has not moved the night anywhere.
   const arriving = packed.stops[packed.stops.length - 1]
-  const here =
-    packed.parkedAt ?? arriving ?? lastStopBefore(allStops, packed, index)
-  const previous = index === 0 ? settings.startPoint.name : undefined
+  const here = packed.parkedAt ?? arriving ?? context.previousNight
 
   return {
     index,
@@ -248,7 +282,9 @@ function toTripDay(
     ...(packed.driveMinutes > 0 && here
       ? {
           drive: {
-            fromName: previous ?? 'Previous stop',
+            // The place this drive actually leaves from: last night's
+            // overnight, or where the route set off from on the first day.
+            fromName: context.previousNight?.name ?? context.originName,
             toName: here.name,
             // Real Google kilometres, from the same legs the minutes come
             // from — see PackedDay.driveKm for why writing 0 here stopped
@@ -262,14 +298,6 @@ function toTripDay(
     // The point of the whole thing: written cheap, filled in when opened.
     detailStatus: 'pending' as const,
   }
-}
-
-function lastStopBefore(
-  allStops: CorridorStopWithId[],
-  _packed: PackedDay<CorridorStopWithId>,
-  index: number,
-): CorridorStopWithId | undefined {
-  return index === 0 ? undefined : allStops[0]
 }
 
 function summaryFor(

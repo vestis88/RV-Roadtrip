@@ -438,6 +438,18 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       ),
     [originPoint, trip.settings.endPoint, lockedStops],
   )
+  /**
+   * What the first day's drive says it leaves FROM.
+   *
+   * Reported 2026-09-02: a day in the Dolomites reading "Lüneburg, Tyskland
+   * → Folgaride bike park · 42 km · 59 min" — the leg was real, the name was
+   * the trip's start point a thousand kilometres north. A route that now
+   * starts from the van has to say so.
+   */
+  const originName = origin.fromPosition
+    ? 'Where we are'
+    : trip.settings.startPoint.name
+
   // Keyed by which stops it describes: an order is a list of positions, and
   // applying yesterday's positions to a different set of stops would shuffle
   // them into nonsense. A changed set simply falls back to the guess until
@@ -604,13 +616,14 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       existingDays: days,
       settings: trip.settings,
       planMeta: trip.planMeta,
+      originName,
       rebuildOverDetail: true,
     })
     return {
       cost: decision.discardingDetail ?? null,
       undatable: decision.undatable ?? 0,
     }
-  }, [routeStops, routeLegs, days, trip.settings, trip.planMeta])
+  }, [routeStops, routeLegs, days, trip.settings, trip.planMeta, originName])
   const rebuildCost = rebuildOutlook.cost
 
   /** Present once the Maps geocoder is loaded — see the effect below. */
@@ -664,6 +677,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       existingDays: days,
       settings: trip.settings,
       planMeta: trip.planMeta,
+      originName,
     })
     if (!decision.days) return
     // The stop ids are part of the signature, not just the dates: the same
@@ -687,7 +701,15 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
       // than leaving the trip permanently dayless.
       skeletonWritten.current = null
     })
-  }, [tripId, routeStops, routeLegs, days, trip.settings, trip.planMeta])
+  }, [
+    tripId,
+    routeStops,
+    routeLegs,
+    days,
+    trip.settings,
+    trip.planMeta,
+    originName,
+  ])
 
   /**
    * Roughly when each kept stop is reached — see arrivalEstimates for why
@@ -1034,6 +1056,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           routeLegs={routeLegs ?? []}
           reorderOpen={reorderOpen}
           routeOrderIsManual={!!routeOrder?.manual}
+          originName={originName}
           onMoveStop={moveStop}
           onResetOrder={resetOrder}
           changeRequestOpen={changeRequestOpen}
