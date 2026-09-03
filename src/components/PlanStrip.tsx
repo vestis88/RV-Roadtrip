@@ -6,11 +6,8 @@ import type { TripDayWithId } from '../hooks/useTripDays'
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
 import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
 import { usePlanBusy } from '../lib/planBusy'
-import { ReorderCorridorPanel } from './ReorderCorridorPanel'
-import {
-  committedStopsInRouteOrder,
-  stopsAddableToRoute,
-} from '../lib/routeEditing'
+import { RouteOrderPanel } from './RouteOrderPanel'
+import { stopsAddableToRoute } from '../lib/routeEditing'
 import { dayStrip, derivedDayStrip } from '../lib/dayStrip'
 import { applyDayCleanup, planDayCleanup, staleDays } from '../lib/dayCleanup'
 import {
@@ -53,6 +50,9 @@ export function PlanStrip({
   arrivals,
   routeLegs,
   reorderOpen,
+  routeOrderIsManual,
+  onMoveStop,
+  onResetOrder,
   onReorderOpenChange,
   changeRequestOpen,
   onChangeRequestOpenChange,
@@ -86,6 +86,10 @@ export function PlanStrip({
    * lists are this component's, so the flag has to sit above both.
    */
   reorderOpen: boolean
+  /** Whether the route order is the traveler's rather than Google's. */
+  routeOrderIsManual: boolean
+  onMoveStop: (stopId: string, delta: -1 | 1) => void
+  onResetOrder: () => void
   onReorderOpenChange: (open: boolean) => void
   /**
    * The other two panels, lifted for the same reason `reorderOpen` was and
@@ -586,12 +590,13 @@ export function PlanStrip({
       )}
 
       {reorderOpen && (
-        <ReorderCorridorPanel
-          tripId={tripId}
-          stops={committedStopsInRouteOrder(days, corridorStops)}
-          addableStops={stopsAddableToRoute(corridorStops)}
-          planBusy={planBusy}
-          onSubmitted={markPlanSubmitted}
+        <RouteOrderPanel
+          stops={routeStops}
+          arrivals={arrivals}
+          manual={routeOrderIsManual}
+          today={today}
+          onMove={onMoveStop}
+          onReset={onResetOrder}
           onClose={() => onReorderOpenChange(false)}
         />
       )}

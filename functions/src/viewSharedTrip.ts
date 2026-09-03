@@ -188,12 +188,22 @@ export async function loadSharedTripView(
       startPoint: trip.settings.startPoint,
       endPoint: trip.settings.endPoint,
       planStatus: trip.planMeta.status,
-      ...(trip.planMeta.totalKm != null
-        ? { totalKm: trip.planMeta.totalKm }
-        : {}),
-      ...(trip.planMeta.avgDriveMinutesPerDay != null
-        ? { avgDriveMinutesPerDay: trip.planMeta.avgDriveMinutesPerDay }
-        : {}),
+      /**
+       * Measured from the days being SHOWN, not read off `planMeta`.
+       *
+       * `planMeta.totalKm` and `avgDriveMinutesPerDay` are written by a full
+       * generation and by nothing else — relics of the plan-as-a-frozen-
+       * artefact model. Under the dynamic one the day list is re-derived from
+       * the board whenever the board changes, so those numbers describe a
+       * plan that may no longer exist: a trip built entirely from locked
+       * stops has never had them written at all, and a trip generated in July
+       * still reports July's total however much has changed since.
+       *
+       * The days carry real Google distances and times per leg (see
+       * PackedDay.driveKm), so the honest answer is simply their sum —
+       * which is by construction the trip a relative is looking at.
+       */
+      ...summariseDrives(days),
       ...(trip.planMeta.generatedAt
         ? { generatedAt: trip.planMeta.generatedAt }
         : {}),
@@ -245,3 +255,25 @@ export const viewSharedTrip = onRequest(async (request, response) => {
 
   response.status(200).json(view)
 })
+
+/**
+ * Total driving and the daily average, from the days themselves.
+ *
+ * Both fields are omitted when there is nothing to measure — a trip with no
+ * driving days yet should show no distance rather than a confident zero.
+ */
+function summariseDrives(days: { drive?: { distanceKm: number; durationMin: number } }[]): {
+  totalKm?: number
+  avgDriveMinutesPerDay?: number
+} {
+  const drives = days
+    .map((day) => day.drive)
+    .filter((drive): drive is { distanceKm: number; durationMin: number } => !!drive)
+  if (drives.length === 0) return {}
+  const totalKm = drives.reduce((sum, drive) => sum + drive.distanceKm, 0)
+  const totalMin = drives.reduce((sum, drive) => sum + drive.durationMin, 0)
+  return {
+    ...(totalKm > 0 ? { totalKm } : {}),
+    avgDriveMinutesPerDay: totalMin / drives.length,
+  }
+}

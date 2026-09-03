@@ -1033,6 +1033,9 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
           arrivals={arrivals}
           routeLegs={routeLegs ?? []}
           reorderOpen={reorderOpen}
+          routeOrderIsManual={!!routeOrder?.manual}
+          onMoveStop={moveStop}
+          onResetOrder={resetOrder}
           changeRequestOpen={changeRequestOpen}
           onChangeRequestOpenChange={setChangeRequestOpen}
           rebuildOpen={rebuildOpen}
@@ -1838,16 +1841,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                     }
                     findingOvernight={sleepBusy === stop.id}
                     overnightOptions={sleepByStop[stop.id]}
-                    onMoveUp={
-                      routeStopIds.has(stop.id)
-                        ? () => moveStop(stop.id, -1)
-                        : undefined
-                    }
-                    onMoveDown={
-                      routeStopIds.has(stop.id)
-                        ? () => moveStop(stop.id, 1)
-                        : undefined
-                    }
                     // Only on a kept stop: how long to stay somewhere you
                     // have not decided to visit is noise, and the budget
                     // counts kept stops only.
@@ -1858,18 +1851,6 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                               setStopStay(tripId, stop.id, stay),
                               'Could not save how long you are staying — please try again.',
                             )
-                        : undefined
-                    }
-                    // Only where there is a route to add TO. A locked stop with
-                    // no day yet is exactly what reconciliation can slot in —
-                    // see the 2026-08-19 "real way into the route" work, which
-                    // this board inherited when the plan stopped having a
-                    // screen of its own.
-                    onAddToRoute={
-                      days.length > 0 &&
-                      stop.status === 'locked' &&
-                      stop.linkedDayIds.length === 0
-                        ? () => setReorderOpen(true)
                         : undefined
                     }
                   />

@@ -77,178 +77,94 @@ test('add-corridor-stop form requires a name', async ({ page }) => {
   await expect(page.getByTestId('add-corridor-stop-form')).toBeVisible()
 })
 
-test('reordering committed stops previews and commits a date/drive-leg swap', async ({
+/**
+ * "Edit route" as the manual ordering surface, replacing the reconcile-driven
+ * panel it used to be (2026-09-01).
+ *
+ * The old one listed `status === 'committed'` stops — what a full GENERATION
+ * writes — ordered by that generation's day indices, so a trip curated since
+ * showed an old route; and it submitted through the paid server pass that
+ * rewrites every date, for what the skeleton writer now does for free.
+ *
+ * Requested in its place: *"retire the arrows, but keep the list as the
+ * manual sorting of the order. It should have a button to reset to full
+ * automatic google ordering."*
+ */
+test('edit route lists the locked stops and lets them be arranged by hand', async ({
   page,
 }) => {
   const tripId = await createTripWithPlan(page)
-  await page.getByTestId('nav-map').click()
-  await page.getByTestId('day-strip').waitFor()
-
-  await page.getByTestId('reorder-stops-button').click()
-  const panel = page.getByTestId('reorder-corridor-panel')
-  await panel.waitFor()
-
-  // Fixture plan: 2026-07-10 Lillehammer (drive), 2026-07-11 Otta (drive),
-  // 2026-07-12 Otta (rest) — 2 distinct committed stops (Lillehammer, Otta),
-  // Otta's own drive+rest days grouped into one stop.
-  const rows = panel.locator('li')
-  await expect(rows).toHaveCount(2)
-  await expect(rows.nth(0)).toContainText('Lillehammer')
-  await expect(rows.nth(1)).toContainText('Otta')
-
-  // Move Otta to first position.
-  await panel.locator('button[data-testid$="-up"]').nth(1).click()
-  await expect(rows.nth(0)).toContainText('Otta')
-  await expect(rows.nth(1)).toContainText('Lillehammer')
-
-  await page.getByTestId('reorder-preview-button').click()
-  await expect(page.getByTestId('reorder-diff-list')).toBeVisible({
-    timeout: 10_000,
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  // Two locked stops — the CURRENT route, which is what this list is about.
+  // Names the fixture does not already use: it seeds its own committed
+  // "Otta Camping", and a name query would then pick whichever came back
+  // first.
+  await stops.add({
+    name: 'Rondane viewpoint',
+    lat: 61.77,
+    lng: 9.54,
+    country: 'NO',
+    status: 'locked',
+    linkedDayIds: [],
   })
+  await stops.add({
+    name: 'Lom stavkyrkje',
+    lat: 61.84,
+    lng: 8.57,
+    country: 'NO',
+    status: 'locked',
+    linkedDayIds: [],
+  })
+  // Row identity comes from the stop id, not from the row's text: the text
+  // leads with the position number, so parsing it asserts on the very thing
+  // the reordering changes.
+  const idOf = async (name: string) =>
+    (await stops.where('name', '==', name).get()).docs[0].id
+  const otta = await idOf('Rondane viewpoint')
+  const lom = await idOf('Lom stavkyrkje')
 
-  await page.getByTestId('reorder-confirm-button').click()
-  await expect(panel).toHaveCount(0)
-
-  // The confirm just fires a planRequests doc — the generatePlan trigger
-  // that actually applies the reorder runs asynchronously, same as
-  // insertRestDay/replan, so the day docs don't reflect it immediately.
-  await expect
-    .poll(
-      async () => {
-        const daysSnap = await adminDb
-          .collection('trips')
-          .doc(tripId)
-          .collection('days')
-          .orderBy('date')
-          .get()
-        return daysSnap.docs.map((d) => d.data().overnight.name)
-      },
-      { timeout: 15_000 },
-    )
-    .toEqual(['Otta Camping', 'Otta Camping', 'Lillehammer Camping'])
-
-  const daysSnap = await adminDb
-    .collection('trips')
-    .doc(tripId)
-    .collection('days')
-    .orderBy('date')
-    .get()
-  const days = daysSnap.docs.map((d) => d.data())
-  expect(days.map((d) => d.type)).toEqual(['drive', 'rest', 'drive'])
-  // Lillehammer now arrives from Otta instead of from the trip start.
-  expect(days[2].drive.fromName).toBe('Otta Camping')
-})
-
-test('removing a stop deletes its day and requires accepting the end-date change', async ({
-  page,
-}) => {
-  const tripId = await createTripWithPlan(page)
   await page.getByTestId('nav-map').click()
-  await page.getByTestId('day-strip').waitFor()
-
   await page.getByTestId('reorder-stops-button').click()
-  const panel = page.getByTestId('reorder-corridor-panel')
+  const panel = page.getByTestId('route-order-panel')
   await panel.waitFor()
 
   const rows = panel.locator('li')
   await expect(rows).toHaveCount(2)
-
-  // Remove Lillehammer (the first row) — a day count change, so the
-  // trip's own end date moves too.
-  await panel.locator('button[data-testid$="-remove"]').first().click()
-  await expect(rows).toHaveCount(1)
-  await expect(rows.nth(0)).toContainText('Otta')
-
-  await page.getByTestId('reorder-preview-button').click()
-  await expect(page.getByTestId('reorder-removed-list')).toBeVisible({
-    timeout: 10_000,
-  })
-  await expect(page.getByTestId('reorder-removed-list')).toContainText(
-    'Removed: Lillehammer Camping',
-  )
-
-  const enddateNotice = page.getByTestId('reorder-enddate-change')
-  await expect(enddateNotice).toBeVisible()
-  const confirmButton = page.getByTestId('reorder-confirm-button')
-  await expect(confirmButton).toBeDisabled()
-
-  await page.getByTestId('reorder-enddate-accept').check()
-  await expect(confirmButton).toBeEnabled()
-  await confirmButton.click()
-  await expect(panel).toHaveCount(0)
-
-  await expect
-    .poll(
-      async () => {
-        const daysSnap = await adminDb
-          .collection('trips')
-          .doc(tripId)
-          .collection('days')
-          .orderBy('date')
-          .get()
-        return daysSnap.docs.map((d) => d.data().date)
-      },
-      { timeout: 15_000 },
+  const idsInOrder = async () =>
+    rows.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-testid')?.replace('route-order-row-', '')),
     )
-    .toEqual(['2026-07-10', '2026-07-11'])
+  const before = await idsInOrder()
+  expect(before.sort()).toEqual([lom, otta].sort())
 
-  // commitInChunks(days) and the trip-level settings/planMeta update are two
-  // separate writes within the same async function — the days poll above
-  // only proves the first has landed, not the second, so settings.endDate
-  // needs its own poll rather than an immediate read right after.
+  // Both rows say WHEN, which is the consequence the per-card arrows never
+  // showed.
+  await expect(page.getByTestId(`route-order-when-${before[0]}`)).toBeVisible()
+
+  // Google owns the order until the traveler touches it, so there is nothing
+  // to reset yet.
+  await expect(page.getByTestId('route-order-reset')).toHaveCount(0)
+
+  // Moving the second one up swaps them, in the list itself.
+  const started = await idsInOrder()
+  await panel.locator('button[data-testid^="route-order-up-"]').nth(1).click()
   await expect
-    .poll(
-      async () => (await adminDb.collection('trips').doc(tripId).get()).data()
-        ?.settings.endDate,
-      { timeout: 15_000 },
-    )
-    .toBe('2026-07-11')
+    .poll(idsInOrder)
+    .toEqual([started[1], started[0]])
 
-  const daysSnap = await adminDb
+  // And now it is the traveler's, with a way back.
+  await expect(panel).toContainText('Your own order')
+  await page.getByTestId('route-order-reset').click()
+  await expect.poll(idsInOrder).toEqual(started)
+  await expect(panel).toContainText('Google')
+
+  // No server pass, no plan request: nothing was asked of the backend.
+  const requests = await adminDb
     .collection('trips')
     .doc(tripId)
-    .collection('days')
-    .orderBy('date')
+    .collection('planRequests')
     .get()
-  const days = daysSnap.docs.map((d) => d.data())
-  expect(days.every((d) => d.overnight.name === 'Otta Camping')).toBe(true)
-  // Otta's arrival now comes straight from the trip's own start point.
-  expect(days[0].drive.fromName).toBe('Oslo')
-
-  const corridorSnap = await adminDb
-    .collection('trips')
-    .doc(tripId)
-    .collection('corridorStops')
-    .where('name', '==', 'Lillehammer Camping')
-    .get()
-  expect(corridorSnap.empty).toBe(true)
-})
-
-test('adding a locked stop degrades to an error banner without Claude/Places access', async ({
-  page,
-}) => {
-  await createTripWithPlan(page)
-  await page.getByTestId('nav-map').click()
-  await page.getByTestId('day-strip').waitFor()
-
-  await page.getByTestId('add-corridor-stop-toggle').click()
-  await page.getByTestId('corridor-stop-name').fill('Vinstra viewpoint')
-  await setPlaceInput(page.getByTestId('corridor-stop-location'), 'Vinstra, Norway')
-  await page.getByTestId('corridor-stop-submit').click()
-  await expect(page.getByTestId('add-corridor-stop-form')).toHaveCount(0)
-
-  await page.getByTestId('reorder-stops-button').click()
-  const panel = page.getByTestId('reorder-corridor-panel')
-  await panel.waitFor()
-
-  const addButton = panel.locator('button[data-testid$="-add"]')
-  await expect(addButton).toBeVisible()
-  await addButton.click()
-
-  await page.getByTestId('reorder-preview-button').click()
-  await expect(page.getByTestId('reorder-preview-error')).toBeVisible({
-    timeout: 10_000,
-  })
+  expect(requests.empty).toBe(true)
 })
 
 test('rescanning this area degrades to an error banner without Claude/Places access', async ({
@@ -749,10 +665,13 @@ test('curated stops survive into the plan, with their curation intact', async ({
     .poll(async () => (await stops.doc(added.id).get()).data()?.status)
     .toBe('locked')
 
-  // Once locked, the way into the itinerary is a button rather than a
-  // sentence telling the traveler where to find one.
-  await page.getByTestId(`explore-candidate-add-to-route-${added.id}`).click()
-  await expect(page.getByTestId('reorder-corridor-panel')).toBeVisible()
+  // And once locked, no button is needed to get it into the itinerary: the
+  // day writer packs it from the board on its own. "Add to route" was a
+  // relic of the frozen-plan model, pointing at a reconcile panel that no
+  // longer adds anything (2026-09-01).
+  await expect(
+    page.getByTestId(`explore-candidate-add-to-route-${added.id}`),
+  ).toHaveCount(0)
 })
 
 // Turning a stop down has to be remembered, or the next "Find more stops"

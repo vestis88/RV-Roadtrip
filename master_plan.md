@@ -3862,6 +3862,80 @@ Verification: lint 0, build 0, frontend **469**, functions **664**, e2e
 **174** — all green (`dayview.spec.ts:140` and `responsive-offline.spec.ts:33`
 flaked once in a full run; both pass in isolation and on the re-run).
 
+### 2026-09-01 — retiring the frozen-plan relics
+
+*"The edit route contains an old route, not the current… Also update the
+share link for viewers so it's the dynamically updateable plan they are
+seeing. Look through and find old relics in the code that still relies on the
+previous 'freezing' of travel plans."*
+
+**"Edit route" was a relic twice over.** It listed `status === 'committed'`
+stops — what a full GENERATION writes, and nothing else — ordered by the day
+indices of that generation. On a trip curated since, that is an old route by
+construction, which is exactly how it was reported. And it submitted through
+`reconcileCorridor`, the paid server pass that rewrites every day and every
+date, for what the skeleton writer now does for free in a second.
+
+Replaced, on the traveler's own instruction — *"I don't like the current
+order arrows, as it doesn't show how it changes things. So retire the arrows,
+but keep the list as the manual sorting of the order. It should have a button
+to reset to full automatic google ordering."* — by `RouteOrderPanel`:
+
+- the **locked** stops, in the order they will actually be driven;
+- every row carries the day it would be reached, and those dates re-derive as
+  the order changes. That is the answer to "it doesn't show how it changes
+  things": the change is the dates;
+- moving one writes a manual `routeOrder` (`manualRouteOrder`, which already
+  existed from phase 5) — no callable, no plan request, no end-date tick, and
+  the day list follows on its own;
+- **"Back to automatic order"** appears only once there is something to undo.
+
+The per-card **Order ↑↓ arrows are gone**, and so is **"Add to route"** — a
+button offered on a locked stop with no day, which opened the reconcile panel
+to slot it in. Nothing needs slotting in now; a locked stop is packed from
+the board. It pointed at a panel that no longer adds anything.
+
+**The share view was already live** — it polls, reads days and stops on every
+request, caches nothing, and already includes locked stops. One relic in it:
+`totalKm` and `avgDriveMinutesPerDay` came off `planMeta`, which only a full
+generation ever writes. A board-built trip had never had them written; a trip
+generated in July still reported July's total. Both are now measured from the
+days being shown, whose legs carry real Google distances.
+
+**Three e2e specs drove UI that no longer exists** — removal with the
+end-date tick, add-then-reconcile, and add-to-route opening the panel. Their
+behaviour is not lost: `corridorReconciliation.test.ts` covers it in 16
+server-side tests, including day deletion, the accounted-day-count failure,
+adding through the detail phase, and the country/proposed rejections. The
+callables remain; only the entry point is gone.
+
+#### Relics still standing, reported rather than changed
+
+Asked for and deliberately not touched — *"Not yet — report first"*:
+
+1. **Two statuses mean "on the route".** `locked` is what the board sets;
+   `committed` is what `generatePlan` and `corridorReconciliation` write. They
+   diverge by surface: `routeEditing.committedStopsInRouteOrder` filtered
+   `committed` only (the bug above), `viewSharedTrip` accepts
+   `committed || locked`, the board's own list accepts
+   `candidate | locked | proposed`, and `routeStops` is locked-only. Every
+   future "why is this stop missing" has a good chance of being this.
+2. **`updateTripSettings` still marks a plan `stale`** for `startDate`,
+   `endDate`, `startPoint`, `endPoint`. Not an oversight: `detectDateShift`
+   is gated on `staleSettings` containing date keys only, so widening it
+   would silently retire the "move the plan 7 days later" shortcut (recorded
+   on 2026-08-25). The other six settings became advice in phase 2.
+3. **`GENERATE_LABEL` / "Rebuild plan"** on Trip setup, and `generatePlan`'s
+   full pass — still the only way to get researched detail across a whole
+   trip at once. Not reachable by accident, and not destructive since
+   generation honours curation, but it is the frozen-plan button.
+4. **`replanTrip`, `insertRestDay`, `RequestChangesForDay`** — server passes
+   that rewrite days wholesale, each behind its own busy gate. They work; they
+   are the last places a trip is treated as an artefact to be regenerated.
+
+Verification: lint 0, build 0, frontend **469**, functions **664**, e2e
+**172** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

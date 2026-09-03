@@ -66,14 +66,6 @@ interface ExploreCandidateCardProps {
    */
   onSetStay?: (stay: CorridorStop['stayDuration']) => void
   /**
-   * Move this stop one place earlier or later in the driving order
-   * (2026-08-23). Offered only on a kept stop, since only kept stops are in
-   * the route at all. Using them marks the order as the traveler's, after
-   * which Google stops rearranging it until they reset — see routeOrder.
-   */
-  onMoveUp?: () => void
-  onMoveDown?: () => void
-  /**
    * Find somewhere to sleep near this stop (2026-08-23). Offered on a kept
    * stop only, and resolved when pressed — it costs Places, Overpass and
    * sometimes Claude, which is why it is not done for every stop up front.
@@ -119,12 +111,6 @@ interface ExploreCandidateCardProps {
   findingOvernight?: boolean
   /** What it found, once it has. */
   overnightOptions?: { name: string; kind: string; why?: string }[]
-  /**
-   * Offered only where a route already exists to add the stop TO — the plan
-   * map. Absent in explore mode, where there is no itinerary yet and locking
-   * in is the whole commitment.
-   */
-  onAddToRoute?: () => void
 }
 
 /**
@@ -184,8 +170,6 @@ export function ExploreCandidateCard({
   onUnlock,
   onReject,
   onSetStay,
-  onMoveUp,
-  onMoveDown,
   onMarkDone,
   onUndoDone,
   onOpenDay,
@@ -194,7 +178,6 @@ export function ExploreCandidateCard({
   onFindOvernight,
   findingOvernight,
   overnightOptions,
-  onAddToRoute,
 }: ExploreCandidateCardProps) {
   // The diary form, opened by "We've done this" rather than shown always:
   // marking done is a two-line form, and drawing it on every kept card would
@@ -579,34 +562,6 @@ export function ExploreCandidateCard({
           </div>
         )}
 
-        {(onMoveUp || onMoveDown) && (
-          <div
-            data-testid={`explore-candidate-move-${stop.id}`}
-            className="flex items-center gap-1 pt-1"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              Order
-            </span>
-            <button
-              type="button"
-              data-testid={`explore-candidate-move-up-${stop.id}`}
-              className="btn btn-sm btn-outline px-2.5"
-              onClick={onMoveUp}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              data-testid={`explore-candidate-move-down-${stop.id}`}
-              className="btn btn-sm btn-outline px-2.5"
-              onClick={onMoveDown}
-            >
-              ↓
-            </button>
-          </div>
-        )}
-
         {onSetStay && (
           <div
             data-testid={`explore-candidate-stay-${stop.id}`}
@@ -724,23 +679,6 @@ export function ExploreCandidateCard({
               className="btn btn-sm btn-secondary"
             >
               Unlock
-            </button>
-          )}
-          {/* The step that turns curation into an actual change to the
-           * itinerary. It used to be the sentence 'Use "Edit route" to add
-           * this stop to your itinerary.' — an instruction where the one
-           * action that matters should have been. */}
-          {onAddToRoute && stop.status === 'locked' && (
-            <button
-              type="button"
-              data-testid={`explore-candidate-add-to-route-${stop.id}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onAddToRoute()
-              }}
-              className="btn btn-sm btn-primary"
-            >
-              Add to route
             </button>
           )}
           {/* Offered whether or not the stop is locked. Undoing a commitment

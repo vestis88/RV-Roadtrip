@@ -98,7 +98,11 @@ test('the board stays legible in dark mode', async ({ page }) => {
   // 4.5:1 is WCAG AA for body text. The reported state measured around 1.1.
   for (const testId of [
     `explore-candidate-mark-done-${stop.id}`,
-    `explore-candidate-move-up-${stop.id}`,
+    // The order arrows used to be measured here. They moved off the card
+    // into the route-order list on 2026-09-01 ("retire the arrows"), so the
+    // sleep button stands in — same .btn-outline on the same dark card,
+    // which is the declaration this test is really about.
+    `explore-candidate-sleep-${stop.id}`,
     `explore-candidate-stay-hours-${stop.id}`,
   ]) {
     const control = page.getByTestId(testId)
