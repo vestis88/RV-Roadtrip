@@ -207,3 +207,58 @@ describe('ordering from where the van actually is', () => {
     expect(ordered.map((s) => s.id)).toEqual(['near', 'far'])
   })
 })
+
+/**
+ * Reported 2026-09-01: *"I have 3 four hour activities that should go into
+ * today… one is put at day 6, after many things that are a lot further
+ * away."* And the traveler's own diagnosis, which was right: *"I don't think
+ * [Google] does such a poor job, rather I think there is a bug with how the
+ * optimization is fed the list."*
+ *
+ * It was fed a list that already had the stop last. The sign test in
+ * `orderStopsFromHere` has no sense of scale, so a stop a few hundred metres
+ * the "wrong" side of a van parked among a cluster projected negative and was
+ * exiled behind every stop ahead of it, however far away those were.
+ */
+describe('stops where the van already is', () => {
+  const GARDA = { lat: 45.88, lng: 10.84 }
+  // The trip continues a long way north.
+  const END = { lat: 59.33, lng: 18.06 }
+
+  it('keeps a cluster together whichever side of the van it sits on', async () => {
+    const { orderStopsFromHere } = await import('./candidateOrder')
+    const stops = [
+      // 200 km up the road — genuinely later, however keen you are.
+      { id: 'far', lat: 47.5, lng: 11.1 },
+      // Three things to do here. Two are marginally SOUTH of the van, so
+      // they project negative against a route running north.
+      { id: 'south-a', lat: 45.86, lng: 10.83 },
+      { id: 'south-b', lat: 45.85, lng: 10.86 },
+      { id: 'north', lat: 45.9, lng: 10.85 },
+    ]
+    const ordered = orderStopsFromHere(GARDA, END, stops, (s) => s)
+    expect(ordered.map((s) => s.id)).toEqual([
+      'north',
+      'south-a',
+      'south-b',
+      'far',
+    ])
+  })
+
+  /**
+   * The first report still holds: Kronplatz is ~50 km the wrong way from the
+   * Seiser Alm, and calling that "where we are" would undo the fix that put
+   * it behind rather than ahead.
+   */
+  it('still sends a genuinely backward stop to the end', async () => {
+    const { orderStopsFromHere } = await import('./candidateOrder')
+    const SEISER_ALM = { lat: 46.54, lng: 11.61 }
+    const VERONA = { lat: 45.44, lng: 10.99 }
+    const stops = [
+      { id: 'kronplatz', lat: 46.74, lng: 11.95 },
+      { id: 'ahead', lat: 46.0, lng: 11.2 },
+    ]
+    const ordered = orderStopsFromHere(SEISER_ALM, VERONA, stops, (s) => s)
+    expect(ordered.map((s) => s.id)).toEqual(['ahead', 'kronplatz'])
+  })
+})

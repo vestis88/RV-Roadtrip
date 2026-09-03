@@ -1,5 +1,6 @@
 import {
   findCheapestBackboneLeg,
+  haversineDistanceKm,
   projectAlongRoute,
   sortAlongRoute,
   type LatLng,
@@ -51,7 +52,37 @@ import type { CorridorStopWithId } from '../hooks/useCorridorStops'
  * A stop you have passed, or that lies the other way, is still yours — it is
  * just not next. So the ones ahead come first in projection order, and the
  * ones behind follow, in the order you would meet them going back.
+ *
+ * WITH ONE CORRECTION, and it is the whole of the second report.
+ *
+ * The sign test has no sense of scale. Parked among a cluster of things to
+ * do, half of them project a few hundred metres NEGATIVE — noise, not a
+ * statement about the trip — and each one was exiled behind every stop
+ * ahead, however far away those were. Reported 2026-09-01: *"I have 3 four
+ * hour activities that should go into today… one is put at day 6, after many
+ * things that are a lot further away."* The traveler was right that this was
+ * not Google's doing; the order Google is asked to improve on already had
+ * the stop last, and on a day the van has not moved far enough to re-key the
+ * answer, this guess IS the order.
+ *
+ * So "behind" now has to mean meaningfully behind. Anything within
+ * HERE_RADIUS_KM of the van is simply WHERE YOU ARE — you will do it now
+ * whichever compass direction it lies in — and sorts nearest-first at the
+ * front. Beyond that the ahead/behind rule is unchanged, so Kronplatz, some
+ * 50 km the wrong way from the Seiser Alm, still sorts last exactly as the
+ * first report demanded.
  */
+
+/**
+ * How close a stop has to be before its direction stops mattering.
+ *
+ * 20 km is about the radius of a day's pottering: inside it you are choosing
+ * an order for this afternoon, and the sign of a projection onto a line
+ * pointing at the end of the trip says nothing useful about that. Outside
+ * it, turning around is a real decision and the projection is the right
+ * measure again.
+ */
+const HERE_RADIUS_KM = 20
 export function orderStopsFromHere<T>(
   origin: LatLng,
   end: LatLng,
@@ -62,12 +93,17 @@ export function orderStopsFromHere<T>(
     stop,
     index,
     along: projectAlongRoute(origin, end, pointOf(stop)),
+    fromHere: haversineDistanceKm(origin, pointOf(stop)),
   }))
-  const ahead = measured.filter((entry) => entry.along >= 0)
-  const behind = measured.filter((entry) => entry.along < 0)
+  // Where you already are, whichever way it lies — see HERE_RADIUS_KM.
+  const here = measured.filter((entry) => entry.fromHere <= HERE_RADIUS_KM)
+  const rest = measured.filter((entry) => entry.fromHere > HERE_RADIUS_KM)
+  const ahead = rest.filter((entry) => entry.along >= 0)
+  const behind = rest.filter((entry) => entry.along < 0)
   // Behind is sorted DESCENDING: the least-far-back comes first, because
   // that is the one you would reach first if you turned around.
   const order = [
+    ...here.sort((a, b) => a.fromHere - b.fromHere || a.index - b.index),
     ...ahead.sort((a, b) => a.along - b.along || a.index - b.index),
     ...behind.sort((a, b) => b.along - a.along || a.index - b.index),
   ]

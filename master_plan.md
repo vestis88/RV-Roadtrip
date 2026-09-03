@@ -3817,6 +3817,51 @@ whole-trip driving optimisation.
 Verification: lint 0, build 0, frontend **467**, functions **664**, e2e
 **174** — all green.
 
+### 2026-09-01 — "behind you" needed a sense of scale
+
+*"No need to raise ceiling, but you need to investigate why the stop is put
+last with google optimization. I don't think it does such a poor job, rather
+I think there is a bug with how the optimization is fed the list or similar."*
+
+**Right on both counts.** Google was not the problem, and the list it was fed
+already had the stop last.
+
+The plumbing checked out: `askedBackbone` is built from `guessedOrder` and
+never from Google's own answer, so `waypoint_order` — which indexes the
+waypoints, i.e. the stops — is applied to exactly the list it describes. No
+off-by-one, and rule 1 of routeOrder.ts is honoured.
+
+The fault was one line upstream, in `orderStopsFromHere`:
+
+    const ahead = measured.filter((entry) => entry.along >= 0)
+    const behind = measured.filter((entry) => entry.along < 0)
+
+**The sign test has no sense of scale.** Parked among a cluster of things to
+do, half of them project a few hundred metres NEGATIVE against a line
+pointing at the end of the trip — noise, not a statement about anything — and
+each was exiled behind every stop ahead, however far away those were. Hence a
+four-hour activity a few minutes from the van landing on day 6 behind things
+hundreds of kilometres off. And on a day the van has not moved far enough to
+re-key Google's stored answer, this guess IS the order the traveler sees.
+
+So "behind" now has to mean *meaningfully* behind. Anything within 20 km of
+the van is simply where you are — you will do it now whichever compass
+direction it lies in — and sorts nearest-first at the front. Beyond that the
+ahead/behind rule is untouched, which is what keeps the ORIGINAL report fixed:
+Kronplatz, some 50 km the wrong way from the Seiser Alm, still sorts last.
+Both cases are now tests, and the new one was confirmed to fail under the old
+rule before being kept — three of six ordering tests once passed against the
+code they were meant to indict, and that is not repeated here.
+
+What this does NOT change: three four-hour activities are still 12 hours
+against a 10-hour day, so two share today and the third moves to tomorrow.
+The traveler declined to raise the ceiling, and the split was never the
+complaint — the sixth day was.
+
+Verification: lint 0, build 0, frontend **469**, functions **664**, e2e
+**174** — all green (`dayview.spec.ts:140` and `responsive-offline.spec.ts:33`
+flaked once in a full run; both pass in isolation and on the re-run).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
