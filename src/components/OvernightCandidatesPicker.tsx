@@ -1,29 +1,25 @@
 import { useState } from 'react'
 import { collection, getDocs } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
-import type { OvernightStopCandidate, Trip, TripDay } from '@rv/shared'
+import type { OvernightStopCandidate, TripDay } from '@rv/shared'
 import { db, functions } from '../lib/firebase'
 import { navigateUrl } from '../lib/mapLinks'
-import { submitPlanChangeRequest } from '../lib/submitChangeRequest'
+import { chooseOvernight } from '../lib/chooseOvernight'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 
 interface OvernightCandidatesPickerProps {
   tripId: string
-  trip: Trip
   dayId: string
   day: TripDay
-  /** ids of every day before this one — locked so only this day (and, via
-   * the replan, everything after it) gets re-planned. */
-  priorDayIds: string[]
   /**
-   * True while the plan is already being rewritten — including a submission
-   * this client just made that the backend has not acknowledged yet. Same
-   * prop, same reason, as AddRestDay and RequestChangesForDay: see the note
-   * on pickCandidate below for what happened without it.
+   * True while a full plan generation is rewriting the trip underneath this.
+   *
+   * Kept although choosing no longer submits anything: a generation in
+   * flight owns the days and would overwrite a choice made while it ran.
+   * `trip`, `priorDayIds` and `onSubmitted` went with the replan they
+   * existed for.
    */
   planBusy: boolean
-  /** Called once the planRequest write lands, so the busy state starts. */
-  onSubmitted: () => void
 }
 
 const WILD_TOOLTIP_SEEN_KEY = 'wildCampingTooltipSeen'
@@ -35,28 +31,27 @@ const GROUPS: { type: OvernightStopCandidate['type']; label: string }[] = [
 ]
 
 /**
- * Overnight-stop type & candidate selection (implemented 2026-07-27):
- * candidates are resolved lazily, only when this panel is opened, and
- * picking one doesn't patch TripDay.overnight directly — that would leave
- * every following day's drive leg silently stale. Instead it submits a
- * scoped replan (reusing submitPlanChangeRequest, the same path Day View's
- * "Request changes for this day" uses) locking every day before this one,
- * with the chosen stop passed in as a hard constraint.
+ * Overnight-stop type & candidate selection (2026-07-27): candidates are
+ * resolved lazily, only when this panel is opened, and picking one writes
+ * the choice onto the day immediately.
  *
- * Because it submits a replan, it needs the same busy guard every other
- * submitter on this screen has (see planBusy below). It shipped without one:
- * the 2026-08-11 fix for repeat submissions was applied to "Add a rest day
- * here" and "Request changes for this day" and to nothing else, and this
- * picker — which had existed since 2026-07-27 — was simply not on the list.
+ * It did not always. Until 2026-09-02 it submitted a scoped REPLAN —
+ * *"picking one doesn't patch TripDay.overnight directly — that would leave
+ * every following day's drive leg silently stale"* — so a chosen campsite
+ * changed nothing until a Claude pass rewrote the rest of the trip, and with
+ * the API account out of credit it changed nothing at all. Reported as *"I
+ * went in to add alternative overnight stops… It was not saved."*
+ *
+ * The fear was real under a frozen plan and is obsolete under this one: the
+ * days are re-derived from the board and their legs come from the live
+ * Directions call. See chooseOvernight, and `townAnchor` for the part that
+ * keeps the day recognisable to the writer that preserves it.
  */
 export function OvernightCandidatesPicker({
   tripId,
-  trip,
   dayId,
   day,
-  priorDayIds,
   planBusy,
-  onSubmitted,
 }: OvernightCandidatesPickerProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -156,24 +151,16 @@ export function OvernightCandidatesPicker({
     setSubmittingIndex(index)
     setError(null)
     try {
-      await submitPlanChangeRequest(
-        tripId,
-        trip,
-        `Change the overnight stop for Day ${day.index + 1} to "${candidate.name}" ` +
-          `(${candidate.type}) at approximately ${candidate.lat.toFixed(4)}, ` +
-          `${candidate.lng.toFixed(4)} — ${candidate.description}. Replan the ` +
-          `route to continue from there.`,
-        priorDayIds,
-      )
-      // Before the panel closes, so the busy banner is already on screen by
-      // the time the controls disappear — closing into an apparently
-      // unchanged screen is what invited the second tap.
-      onSubmitted()
+      // Written straight onto the day. See chooseOvernight for why this
+      // stopped being a replan: the fear it was avoiding — stranding the
+      // following days' drive legs — belongs to a plan that was frozen, and
+      // this one is re-derived from the board.
+      await chooseOvernight(tripId, dayId, day, candidate)
       setOpen(false)
       setCandidates(null)
     } catch (err) {
-      console.error('Failed to submit overnight change', err)
-      setError('Could not submit that change — try again.')
+      console.error('Failed to save the overnight choice', err)
+      setError('Could not save that — try again.')
     } finally {
       setSubmittingIndex(null)
     }

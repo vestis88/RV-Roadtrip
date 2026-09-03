@@ -639,3 +639,96 @@ describe('recognising an itinerary that already says this', () => {
     expect(decision.days).toBeDefined()
   })
 })
+
+/**
+ * Reported 2026-09-02: *"I went in to add alternative overnight stops through
+ * change overnight stops. It was not saved now that I went back to the same
+ * day."*
+ *
+ * The first cause was that choosing submitted a replan that never ran. The
+ * second would have bitten the moment the first was fixed: a campsite can
+ * sit 15 km outside the town its day is built around, so matching a stored
+ * day by where it SLEEPS makes it unrecognisable to the writer that
+ * preserves it — and the next pass deletes it and writes a fresh one, taking
+ * the choice with it. `townAnchor` is the day's identity; the bed is a
+ * decision about it.
+ */
+describe('a day whose overnight has been moved off its town', () => {
+  const stored = (over: Partial<TripDayWithId>): TripDayWithId =>
+    ({
+      id: 'd1',
+      index: 0,
+      date: '2026-09-02',
+      type: 'drive',
+      summary: 'A day by the lake.',
+      ...over,
+    }) as TripDayWithId
+
+  it('is still recognised by the town it belongs to', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [
+        stored({
+          // Chosen campsite, well outside the town and under another name.
+          overnight: {
+            name: 'Camping Bella Italia',
+            lat: 45.44,
+            lng: 10.71,
+            country: 'IT',
+          },
+          // Where the day actually belongs.
+          townAnchor: { lat: 45.88, lng: 10.84 },
+        }),
+      ],
+      [
+        {
+          index: 0,
+          date: '2026-09-04',
+          type: 'drive',
+          overnight: {
+            name: 'Riva del Garda',
+            lat: 45.88,
+            lng: 10.84,
+            country: 'IT',
+          },
+          summary: 'On to Riva del Garda.',
+        } as TripDay,
+      ],
+    )
+    expect(plan.reuse.map((entry) => entry.id)).toEqual(['d1'])
+    expect(plan.removeIds).toHaveLength(0)
+  })
+
+  // Without the anchor the same day is unmatchable, which is precisely the
+  // deletion this guards against.
+  it('would be lost without one', async () => {
+    const { planSkeletonWrite } = await import('./skeletonDays')
+    const plan = planSkeletonWrite(
+      [
+        stored({
+          overnight: {
+            name: 'Camping Bella Italia',
+            lat: 45.44,
+            lng: 10.71,
+            country: 'IT',
+          },
+        }),
+      ],
+      [
+        {
+          index: 0,
+          date: '2026-09-04',
+          type: 'drive',
+          overnight: {
+            name: 'Riva del Garda',
+            lat: 45.88,
+            lng: 10.84,
+            country: 'IT',
+          },
+          summary: 'On to Riva del Garda.',
+        } as TripDay,
+      ],
+    )
+    expect(plan.removeIds).toEqual(['d1'])
+  })
+})

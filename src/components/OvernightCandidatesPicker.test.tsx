@@ -1,40 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OvernightStopCandidate, PlanStatus, Trip, TripDay } from '@rv/shared'
+import type { OvernightStopCandidate, PlanStatus, TripDay } from '@rv/shared'
 import { usePlanBusy } from '../lib/planBusy'
-
-// A trip that has NOT started yet, which is the state every reported
-// occurrence of this bug was in.
-const TRIP: Trip = {
-  meta: {
-    name: 'Copenhagen loop',
-    shareCode: 'AB12CD',
-    createdAt: '2026-08-01T10:00:00Z',
-    version: 1,
-  },
-  settings: {
-    startDate: '2026-08-14',
-    endDate: '2026-08-17',
-    startPoint: { name: 'Copenhagen', lat: 55.6761, lng: 12.5683 },
-    endPoint: { name: 'Copenhagen', lat: 55.6761, lng: 12.5683 },
-    travelers: [{ name: 'Traveler', role: 'adult' }],
-    interests: ['castles'],
-    preferredCountries: ['DK'],
-    restDayFrequency: 7,
-    maxDriveHoursPerDay: 4,
-    vehicle: {
-      type: 'RV',
-      weightKg: 3500,
-      registeredAs: 'car',
-      heightM: 2.9,
-      lengthM: 6.5,
-      widthM: 2.3,
-      fuel: 'diesel',
-    },
-  },
-  notes: { freeText: '', updatedAt: '2026-08-01T10:00:00Z' },
-  planMeta: { status: 'ready' },
-}
 
 const DAY: TripDay = {
   index: 1,
@@ -57,7 +24,7 @@ const CANDIDATE: OvernightStopCandidate = {
 // Only the two edges that leave this component matter here: where the
 // candidates come from, and whether a replan was submitted. Everything else
 // is the component's own state machine, which is what's under test.
-const submitPlanChangeRequest = vi.fn().mockResolvedValue(undefined)
+const chooseOvernight = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('firebase/firestore', () => ({
   collection: () => ({}),
@@ -69,9 +36,8 @@ vi.mock('firebase/firestore', () => ({
 }))
 vi.mock('firebase/functions', () => ({ httpsCallable: () => vi.fn() }))
 vi.mock('../lib/firebase', () => ({ db: {}, functions: {} }))
-vi.mock('../lib/submitChangeRequest', () => ({
-  submitPlanChangeRequest: (...args: unknown[]) =>
-    submitPlanChangeRequest(...args),
+vi.mock('../lib/chooseOvernight', () => ({
+  chooseOvernight: (...args: unknown[]) => chooseOvernight(...args),
 }))
 
 const { OvernightCandidatesPicker } = await import('./OvernightCandidatesPicker')
@@ -87,22 +53,19 @@ const { OvernightCandidatesPicker } = await import('./OvernightCandidatesPicker'
  * claiming it. That interval is the entire bug.
  */
 function Harness({ status }: { status: PlanStatus }) {
-  const { busy, markSubmitted } = usePlanBusy(status)
+  const { busy } = usePlanBusy(status)
   return (
     <OvernightCandidatesPicker
       tripId="trip1"
-      trip={TRIP}
       dayId="day1"
       day={DAY}
-      priorDayIds={['day0']}
       planBusy={busy}
-      onSubmitted={markSubmitted}
     />
   )
 }
 
 beforeEach(() => {
-  submitPlanChangeRequest.mockClear()
+  chooseOvernight.mockClear()
   window.localStorage.clear()
 })
 
@@ -114,50 +77,55 @@ describe('OvernightCandidatesPicker', () => {
     )
   }
 
-  it('submits the pick as a scoped replan', async () => {
+  /**
+   * Reported 2026-09-02: *"I went in to add alternative overnight stops
+   * through change overnight stops. It was not saved now that I went back to
+   * the same day. I want the stops saved!!"*
+   *
+   * It was never saved: picking submitted a scoped REPLAN and waited for a
+   * Claude pass to rewrite the trip, which with the API account out of
+   * credit never arrived. The choice is one field on one day now.
+   */
+  it('saves the pick straight onto the day', async () => {
     render(<Harness status="ready" />)
     await openAndPick()
 
-    await waitFor(() => expect(submitPlanChangeRequest).toHaveBeenCalledTimes(1))
-    const [tripId, , changeText, lockedDayIds] =
-      submitPlanChangeRequest.mock.calls[0]
+    await waitFor(() => expect(chooseOvernight).toHaveBeenCalledTimes(1))
+    const [tripId, dayId, , candidate] = chooseOvernight.mock.calls[0]
     expect(tripId).toBe('trip1')
-    expect(changeText).toContain('Helsingør Camping')
-    expect(lockedDayIds).toEqual(['day0'])
+    expect(dayId).toBe('day1')
+    expect((candidate as OvernightStopCandidate).name).toBe(
+      'Helsingør Camping',
+    )
   })
 
-  // The 2026-08-13 incident, and the reason this file exists. The traveler
-  // picked a stop, the panel closed, and — with the trip still 'ready'
-  // because the trigger hadn't fired yet — the button came straight back.
-  // Tapping it again submitted a second replan against a plan that was
-  // already being replaced.
-  it('refuses a second pick during the window before the backend acknowledges the first', async () => {
-    render(<Harness status="ready" />)
-    await openAndPick()
-    await waitFor(() => expect(submitPlanChangeRequest).toHaveBeenCalledTimes(1))
-
-    const toggle = await screen.findByTestId('change-overnight-toggle')
-    expect(toggle).toBeDisabled()
-    fireEvent.click(toggle)
-    expect(screen.queryByTestId('overnight-candidates-panel')).toBeNull()
-    expect(submitPlanChangeRequest).toHaveBeenCalledTimes(1)
-  })
-
-  // The acknowledgement has to be on screen before the controls vanish —
-  // a panel that closes into an unchanged page is what "nothing happened"
-  // looked like, and what invited the second tap in the first place.
-  it('reports the submission before closing the panel', async () => {
+  // The panel closes because the thing it was for is done — not because a
+  // request is pending somewhere. Nothing to acknowledge, nothing to wait
+  // for, and the choice is already on the day behind it.
+  it('closes once the choice is written', async () => {
     render(<Harness status="ready" />)
     await openAndPick()
 
     await waitFor(() =>
-      expect(screen.getByTestId('change-overnight-toggle')).toHaveTextContent(
-        'Updating the plan…',
-      ),
+      expect(screen.queryByTestId('overnight-candidates-panel')).toBeNull(),
     )
   })
 
-  it('cannot be opened at all while the backend is already replanning', () => {
+  // And it can be changed again immediately: the 2026-08-13 double-submit
+  // guard existed because two replans against overlapping state corrupted
+  // the trip. Writing one field twice is simply the second answer.
+  it('lets the traveller change their mind straight away', async () => {
+    render(<Harness status="ready" />)
+    await openAndPick()
+    await waitFor(() => expect(chooseOvernight).toHaveBeenCalledTimes(1))
+
+    const toggle = await screen.findByTestId('change-overnight-toggle')
+    expect(toggle).toBeEnabled()
+  })
+
+  // A generation owns the days while it runs and would overwrite a choice
+  // made underneath it — the one reason this still watches planBusy.
+  it('cannot be opened while a generation is rewriting the trip', () => {
     render(<Harness status="generating" />)
     const toggle = screen.getByTestId('change-overnight-toggle')
     expect(toggle).toBeDisabled()

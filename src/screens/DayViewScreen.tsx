@@ -594,12 +594,9 @@ export function DayViewScreen() {
 
         <OvernightCandidatesPicker
           tripId={tripId}
-          trip={trip}
           dayId={dayId}
           day={day}
-          priorDayIds={days.filter((d) => d.index < day.index).map((d) => d.id)}
           planBusy={planBusy}
-          onSubmitted={markSubmitted}
         />
 
         <p className="mx-4 mt-4 flex flex-wrap items-center gap-1.5 text-sm text-neutral-700 dark:text-neutral-200">

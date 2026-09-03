@@ -414,3 +414,61 @@ test('selecting the day\'s only activity with no reserve left degrades to a "no 
     timeout: 10_000,
   })
 })
+
+/**
+ * Reported 2026-09-02: *"I went in to add alternative overnight stops through
+ * change overnight stops. It was not saved now that I went back to the same
+ * day. I want the stops saved!!"*
+ *
+ * It was never saved. Picking submitted a scoped REPLAN and waited for a
+ * Claude pass to rewrite the rest of the trip — a relic of the frozen-plan
+ * model — so nothing changed on the day until that finished, and with the
+ * API account out of credit it never finished at all.
+ */
+test('a chosen overnight is saved on the day, and survives coming back to it', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  const dayRef = adminDb.collection('trips').doc(tripId).collection('days').doc(dayId)
+
+  // Options resolved earlier — the sandbox has no credentials to resolve
+  // them live, and that is not what this is about.
+  await dayRef.collection('overnightOptions').doc('c0').set({
+    name: 'Camping Bella Italia',
+    type: 'campsite',
+    lat: 45.44,
+    lng: 10.71,
+    country: 'IT',
+    description: 'Lakeside pitches with a pool.',
+    source: 'places',
+  })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  await page.getByTestId('change-overnight-toggle').click()
+  await page.getByTestId('overnight-candidate-pick-campsite-0').click()
+  await expect(page.getByTestId('overnight-candidates-panel')).toHaveCount(0)
+
+  // On the day itself, immediately — no plan request, nothing to wait for.
+  await expect
+    .poll(async () => (await dayRef.get()).data()?.overnight?.name, {
+      timeout: 15_000,
+    })
+    .toBe('Camping Bella Italia')
+
+  // The town the day belongs to is recorded, so the day list writer still
+  // recognises it and cannot delete it out from under the choice.
+  const saved = (await dayRef.get()).data()
+  expect(saved?.townAnchor).toBeTruthy()
+
+  // And it is still there on the way back, which is the whole report.
+  await page.goto('/map')
+  await page.getByTestId('day-strip').waitFor()
+  await page.goto(`/map/day/${dayId}`)
+  await expect(page.getByTestId('day-view')).toBeVisible()
+  await expect(page.getByText('Camping Bella Italia').first()).toBeVisible({
+    timeout: 15_000,
+  })
+})

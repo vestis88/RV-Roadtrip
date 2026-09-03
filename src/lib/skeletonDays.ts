@@ -372,7 +372,7 @@ export function planSkeletonWrite(
       byName >= 0
         ? byName
         : unclaimed.findIndex(
-            (old) => coordKey(old.overnight) === coordKey(day.overnight),
+            (old) => coordKey(anchorOf(old)) === coordKey(day.overnight),
           )
     if (index < 0) return undefined
     return unclaimed.splice(index, 1)[0]
@@ -414,6 +414,23 @@ function nameKey(name: string | undefined): string {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+/**
+ * Where a stored day BELONGS, as opposed to where it sleeps.
+ *
+ * `townAnchor` is set the moment a traveler picks an alternative overnight
+ * (see chooseOvernight), because a campsite can sit 15 km outside the town
+ * the day is built around — and matching on the bed would make the day
+ * unrecognisable to this function the instant someone chose one. The next
+ * pass would then delete it and write a fresh one, taking the choice with
+ * it. Reported 2026-09-02: "I went in to add alternative overnight stops…
+ * It was not saved."
+ *
+ * The town is the identity; the bed is a decision about it.
+ */
+function anchorOf(day: TripDayWithId): { lat: number; lng: number } | undefined {
+  return day.townAnchor ?? day.overnight
 }
 
 /** ≈1 km, the same grid quantisePosition uses for the route origin. */

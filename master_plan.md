@@ -3936,6 +3936,50 @@ Asked for and deliberately not touched — *"Not yet — report first"*:
 Verification: lint 0, build 0, frontend **469**, functions **664**, e2e
 **172** — all green.
 
+### 2026-09-02 — the overnight choice was never saved, by design
+
+*"I went in to add alternative overnight stops through change overnight stops.
+It was not saved now that I went back to the same day. I want the stops
+saved!!"*
+
+It was not saved, and the code said so in its own comment:
+
+> picking one doesn't patch `TripDay.overnight` directly — that would leave
+> every following day's drive leg silently stale. Instead it submits a scoped
+> replan.
+
+So choosing a campsite wrote a `planRequests` document and waited for a Claude
+pass to rewrite the remainder of the trip. **Nothing changed on the day until
+that finished** — and with the API account out of credit it never finished,
+so the choice evaporated in silence. Another relic of the plan-as-frozen-
+artefact model, and the third this week where the old machinery turned a
+one-field edit into a paid rewrite.
+
+The fear behind it is obsolete. Following days no longer hold a frozen drive
+leg that a change here would strand: the day list is re-derived from the
+board, and the legs come from the live Directions call the map is already
+making. So it is now one field, on one day, written immediately.
+
+**`townAnchor` is the load-bearing half**, and this would have broken again
+the moment the first half was fixed. `planSkeletonWrite` matches a stored day
+to a rebuilt one by where it SLEEPS — so moving the overnight onto a campsite
+15 km outside the town makes the day unrecognisable to the very function that
+preserves it, and the next pass deletes it and writes a fresh one, taking the
+choice with it. The town is the day's identity; the bed is a decision about
+it. Recorded on the first change and never overwritten, so the anchor stays
+the town however many campsites are tried. Both halves are tests, including
+one asserting the day WOULD be lost without the anchor.
+
+The picker also shed `trip`, `priorDayIds` and `onSubmitted` — props that
+existed only for the replan — and its double-submit guard, which existed
+because two replans against overlapping state corrupted a trip in August.
+Writing one field twice is simply the second answer. It still watches
+`planBusy`: a full generation owns the days while it runs and would overwrite
+a choice made underneath it.
+
+Verification: lint 0, build 0, frontend **471**, functions **664**, e2e
+**173** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:
