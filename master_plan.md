@@ -4065,6 +4065,36 @@ Verification: lint 0, build 0, frontend **470**, functions **664**, e2e
 **174** — all green (`execution-mode.spec.ts:76` flaked once in a full run
 and passes in isolation and on the re-run).
 
+#### 2026-09-03 — the row failed twice and said nothing (follow-up)
+
+Reported with two screenshots the same day the row shipped: *"Seems like
+there is some at least visual issues here. Looks like when I click the
+button two texts are shown. Then I get these errors."*
+
+Two defects, one of them mine and one older:
+
+1. **The failure was rendered twice.** `CardRow` renders its `empty` slot
+   *and* its `footer`, and the error had been put in both — so a failed look
+   printed two identical red lines. The footer is now the single place a
+   failure is reported; the empty slot holds only the fill button and the
+   "Nothing found nearby" note.
+2. **The failure said nothing.** `getOvernightCandidates` called
+   `fetchOvernightCandidates` with no `try`/`catch`, so anything that was
+   not already an `HttpsError` reached the browser as the bare word
+   `internal` — the trap `rescanCorridorCallable.ts` has documented since
+   2026-08-16. It now wraps the call and names the cause with
+   `describeCause`, and the row prefers the server's own account over the
+   generic line via `describeOvernightSearchError`, the third screen to use
+   `callableError.ts` after the explore search and the country briefs. The
+   commonest cause this week is the Claude account being out of credit,
+   which no amount of pressing the button again will fix, so the row now
+   says so instead of advising a retry.
+
+On the overlapping button text: only one button exists — `CardRow` renders
+`empty` **or** `children`, never both, and the `{busy ? 'Looking…' : 'Find
+where to sleep'}` swap is the same one every other section uses. The
+duplicated *error* was the real defect behind that screenshot.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

@@ -3,6 +3,7 @@ import { HttpsError, onCall } from 'firebase-functions/https'
 import type { LatLng, OvernightStopCandidate, TripDay } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { requireTripMember } from './authz.js'
+import { describeCause } from './describeCause.js'
 import { loadFreeCampingRulesByCountry } from './countryGuideSections.js'
 import { findNearbyCampsites, googlePlacesApiKey } from './placesApi.js'
 import { searchStellplatzCandidates } from './overpassApi.js'
@@ -265,7 +266,21 @@ export const getOvernightCandidates = onCall(
       throw new HttpsError('invalid-argument', 'tripId and dayId are required')
     }
     await requireTripMember(tripId, request.auth.uid)
-    const candidates = await fetchOvernightCandidates(tripId, dayId)
-    return { candidates }
+    try {
+      const candidates = await fetchOvernightCandidates(tripId, dayId)
+      return { candidates }
+    } catch (error) {
+      // Anything not already an HttpsError reaches the browser as the bare
+      // word "internal" — the trap rescanCorridorCallable.ts documents, and
+      // what a traveler saw on 2026-09-03 when the row failed. The commonest
+      // cause this week is the Claude account being out of credit, which no
+      // amount of pressing the button again will fix, so say it.
+      if (error instanceof HttpsError) throw error
+      console.error('getOvernightCandidates failed', error)
+      throw new HttpsError(
+        'internal',
+        `Could not look for places to sleep: ${describeCause(error)}`,
+      )
+    }
   },
 )

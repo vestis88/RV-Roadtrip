@@ -4,6 +4,7 @@ import type { OvernightStopCandidate, TripDay } from '@rv/shared'
 import { functions } from '../lib/firebase'
 import { LONG_CALLABLE_TIMEOUT_MS } from '../lib/callableTimeouts'
 import { chooseOvernight } from '../lib/chooseOvernight'
+import { describeOvernightSearchError } from '../lib/overnightSearchError'
 import { CardRow } from './CardRow'
 import { PlaceCard } from './PlaceCard'
 import type { OvernightOptionWithId } from '../hooks/useDayDetail'
@@ -89,7 +90,10 @@ export function OvernightSection({
       setLookedAndFoundNothing(result.data.candidates.length === 0)
     } catch (err) {
       console.error('getOvernightCandidates failed', err)
-      setError('Could not look for places to sleep — please try again.')
+      // The cause, not a shrug. Every other failing lookup on this trip says
+      // what went wrong — the commonest one this week is the API account
+      // being out of credit, which no amount of trying again will fix.
+      setError(describeOvernightSearchError(err))
     } finally {
       setFinding(false)
     }
@@ -134,6 +138,18 @@ export function OvernightSection({
                 Nothing found nearby.
               </span>
             )}
+          </div>
+        ) : undefined
+      }
+      footer={
+        /* The row's footer is the ONE place a failure is reported.
+         *
+         * It was in the empty slot as well until 2026-09-03, which put two
+         * identical red lines on screen the moment a look failed — reported
+         * with a screenshot, and obvious in hindsight: an empty row renders
+         * both slots. */
+        error || wild ? (
+          <span className="flex flex-col gap-1">
             {error && (
               <span
                 data-testid="overnight-row-error"
@@ -142,27 +158,18 @@ export function OvernightSection({
                 {error}
               </span>
             )}
-          </div>
-        ) : undefined
-      }
-      footer={
-        /* Kept from the old panel because it is a safety note rather than a
-         * piece of that panel: legality varies by country and the app is
-         * suggesting somewhere to park overnight. */
-        wild ? (
-          <span
-            data-testid="wild-camping-caveat"
-            className="text-xs text-amber-800 dark:text-amber-200"
-          >
-            Wild camping legality varies a lot by country and region — verify
-            locally before relying on any of these.
-          </span>
-        ) : error ? (
-          <span
-            data-testid="overnight-row-error"
-            className="text-xs text-red-600 dark:text-red-400"
-          >
-            {error}
+            {/* Kept from the old panel because it is a safety note rather
+              * than a piece of that panel: legality varies by country and
+              * the app is suggesting somewhere to park overnight. */}
+            {wild && (
+              <span
+                data-testid="wild-camping-caveat"
+                className="text-xs text-amber-800 dark:text-amber-200"
+              >
+                Wild camping legality varies a lot by country and region —
+                verify locally before relying on any of these.
+              </span>
+            )}
           </span>
         ) : undefined
       }
