@@ -12,6 +12,16 @@ export const CATEGORY_ICON: Record<ActivityCategory, string> = {
 }
 export const RESTAURANT_ICON = '🍴'
 export const OVERNIGHT_ICON = '🛏️'
+/**
+ * A place this day COULD sleep, as opposed to the one it does.
+ *
+ * Requested 2026-09-02: *"I want the overnight stop options to show on the
+ * map in a similar way as activities and restaurants."* Deliberately not the
+ * bed: the chosen overnight and a candidate for it must be tellable apart at
+ * a glance, or the map answers "where am I sleeping" with a dozen equal
+ * pins. A tent is the option; the bed is the decision.
+ */
+export const OVERNIGHT_OPTION_ICON = '⛺'
 export const CORRIDOR_PROPOSED_ICON = '🔍'
 export const CORRIDOR_LOCKED_ICON = '📌'
 export const CORRIDOR_CANDIDATE_ICON = '💡'

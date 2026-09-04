@@ -4013,6 +4013,58 @@ because it has not moved the night anywhere. `lastStopBefore` is gone.
 Verification: lint 0, build 0, frontend **474**, functions **664**, e2e
 **173** — all green.
 
+### 2026-09-02 — where to sleep becomes an ordinary section
+
+*"I want the overnight stop options to show on the map in a similar way as
+activities and restaurants."* — and then, shown a bespoke panel wired to the
+map with its own open state and its own highlighting: *"I want the exact same
+kind of logic as the list for the restaurants and activities. There is no
+need for different functionality, or is there?"*
+
+The push-back was right and the first attempt was mine inventing a mechanism
+next to one that already existed. The overnight options are now a section of
+the day — "Where to sleep" — built from the same `CardRow` and `PlaceCard`
+every other row uses, because every part of the old panel already had a
+counterpart:
+
+| The panel had | The day already had |
+|---|---|
+| a link that opened a collapsible list | a row that is simply there |
+| its own fetch on open | a "Find where to sleep" button on an empty row, exactly like "Find things to do" |
+| its own highlighted-row styling | `selectedPlace`, shared by every card and pin |
+| nothing on the map | pins that select their card, like an activity's |
+
+The candidates are streamed by `useDayDetail` alongside activities and
+restaurants, so they are on the map whether or not anyone opens anything, and
+they survive the app closing like every other lookup — the callable writes
+them to the day rather than returning them into component state.
+
+**The one real difference, since it was asked directly:** an overnight is a
+single choice that lands on the day, where an activity or a restaurant each
+carries its own status and several can be selected at once. So a card here
+reads as chosen rather than as selected-among-many, and choosing one
+un-chooses the last. That is a fact about sleeping in one place at a time,
+not a reason for different machinery.
+
+Two things were kept from the panel because they are content rather than
+structure: the wild-camping caveat (legality varies by country, and the app
+is suggesting somewhere to park overnight), and the distinction between a
+look that has not happened and one that came back empty — every source can
+be unreachable at once, and "nothing found nearby" is then the honest answer
+rather than an error. `OvernightCandidatesPicker` is deleted.
+
+**Environment note**, recorded because it cost a confusing half hour: the
+container was recycled mid-session and took `node_modules`, `functions/lib`
+and the local `.env` with it. The symptoms were a TypeScript "cannot find
+type definition file for google.maps", then every e2e failing at sign-in,
+then two unit suites failing with `auth/invalid-api-key`. `npm ci` in both
+roots, `npm run build` in `functions/`, and the emulator-mode `.env` that
+`ci.yml` writes for itself.
+
+Verification: lint 0, build 0, frontend **470**, functions **664**, e2e
+**174** — all green (`execution-mode.spec.ts:76` flaked once in a full run
+and passes in isolation and on the re-run).
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

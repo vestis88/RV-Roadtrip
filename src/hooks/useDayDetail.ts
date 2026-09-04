@@ -1,15 +1,34 @@
 import { useEffect, useState } from 'react'
 import { collection, doc, onSnapshot } from 'firebase/firestore'
-import type { Activity, Restaurant, TripDay } from '@rv/shared'
+import type {
+  Activity,
+  OvernightStopCandidate,
+  Restaurant,
+  TripDay,
+} from '@rv/shared'
 import { db } from '../lib/firebase'
 
 export type ActivityWithId = Activity & { id: string }
 export type RestaurantWithId = Restaurant & { id: string }
+export type OvernightOptionWithId = OvernightStopCandidate & { id: string }
 
 export function useDayDetail(tripId: string, dayId: string | undefined) {
   const [day, setDay] = useState<TripDay | undefined>(undefined)
   const [activities, setActivities] = useState<ActivityWithId[]>([])
   const [restaurants, setRestaurants] = useState<RestaurantWithId[]>([])
+  /**
+   * The places this day COULD sleep, as opposed to the one it does.
+   *
+   * Requested 2026-09-02: *"I want the overnight stop options to show on the
+   * map in a similar way as activities and restaurants."* They were read
+   * only by the picker, and only once it was opened — so a decision about
+   * where to sleep was made from a list of names while the map beside it
+   * showed nothing but the current choice. Streamed like everything else on
+   * the day, so the pins are simply there.
+   */
+  const [overnightOptions, setOvernightOptions] = useState<
+    OvernightOptionWithId[]
+  >([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -48,12 +67,29 @@ export function useDayDetail(tripId: string, dayId: string | undefined) {
       (error) =>
         console.error('[useDayDetail] restaurants onSnapshot error', dayId, error),
     )
+    const unsubOvernight = onSnapshot(
+      collection(dayRef, 'overnightOptions'),
+      (snap) =>
+        setOvernightOptions(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as OvernightStopCandidate),
+          })),
+        ),
+      (error) =>
+        console.error(
+          '[useDayDetail] overnightOptions onSnapshot error',
+          dayId,
+          error,
+        ),
+    )
     return () => {
       unsubDay()
       unsubActivities()
       unsubRestaurants()
+      unsubOvernight()
     }
   }, [tripId, dayId])
 
-  return { day, activities, restaurants, loading }
+  return { day, activities, restaurants, overnightOptions, loading }
 }

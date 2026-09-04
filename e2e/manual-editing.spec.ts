@@ -210,14 +210,16 @@ test('opening "Change overnight stop" degrades to "nothing found" without Claude
   await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
-  await page.getByTestId('change-overnight-toggle').click()
-  await expect(page.getByTestId('overnight-candidates-panel')).toBeVisible()
-  await expect(page.getByTestId('overnight-candidates-empty')).toBeVisible({
-    timeout: 10_000,
+  // An ordinary section of the day since 2026-09-02, offering to fill itself
+  // exactly as "Find things to do" does — no panel to open or dismiss.
+  await page.getByTestId('overnight-row').waitFor()
+  await page.getByTestId('overnight-row-fill').click()
+  // Every source is unreachable here, and each fails independently, so the
+  // honest answer is "nothing nearby" rather than an error — the same state
+  // a traveler would see with real credentials and nothing around them.
+  await expect(page.getByTestId('overnight-row-empty')).toBeVisible({
+    timeout: 15_000,
   })
-
-  await page.getByTestId('change-overnight-cancel').click()
-  await expect(page.getByTestId('overnight-candidates-panel')).toHaveCount(0)
 })
 
 test('skipping the day\'s only activity, with a reserve one waiting, promotes it instantly', async ({
@@ -447,9 +449,10 @@ test('a chosen overnight is saved on the day, and survives coming back to it', a
   await page.goto(`/map/day/${dayId}`)
   await page.getByTestId('day-view').waitFor()
 
-  await page.getByTestId('change-overnight-toggle').click()
-  await page.getByTestId('overnight-candidate-pick-campsite-0').click()
-  await expect(page.getByTestId('overnight-candidates-panel')).toHaveCount(0)
+  // The card's own keep button, the same control an activity card carries.
+  const card = page.getByTestId('overnight-option-c0')
+  await expect(card).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('overnight-option-c0-mark-selected').click()
 
   // On the day itself, immediately — no plan request, nothing to wait for.
   await expect
@@ -471,4 +474,43 @@ test('a chosen overnight is saved on the day, and survives coming back to it', a
   await expect(page.getByText('Camping Bella Italia').first()).toBeVisible({
     timeout: 15_000,
   })
+})
+
+/**
+ * Requested 2026-09-02: *"I want the overnight stop options to show on the
+ * map in a similar way as activities and restaurants."*
+ *
+ * They were read only by the picker, and only once it was opened — so a
+ * decision about where to sleep was made from a list of names while the map
+ * beside it showed nothing but the current choice.
+ */
+test('overnight options are pins on the day map, and reach their entry', async ({
+  page,
+}) => {
+  const tripId = await createTripWithPlan(page)
+  const dayId = await getDayIdByDate(tripId, '2026-07-10')
+  const dayRef = adminDb.collection('trips').doc(tripId).collection('days').doc(dayId)
+
+  await dayRef.collection('overnightOptions').doc('c0').set({
+    name: 'Camping Bella Italia',
+    type: 'campsite',
+    lat: 45.44,
+    lng: 10.71,
+    country: 'IT',
+    description: 'Lakeside pitches with a pool.',
+    source: 'places',
+  })
+
+  await page.goto(`/map/day/${dayId}`)
+  await page.getByTestId('day-view').waitFor()
+
+  // Drawn like any other place on the day. Google Maps JS is blocked in this
+  // sandbox, so the marker itself is not assertable — what IS assertable is
+  // that the day streams the options at all, which is what the pins are made
+  // from, and that the list they belong to can be reached and shows them.
+  // Streamed onto the day like activities and restaurants, so the row is
+  // simply there — nothing to open, and the same cards the pins point at.
+  await expect(page.getByTestId('overnight-option-c0')).toContainText(
+    'Camping Bella Italia',
+  )
 })

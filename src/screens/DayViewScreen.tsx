@@ -27,9 +27,14 @@ import { RequestChangesForDay } from '../components/RequestChangesForDay'
 import { AddRestDay } from '../components/AddRestDay'
 import { PlanBusyBanner } from '../components/PlanBusyBanner'
 import { usePlanBusy } from '../lib/planBusy'
-import { OvernightCandidatesPicker } from '../components/OvernightCandidatesPicker'
+import { OvernightSection } from '../components/OvernightSection'
 import { MarkerBadge } from '../components/MarkerBadge'
-import { CATEGORY_ICON, OVERNIGHT_ICON, RESTAURANT_ICON } from '../lib/mapIcons'
+import {
+  CATEGORY_ICON,
+  OVERNIGHT_ICON,
+  OVERNIGHT_OPTION_ICON,
+  RESTAURANT_ICON,
+} from '../lib/mapIcons'
 import { navigateUrl } from '../lib/mapLinks'
 import {
   markDone,
@@ -325,7 +330,7 @@ export function DayViewScreen() {
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
   }, [])
-  const { day, activities, restaurants, loading } = useDayDetail(tripId, dayId)
+  const { day, activities, restaurants, overnightOptions, loading } = useDayDetail(tripId, dayId)
   const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
   // Day View is where both structural actions live, and it was the one
@@ -353,9 +358,12 @@ export function DayViewScreen() {
             { lat: day.overnight.lat, lng: day.overnight.lng },
             ...activities.map((a) => ({ lat: a.lat, lng: a.lng })),
             ...restaurants.map((r) => ({ lat: r.lat, lng: r.lng })),
+            // Framed like everything else on the day: a campsite 15 km out
+            // of town is exactly the one worth seeing before choosing it.
+            ...overnightOptions.map((o) => ({ lat: o.lat, lng: o.lng })),
           ]
         : [],
-    [day, activities, restaurants],
+    [day, activities, restaurants, overnightOptions],
   )
 
   // Always shown, not just on the overview map — routing through a day's
@@ -422,6 +430,38 @@ export function DayViewScreen() {
             <FitToPoints points={framedPoints} />
             <MapPanner target={selectedPlace} />
             <DirectionsRoute points={routePoints} onError={setRouteError} />
+
+            {/* The places this day could sleep, before the bed that says
+              * where it does — drawn first so the chosen one is never
+              * covered by a candidate sharing its patch of map. Requested
+              * 2026-09-02: "I want the overnight stop options to show on the
+              * map in a similar way as activities and restaurants." */}
+            {overnightOptions.map((option) => {
+              const placeId = `overnight-option-${option.id}`
+              return (
+                <AdvancedMarker
+                  key={placeId}
+                  position={{ lat: option.lat, lng: option.lng }}
+                  title={`${option.name} — ${option.type}`}
+                  onClick={() =>
+                    setSelectedPlace({
+                      id: placeId,
+                      name: option.name,
+                      lat: option.lat,
+                      lng: option.lng,
+                    })
+                  }
+                >
+                  <MarkerBadge
+                    icon={OVERNIGHT_OPTION_ICON}
+                    // The one it sleeps at is the bed below; a candidate
+                    // that happens to BE the choice reads as chosen here.
+                    selected={option.name === day.overnight.name}
+                    highlighted={selectedPlace?.id === placeId}
+                  />
+                </AdvancedMarker>
+              )
+            })}
 
             <AdvancedMarker
               position={{ lat: day.overnight.lat, lng: day.overnight.lng }}
@@ -592,10 +632,13 @@ export function DayViewScreen() {
           onSubmitted={markSubmitted}
         />
 
-        <OvernightCandidatesPicker
+        <OvernightSection
           tripId={tripId}
           dayId={dayId}
           day={day}
+          options={overnightOptions}
+          selectedPlaceId={selectedPlace?.id}
+          onSelect={(cardId, place) => setSelectedPlace({ id: cardId, ...place })}
           planBusy={planBusy}
         />
 
