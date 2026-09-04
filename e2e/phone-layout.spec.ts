@@ -1,8 +1,14 @@
 import { expect, test } from './fixtures.js'
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 import {
   createTripWithPlan,
   getDayIdByDate,
 } from './helpers/seedFixturePlan.js'
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'
+if (getApps().length === 0) initializeApp({ projectId: 'demo-rv-trip-planner' })
+const adminDb = getFirestore()
 
 /**
  * Reported 2026-08-24 from an iPhone: "The iPhone view is now very limited
@@ -49,7 +55,19 @@ test('the phone header stays out of the list’s way', async ({ page }) => {
 test('the plan actions are reachable behind More on a phone', async ({
   page,
 }) => {
-  await createTripWithPlan(page)
+  const tripId = await createTripWithPlan(page)
+  // Two kept stops, because "Edit route" is offered where there is an order
+  // to arrange — and the fixture's own stops are all `committed`, which is
+  // what a GENERATION writes and not what the route is made of any more
+  // (2026-09-03). Seeding them here keeps the assertion about the
+  // disclosure rather than about the fixture.
+  const stops = adminDb.collection('trips').doc(tripId).collection('corridorStops')
+  for (const kept of [
+    { name: 'Lago di Braies', lat: 46.6947, lng: 12.0853 },
+    { name: 'Tre Cime di Lavaredo', lat: 46.6183, lng: 12.3053 },
+  ]) {
+    await stops.add({ ...kept, country: 'IT', status: 'locked', linkedDayIds: [] })
+  }
   await page.getByTestId('nav-map').click()
   await page.getByTestId('day-strip').waitFor()
 
@@ -58,10 +76,6 @@ test('the plan actions are reachable behind More on a phone', async ({
 
   await page.getByTestId('more-plan-actions').click()
   await expect(page.getByTestId('request-changes-button')).toBeVisible()
-  // "Edit route" and not "Rebuild day list": this fixture's stops are all
-  // `committed`, and the rebuild button is offered only where there are
-  // LOCKED stops to rebuild the days from. Asserting it here would have been
-  // a claim about the fixture rather than about the disclosure.
   await expect(page.getByTestId('reorder-stops-button')).toBeVisible()
 
   // And they collapse again, rather than being a one-way door.

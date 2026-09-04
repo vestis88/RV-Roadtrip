@@ -1,5 +1,4 @@
 import type { CorridorStopWithId } from '../hooks/useCorridorStops'
-import type { TripDayWithId } from '../hooks/useTripDays'
 
 /**
  * Which stops "Edit route" can reorder, and which it can add.
@@ -8,35 +7,9 @@ import type { TripDayWithId } from '../hooks/useTripDays'
  * the actions row: the button lives in one component and the panel it opens
  * in another, and both have to agree about whether there is anything to
  * edit. Two copies of that rule would drift into a button that opens an
- * empty panel.
+ * empty panel — which is exactly what happened anyway when the panel moved
+ * on and the gate did not, so `canEditRoute` now asks the panel's own list.
  */
-
-/**
- * Committed stops in the order their days fall.
- *
- * `corridorStops` carries no sequence of its own — `linkedDayIds` ties each
- * stop back to real, ordered days, so the days ARE the order. An empty
- * `days` can produce no order at all (every stop ties on Infinity), which
- * surfaced as an intermittently wrong first stop in the reorder panel, so it
- * yields nothing rather than a guess.
- */
-export function committedStopsInRouteOrder(
-  days: TripDayWithId[],
-  corridorStops: CorridorStopWithId[],
-): { id: string; name: string; earliestIndex: number }[] {
-  const dayIndexById = new Map(days.map((day) => [day.id, day.index]))
-  return (days.length === 0 ? [] : corridorStops)
-    .filter((stop) => stop.status === 'committed')
-    .map((stop) => ({
-      id: stop.id,
-      name: stop.name,
-      earliestIndex: stop.linkedDayIds.reduce(
-        (min, dayId) => Math.min(min, dayIndexById.get(dayId) ?? Infinity),
-        Infinity,
-      ),
-    }))
-    .sort((a, b) => a.earliestIndex - b.earliestIndex)
-}
 
 /**
  * Locked stops with no day yet — a traveler-placed pin or a locked rescan
@@ -60,13 +33,21 @@ export function stopsAddableToRoute(
     .map((stop) => ({ id: stop.id, name: stop.name }))
 }
 
-/** Whether "Edit route" has anything to offer: something to reorder, or to add. */
-export function canEditRoute(
-  days: TripDayWithId[],
-  corridorStops: CorridorStopWithId[],
-): boolean {
-  return (
-    committedStopsInRouteOrder(days, corridorStops).length > 1 ||
-    stopsAddableToRoute(corridorStops).length > 0
-  )
+/**
+ * Whether "Edit route" has anything to offer.
+ *
+ * Asks about the same stops the panel lists (2026-09-03). The panel moved to
+ * the kept stops in driving order on 2026-09-01 — that was the whole point of
+ * the report that it "contains an old route, not the current" — but this
+ * gate was left behind asking the frozen-plan question: are there committed
+ * stops from a generation, or kept stops with no day yet?
+ *
+ * On a trip curated rather than generated, both are eventually no: nothing
+ * is 'committed', and the skeleton writer gives every kept stop a
+ * `linkedDayIds` as soon as it writes the days. So the button vanished from
+ * precisely the trips whose order is worth arranging by hand, while the
+ * panel behind it had a full list.
+ */
+export function canEditRoute(routeStops: { id: string }[]): boolean {
+  return routeStops.length > 1
 }

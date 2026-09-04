@@ -4095,6 +4095,58 @@ On the overlapping button text: only one button exists — `CardRow` renders
 where to sleep'}` swap is the same one every other section uses. The
 duplicated *error* was the real defect behind that screenshot.
 
+#### 2026-09-03 — `locked` vs `committed`, and the button that outlived its panel
+
+Asked on 2026-09-01 whether the two statuses should converge, the answer was
+*"Not yet — report first"*. This is that report, plus the one place the
+divergence was actively breaking a screen.
+
+**What each status means now.** `committed` is written by exactly one thing:
+a full generation, for its own overnight towns (`functions/src/corridorStops.ts`).
+`locked` is written by everything a traveler does — pinning a stop, locking
+a candidate, keeping a rescan find. The one other writer of `committed` was
+"Add to route" through `corridorReconciliation`, and that button is gone
+(2026-09-01): the day writer packs a locked stop from the board on its own,
+so nothing a traveler presses can produce a `committed` stop any more.
+
+**Where they diverge today:**
+
+| Surface | Filters on | Right? |
+|---|---|---|
+| The day writer (`skeletonDays`) | `locked`, not done | yes — this is the plan |
+| `routeStops` on the map | `locked`, not done | yes — same set |
+| Explore list, "Locked in" filter | `locked` | yes |
+| Shared trip view | `committed` **or** `locked` | yes — a guest should see both an old generation's route and a curated one |
+| `dayCleanup` (which days are orphans) | `committed` **or** `locked` | yes — same reason: a day is not an orphan because the plan that made it is old |
+| Generation's seed query | `candidate`, `locked`, `committed` (traveler-origin only) | yes, and deliberately: see the 2026-08-19 note in `generatePlan.ts` |
+| **"Edit route" button** | `committed` stops with days, or `locked` stops **without** days | **no — fixed here** |
+
+The button was the live bug. Its panel moved to the kept stops in driving
+order on 2026-09-01 — the whole point of *"the edit route contains an old
+route, not the current"* — but `canEditRoute` was left asking the
+frozen-plan question. On a curated trip both halves of it go false: nothing
+is `committed`, and the skeleton writer gives every kept stop a
+`linkedDayIds` the moment it writes the days. So the button disappeared from
+exactly the trips whose order is worth arranging by hand, while the panel
+behind it had a full list. `canEditRoute(routeStops)` now asks the panel's
+own question — is there more than one stop to order — and
+`committedStopsInRouteOrder` is deleted with it.
+
+**Recommendation on converging the two:** not worth a migration. `committed`
+is now a historical marker — "a generation wrote this town" — read by two
+surfaces that deliberately want both statuses, and by the generation seed
+that deliberately treats them differently. Collapsing it into `locked` would
+lose the distinction `generatePlan` depends on (its own overnight towns must
+not seed the next plan; a traveler's stops must). Left alone, it decays on
+its own: no new `committed` stops are being written.
+
+Deleted with it: `ReorderCorridorPanel.tsx` and `src/lib/reconcileCorridor.ts`,
+the last client path to the paid reconcile pass, unrendered since 2026-09-01.
+The `reconcileCorridor` request kind stays on the server — nothing writes one
+any more, but a queued request from before the change must still be readable.
+
+Verification: lint 0, build 0, frontend **478**, e2e **174** — all green.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

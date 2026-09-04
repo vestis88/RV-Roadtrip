@@ -1229,7 +1229,7 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
                   Rebuild day list
                 </button>
               )}
-              {canEditRoute(days, corridorStops) && (
+              {canEditRoute(routeStops) && (
                 <button
                   type="button"
                   data-testid="reorder-stops-button"
