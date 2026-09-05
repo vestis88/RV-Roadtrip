@@ -927,3 +927,34 @@ describe('when the area sweep runs', () => {
     ).resolves.toBeDefined()
   })
 })
+
+describe('targetFindCount', () => {
+  it('asks a wide circle for a full set', async () => {
+    const { targetFindCount, MAX_RESCAN_RESULTS } = await import('./rescanCorridor.js')
+    expect(targetFindCount({ radiusKm: 150, isCorridor: false, isQuery: false })).toBe(
+      MAX_RESCAN_RESULTS,
+    )
+  })
+
+  it('asks a small circle for what a small circle holds', async () => {
+    const { targetFindCount } = await import('./rescanCorridor.js')
+    expect(targetFindCount({ radiusKm: 40, isCorridor: false, isQuery: false })).toBe(8)
+    expect(targetFindCount({ radiusKm: 6, isCorridor: false, isQuery: false })).toBe(5)
+  })
+
+  // A corridor search covers the whole route, however tight the circle it
+  // was launched from.
+  it('treats a corridor search as a wide one', async () => {
+    const { targetFindCount, MAX_RESCAN_RESULTS } = await import('./rescanCorridor.js')
+    expect(targetFindCount({ radiusKm: 6, isCorridor: true, isQuery: false })).toBe(
+      MAX_RESCAN_RESULTS,
+    )
+  })
+
+  // "coffee stop" wants a handful, and is answered on a smaller output
+  // budget — a dozen four-sentence entries is asking to be cut off.
+  it('asks a typed query for a handful', async () => {
+    const { targetFindCount } = await import('./rescanCorridor.js')
+    expect(targetFindCount({ radiusKm: 150, isCorridor: true, isQuery: true })).toBe(6)
+  })
+})

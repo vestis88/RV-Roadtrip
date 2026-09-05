@@ -309,6 +309,46 @@ describe('runRescanCorridor and the stops the trip already has', () => {
     expect(input.existingStopNames).toContain('Cima Grappa')
   })
 
+  /**
+   * Only the first 60 reach the prompt, and the order was whatever Firestore
+   * returned — so a trip the length of Italy could spend the whole allowance
+   * on stops 800 km from the circle and send none of the ones a search there
+   * could actually propose twice.
+   */
+  it('sends the ones nearest the search first', async () => {
+    const { tripId } = await createTripForUser('uidRescanNearest')
+    const stops = getFirestore()
+      .collection('trips')
+      .doc(tripId)
+      .collection('corridorStops')
+    // Written far-first, so passing this cannot be an accident of insertion
+    // order.
+    for (const stop of [
+      { name: 'Salento beach', lat: 39.8, lng: 18.3 },
+      { name: 'Rome forum', lat: 41.89, lng: 12.49 },
+      { name: 'Next valley over', lat: 45.9, lng: 11.9 },
+    ]) {
+      await stops.add({
+        ...stop,
+        country: 'IT',
+        why: 'Kept.',
+        status: 'candidate',
+        linkedDayIds: [],
+      })
+    }
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(tripId, CENTER, 25)
+
+    const [input] = generateRescanCandidatesMock.mock.calls[0]
+    expect(input.existingStopNames).toEqual([
+      'Next valley over',
+      'Rome forum',
+      'Salento beach',
+    ])
+  })
+
   it('does not add a stop the trip already has', async () => {
     const { tripId } = await createTripForUser('uidRescanDupe')
     const stops = getFirestore()

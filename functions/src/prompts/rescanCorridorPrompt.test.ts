@@ -214,3 +214,42 @@ describe('what the traveler already has', () => {
     expect(system).toMatch(/do not propose them again/i)
   })
 })
+
+/**
+ * Reported 2026-09-05 over a 150 km circle across central Italy: "Searched
+ * 150 km of Italy and it found one stop?! I want it to find the best of the
+ * region. There must be A LOT more!!" — and one find is what the model
+ * returned. The only things this prompt had ever said about quantity were
+ * "do not pad" and "an empty list is a valid and honest answer": two
+ * arguments for fewer, and nothing at all for more. `MAX_RESCAN_RESULTS`
+ * existed the whole time as a server-side slice the model was never told
+ * about.
+ */
+describe('how many places the search is asked for', () => {
+  it('names a target, and says it is a size rather than a ceiling to stay under', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 150 })
+    expect(system).toMatch(/PROPOSE AS MANY AS THE GROUND HOLDS, up to "howManyToPropose"/)
+    expect(system).toMatch(/not a ceiling to stay well under/)
+  })
+
+  it('carries the number itself, so the target is a fact and not a guess', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 150,
+      targetFinds: 12,
+    })
+    expect(JSON.parse(user).howManyToPropose).toBe(12)
+  })
+
+  it('asks for them spread across the area rather than around its centre', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 150 })
+    expect(system).toMatch(/Spread them across the WHOLE area/)
+  })
+
+  // The counterweight survives: this must not become a padding instruction.
+  it('still says fewer is the honest answer for ground that holds fewer', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 6 })
+    expect(system).toMatch(/Do not pad, either/)
+    expect(system).toMatch(/an empty "finds" list is a valid and honest answer/)
+  })
+})

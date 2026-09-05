@@ -69,7 +69,43 @@ export const MAX_RESCAN_RADIUS_KM = 150
 
 /** Caps how many proposed stops one rescan can add — a single search
  * shouldn't be able to flood the corridor with dozens of unreviewed pins. */
-export const MAX_RESCAN_RESULTS = 10
+export const MAX_RESCAN_RESULTS = 12
+
+/**
+ * How many finds to ASK for, which is not the same as how many to allow.
+ *
+ * Reported 2026-09-05 over a 150 km circle across central Italy: *"Searched
+ * 150 km of Italy and it found one stop?! I want it to find the best of the
+ * region. There must be A LOT more!!"* — and the model had indeed proposed
+ * exactly one place, which then failed its map lookup, so the traveler got
+ * nothing at all from a search that ran for minutes.
+ *
+ * `MAX_RESCAN_RESULTS` has always existed, but it is a server-side slice the
+ * model has never been told about. The only things the prompt said about
+ * quantity were "do not pad" and "an empty list is a valid and honest
+ * answer" — both arguments for fewer, with nothing on the other side. One
+ * find was the model doing as it was asked.
+ *
+ * Scaled by the ground being covered, because the honest number genuinely
+ * differs: a 150 km circle across a European region holds a dozen good
+ * stops, and a 5 km circle around a mountain hut holds a handful. A corridor
+ * search covers the whole route, so it gets the wide figure.
+ */
+export function targetFindCount(input: {
+  radiusKm: number
+  isCorridor: boolean
+  /**
+   * A typed query wants a handful of matches rather than a survey — and it
+   * is answered on a smaller output budget (see runSearchTurn), so asking
+   * for a dozen four-sentence entries is asking to be cut off mid-JSON.
+   */
+  isQuery: boolean
+}): number {
+  if (input.isQuery) return 6
+  if (input.isCorridor || input.radiusKm >= 75) return MAX_RESCAN_RESULTS
+  if (input.radiusKm >= 25) return 8
+  return 5
+}
 
 /**
  * When searching along a route backbone (see `backbone` below) instead of a
@@ -273,7 +309,15 @@ export async function generateRescanCandidates(input: {
       console.warn('Area sweep failed — searching without it', error)
     }
   }
-  const { system, user } = buildRescanCorridorPrompt({ ...input, placesInArea })
+  const { system, user } = buildRescanCorridorPrompt({
+    ...input,
+    placesInArea,
+    targetFinds: targetFindCount({
+      radiusKm: input.radiusKm,
+      isCorridor: !!input.backbone && input.backbone.length >= 2,
+      isQuery: !!input.query,
+    }),
+  })
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: user }]
 
   let found: z.infer<typeof rescanResponseSchema> | undefined

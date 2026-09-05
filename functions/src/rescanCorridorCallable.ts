@@ -1,6 +1,11 @@
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
-import { corridorStopSchema, type LatLng, type Trip } from '@rv/shared'
+import {
+  corridorStopSchema,
+  haversineDistanceKm,
+  type LatLng,
+  type Trip,
+} from '@rv/shared'
 import { requireAccess } from './accessControl.js'
 import { describeCause } from './describeCause.js'
 import { requireTripMember } from './authz.js'
@@ -115,9 +120,29 @@ export async function runRescanCorridor(
    * unconditionally.
    */
   const existingSnap = await tripRef.collection('corridorStops').get()
+  // Nearest to the search first. Only the first MAX_EXISTING_STOPS reach the
+  // prompt, and that has always been sliced in whatever order Firestore
+  // returned — so a trip the length of Italy could spend the whole allowance
+  // on stops 800 km from the circle being searched and send none of the ones
+  // that could actually be proposed twice. The comment on MAX_EXISTING_STOPS
+  // has claimed this ordering since it was written (2026-09-05).
   const existingStopNames = existingSnap.docs
-    .map((doc) => (doc.data() as { name?: string }).name)
-    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    .map((doc) => doc.data() as { name?: string; lat?: number; lng?: number })
+    .filter(
+      (stop): stop is { name: string; lat?: number; lng?: number } =>
+        typeof stop.name === 'string' && stop.name.length > 0,
+    )
+    .map((stop) => ({
+      name: stop.name,
+      // A stop with no usable coordinates sorts last rather than throwing
+      // the order out — it is still worth sending if there is room.
+      distanceKm:
+        Number.isFinite(stop.lat) && Number.isFinite(stop.lng)
+          ? haversineDistanceKm({ lat: stop.lat!, lng: stop.lng! }, center)
+          : Number.POSITIVE_INFINITY,
+    }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map((stop) => stop.name)
 
   // A typed query goes to Places first (see findStopsForQuery); the plain
   // "Rescan this area" pass has no query to search for and is Claude's job

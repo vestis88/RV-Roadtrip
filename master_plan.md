@@ -4147,6 +4147,52 @@ any more, but a queued request from before the change must still be readable.
 
 Verification: lint 0, build 0, frontend **478**, e2e **174** — all green.
 
+#### 2026-09-05 — one find for 150 km of Italy
+
+Reported with a screenshot of a 150 km circle over Abruzzo: *"Searched 150 km
+of Italy and it found one stop?! I want it to find the best of the region.
+There must be A LOT more!!"* — and the on-screen line said the one place it
+did suggest could not be found on the map, so the traveler got nothing at
+all from a search that ran for minutes.
+
+The count is not an accident of that particular run. **The prompt has never
+told the model how many places to propose.** `MAX_RESCAN_RESULTS` has existed
+since the feature shipped, but it is a server-side slice applied after the
+answer comes back — the model was never told a cap existed, let alone what a
+good answer looked like. What it *was* told about quantity was "Do not pad"
+and "an empty finds list is a valid and honest answer": two arguments for
+fewer, and nothing whatever on the other side. One find was the model doing
+as it was asked.
+
+So the ask is now explicit and scaled to the ground being covered, because
+the honest number really does differ — a 150 km circle across a European
+region holds a dozen good stops and a 5 km circle around a mountain hut holds
+a handful:
+
+| Search | Asked for |
+|---|---|
+| Corridor, or a circle ≥ 75 km | 12 (`MAX_RESCAN_RESULTS`, raised from 10) |
+| A circle ≥ 25 km | 8 |
+| Anything smaller | 5 |
+| A typed query ("coffee stop") | 6 — a handful, and on a 1500-token budget |
+
+The prompt now carries that number as `howManyToPropose`, says it is the size
+of answer the area deserves rather than a ceiling to stay under, asks for the
+finds spread across the whole circle rather than clustered on its centre or
+its best-known town, and points out that proposing more costs the traveler
+nothing: every name is verified against real map data and they review each
+card. The counterweight survives as its own rule — fewer is still the honest
+answer for ground that holds fewer, and an area with fewer *famous* places is
+still not an area with fewer places.
+
+**Second fix in the same call:** the already-on-the-list names are now sent
+nearest-first. Only the first 60 reach the prompt and the order was whatever
+Firestore happened to return, so a trip running the length of Italy could
+spend the entire allowance on stops 800 km from the circle being searched —
+and send none of the ones a search there could actually propose twice. The
+comment on `MAX_EXISTING_STOPS` has claimed this ordering since the day it
+was written; now the code does it.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

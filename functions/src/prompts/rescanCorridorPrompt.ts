@@ -29,7 +29,8 @@ Hard rules:
 1b. A SMALL RADIUS IS ANSWERED BY ORDINARY THINGS. Within a few kilometres of a point there is rarely a famous sight, and that is not the same as nothing to do. The lake itself and where you can swim in it or launch a boat, the marked trail from the car park, the viewpoint, the gorge walk, the mountain hut, the cable car station, the campsite, the one restaurant in the hamlet — these are real answers and a traveler parked there wants them. Name them at the scale the radius asks for. Reserve an empty list for genuinely empty ground, not for ground that merely has nothing famous on it.
 2. DO NOT invent or state exact distances, drive times, or coordinates — not in "why", not anywhere. Those are checked against real data after you respond. Describe where a place roughly is in words and stop there.
 3. "name" MUST be the real, searchable name of a real place, spelled the way Google Maps would have it (e.g. "Vallåsen Bike Park", "Hovs Hallar", "Klässbols Linneväveri"). Every name is looked up against real map data after you respond and DISCARDED if it can't be found, so a generic entry ("a nice forest walk", "a local café") is a wasted one — name the park, the operator, the trailhead, the resort's own base area.
-4. Do not pad. If this area genuinely has nothing worth stopping for, an empty "finds" list is a valid and honest answer. But "I am not certain enough" is not the same as "there is nothing here": propose the place you would name to a friend and let the map-data check be the thing that rejects it.
+4. PROPOSE AS MANY AS THE GROUND HOLDS, up to "howManyToPropose". That number describes the size of answer this area deserves, not a ceiling to stay well under — a wide circle across a European region holds many genuinely good stops, and naming one or two of them is a worse answer than the ground supports. Spread them across the WHOLE area rather than clustering them around its centre or its best-known town, and cover the different interests and kinds of stop rather than five variations on one. Proposing more costs the traveler nothing: every name is checked against real map data and they review each one, so a good place you were only fairly sure about is worth naming and a place they end up skipping costs them a glance.
+5. Do not pad, either. If this area genuinely has fewer than that, name fewer, and if it genuinely has nothing worth stopping for, an empty "finds" list is a valid and honest answer. But "I am not certain enough" is not the same as "there is nothing here": propose the place you would name to a friend and let the map-data check be the thing that rejects it. And an area with fewer FAMOUS places is not an area with fewer places — see rule 1b.
 
 The "why" for each find is what the traveler actually reads when deciding whether to keep it: 2-4 sentences describing what's genuinely there, what makes it worth the stop, and which of the traveler's stated interests or notes it answers.
 
@@ -47,6 +48,12 @@ If you have nothing to add, respond with { "finds": [] }.`
  * that matter for "do not propose it twice" are the ones near this search.
  */
 const MAX_EXISTING_STOPS = 60
+
+/**
+ * What to ask for when a caller does not say — the debug tool and the older
+ * tests. Real searches pass a figure scaled to the ground they cover.
+ */
+const DEFAULT_TARGET_FINDS = 8
 
 export function buildRescanCorridorPrompt(input: {
   center: LatLng
@@ -120,6 +127,8 @@ export function buildRescanCorridorPrompt(input: {
    * and stops the same place being proposed twice.
    */
   existingStopNames?: string[]
+  /** How many finds to ask for — see targetFindCount in rescanCorridor.ts. */
+  targetFinds?: number
 }): { system: string; user: string } {
   const namedRoute =
     input.waypointNames && input.waypointNames.length >= 2
@@ -150,6 +159,11 @@ export function buildRescanCorridorPrompt(input: {
     ...(input.existingStopNames && input.existingStopNames.length > 0
       ? { alreadyOnTheList: input.existingStopNames.slice(0, MAX_EXISTING_STOPS) }
       : {}),
+    // How big an answer this ground deserves — see targetFindCount. Sent
+    // because the model had no idea a cap existed and no idea what a good
+    // count looked like, and the only quantity guidance in the prompt was
+    // two different arguments for fewer.
+    howManyToPropose: input.targetFinds ?? DEFAULT_TARGET_FINDS,
     interests: input.interests ?? [],
     notes: input.notesFreeText ?? '',
     ...(input.query ? { focusQuery: input.query } : {}),
