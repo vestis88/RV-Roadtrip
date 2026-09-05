@@ -4,6 +4,7 @@ import type {
   Activity,
   ActivityCategory,
   LatLng,
+  MapBounds,
   Meal,
   OvernightStopCandidate,
   Restaurant,
@@ -1091,7 +1092,12 @@ export async function searchPlacesByQuery(
       `Places query search failed with ${response.status}: ${body.slice(0, 500)}`,
     )
   }
-  const data = (await response.json()) as {
+  return placesFromResponse(await response.json())
+}
+
+/** The one shape both sweeps get back, read the same way. */
+function placesFromResponse(payload: unknown): QueryPlaceFind[] {
+  const data = payload as {
     places?: {
       displayName?: { text?: string }
       location?: { latitude: number; longitude: number }
@@ -1224,6 +1230,96 @@ export async function searchPlacesInArea(
   return [...byId.values()].sort(
     (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.ratingCount ?? 0) - (a.ratingCount ?? 0),
   )
+}
+
+/**
+ * Every notable place Places knows of inside a RECTANGLE — the area the
+ * traveler can actually see.
+ *
+ * Asked for directly on 2026-09-05: *"Don't lock yourself to a circle if a
+ * rectangle would work better. Google must have some native understanding of
+ * searching a defined area!"* They do, and it is a different endpoint.
+ *
+ * `places:searchNearby` — what the circle sweep above uses — takes only a
+ * circle and refuses one larger than 50 km, which is the entire reason the
+ * sweep was switched off above that and a 150 km search had to run on the
+ * model's memory alone. `places:searchText` takes a `locationRestriction`
+ * RECTANGLE, with no such cap, so the map's own viewport goes to Google
+ * verbatim and comes back filled in. Same hard-bound guarantee as the
+ * circle: a restriction cannot return a place outside it, so nothing
+ * downstream has anything left to drop.
+ *
+ * One request per type for the same reason the circle sweep does it: a mixed
+ * request ranks by prominence and hands back the one famous sight twenty
+ * times over while never mentioning the trailhead.
+ */
+export async function searchPlacesInRectangle(
+  bounds: MapBounds,
+): Promise<QueryPlaceFind[]> {
+  const apiKey = googlePlacesApiKey.value()
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_PLACES_API_KEY is not configured — area search requires real data and has no synthetic fallback.',
+    )
+  }
+  const byId = new Map<string, QueryPlaceFind>()
+  const perType = await Promise.all(
+    AREA_SWEEP_TYPES.map(async (includedType) => {
+      try {
+        return await textSearchInRectangle(includedType, bounds, apiKey)
+      } catch (error) {
+        console.warn(`Rectangle sweep for type "${includedType}" failed`, error)
+        return [] as QueryPlaceFind[]
+      }
+    }),
+  )
+  for (const find of perType.flat()) {
+    const key = `${find.name}|${find.lat.toFixed(4)}|${find.lng.toFixed(4)}`
+    if (!byId.has(key)) byId.set(key, find)
+  }
+  return [...byId.values()].sort(
+    (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.ratingCount ?? 0) - (a.ratingCount ?? 0),
+  )
+}
+
+async function textSearchInRectangle(
+  includedType: string,
+  bounds: MapBounds,
+  apiKey: string,
+): Promise<QueryPlaceFind[]> {
+  const response = await fetch(
+    'https://places.googleapis.com/v1/places:searchText',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': QUERY_SEARCH_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        // searchText requires a query. The type's own name is the most
+        // neutral one there is — `includedType` is what actually constrains
+        // the result set, and a more opinionated phrase here would rank the
+        // sweep toward whatever it described.
+        textQuery: includedType.replace(/_/g, ' '),
+        includedType,
+        pageSize: 20,
+        locationRestriction: {
+          rectangle: {
+            low: { latitude: bounds.south, longitude: bounds.west },
+            high: { latitude: bounds.north, longitude: bounds.east },
+          },
+        },
+      }),
+    },
+  )
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(
+      `Places rectangle search failed with ${response.status}: ${body.slice(0, 300)}`,
+    )
+  }
+  return placesFromResponse(await response.json())
 }
 
 async function nearbySearchInCircle(

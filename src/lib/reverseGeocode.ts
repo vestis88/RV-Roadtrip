@@ -181,3 +181,45 @@ export function mostSpecific(
   }
   return best
 }
+
+/**
+ * The four corners of the visible map, as place names.
+ *
+ * The fix for a search that knew where its centre was and nothing about how
+ * far it reached. `reverseGeocodeName` picks the most specific rung it can —
+ * a park, a lake, a hamlet — which is exactly right for locating a 7 km
+ * circle and exactly wrong as the ONLY thing describing a 250 km rectangle:
+ * a search centred on Parco Sirente-Velino answered with those mountains and
+ * never mentioned the sea or Rome, both of which were on screen (reported
+ * 2026-09-05, with the pins clustered in one valley).
+ *
+ * Corners rather than the centre, because corners are what state a span. All
+ * four are looked up at once and each is allowed to fail on its own: a
+ * corner out at sea names nothing, and the rectangle is still better
+ * described by the three that answered than by none of them.
+ */
+export async function nameAreaCorners(bounds: {
+  north: number
+  south: number
+  east: number
+  west: number
+}): Promise<{
+  northWest?: string
+  northEast?: string
+  southWest?: string
+  southEast?: string
+}> {
+  const corners = {
+    northWest: { lat: bounds.north, lng: bounds.west },
+    northEast: { lat: bounds.north, lng: bounds.east },
+    southWest: { lat: bounds.south, lng: bounds.west },
+    southEast: { lat: bounds.south, lng: bounds.east },
+  }
+  const named = await Promise.all(
+    Object.entries(corners).map(async ([corner, point]) => {
+      const name = await reverseGeocodeName(point)
+      return [corner, name] as const
+    }),
+  )
+  return Object.fromEntries(named.filter(([, name]) => !!name))
+}

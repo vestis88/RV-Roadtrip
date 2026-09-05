@@ -10,6 +10,7 @@ import {
   estimateDetourKm,
   type CorridorStopPriority,
   type LatLng,
+  type MapBounds,
   type Trip,
 } from '@rv/shared'
 import { useCorridorStops } from '../hooks/useCorridorStops'
@@ -65,8 +66,12 @@ import { addFindToTrip } from '../lib/addFind'
 import { SearchFindCard } from '../components/SearchFindCard'
 import { dropFindFromScratch, type LiveFind, type LiveResult } from '../lib/liveSearch'
 import { useSearchScratch } from '../hooks/useSearchScratch'
-import { SearchAreaCircle } from '../components/SearchAreaCircle'
-import { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM, visibleRadiusKm } from '../lib/rescanCorridorAction'
+import { SearchArea } from '../components/SearchArea'
+import {
+  MAX_RESCAN_RADIUS_KM,
+  RESCAN_RADIUS_KM,
+  visibleSearchArea,
+} from '../lib/rescanCorridorAction'
 import { ConfirmGenerateDialog } from '../components/ConfirmGenerateDialog'
 import { PlanStrip } from '../components/PlanStrip'
 import {
@@ -202,16 +207,22 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
   const [addedFindNames, setAddedFindNames] = useState<Set<string>>(new Set())
   /** Which find's pin was tapped — the same idea as selectedId, for finds. */
   const [selectedFind, setSelectedFind] = useState<string | null>(null)
-  const searchArea = useMemo(() => {
-    const fromViewport = bounds
-      ? visibleRadiusKm(bounds)
-      : { radiusKm: RESCAN_RADIUS_KM }
-    if (radiusOverrideKm === null) return fromViewport
-    // The cap still applies to a typed number: it is the callable's, not the
-    // viewport's — see MAX_RESCAN_RADIUS_KM.
-    return radiusOverrideKm > MAX_RESCAN_RADIUS_KM
-      ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: radiusOverrideKm }
-      : { radiusKm: radiusOverrideKm }
+  const searchArea = useMemo((): {
+    bounds?: MapBounds
+    radiusKm: number
+    cappedFrom?: number
+  } => {
+    // A typed radius is a circle by definition — the traveler asked for a
+    // number of kilometres, not for what is on screen — so it keeps the
+    // circle. "What I can see" is the rectangle. See visibleSearchArea.
+    if (radiusOverrideKm !== null) {
+      // The cap still applies to a typed number: it is the callable's, not
+      // the viewport's — see MAX_RESCAN_RADIUS_KM.
+      return radiusOverrideKm > MAX_RESCAN_RADIUS_KM
+        ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: radiusOverrideKm }
+        : { radiusKm: radiusOverrideKm }
+    }
+    return bounds ? visibleSearchArea(bounds) : { radiusKm: RESCAN_RADIUS_KM }
   }, [bounds, radiusOverrideKm])
   // "Rescan this area"/"Add stop" both anchor to wherever the traveler is
   // actually looking, not a fixed point — OverviewMapScreen already tracks
@@ -1501,7 +1512,8 @@ export function ExploreMapScreen({ tripId, trip }: ExploreMapScreenProps) {
               {/* Only while aiming. Drawn on every map all the time, it
                 buried the pins under a boundary nobody had asked to see. */}
               {aimingSearch && (
-                <SearchAreaCircle
+                <SearchArea
+                  bounds={searchArea.bounds}
                   center={center}
                   radiusKm={searchArea.radiusKm}
                   capped={searchArea.cappedFrom !== undefined}

@@ -46,6 +46,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 // Vallåsen Bike Park, because the verified name was thrown away).
 const verifyPlaceMock = vi.fn()
 const sweepMock = vi.fn(() => Promise.resolve([]))
+const rectangleSweepMock = vi.fn(() => Promise.resolve([]))
 
 vi.mock('../placesApi.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../placesApi.js')>()
@@ -53,6 +54,8 @@ vi.mock('../placesApi.js', async (importOriginal) => {
     ...actual,
     verifyPlaceLocation: (...args: unknown[]) => verifyPlaceMock(...args),
     searchPlacesInArea: (...args: unknown[]) => sweepMock(...(args as [])),
+    searchPlacesInRectangle: (...args: unknown[]) =>
+      rectangleSweepMock(...(args as [])),
   }
 })
 
@@ -956,5 +959,94 @@ describe('targetFindCount', () => {
   it('asks a typed query for a handful', async () => {
     const { targetFindCount } = await import('./rescanCorridor.js')
     expect(targetFindCount({ radiusKm: 150, isCorridor: true, isQuery: true })).toBe(6)
+  })
+})
+
+/**
+ * Asked for 2026-09-05: *"Don't lock yourself to a circle if a rectangle
+ * would work better. Google must have some native understanding of searching
+ * a defined area!"*
+ *
+ * They do — `places:searchText` restricts to a rectangle at any size, where
+ * `searchNearby` takes only a circle and refuses one over 50 km. That cap is
+ * the entire reason a 150 km search ran on the model's memory with no list of
+ * what was actually there.
+ */
+describe('searching the rectangle the traveler can see', () => {
+  const VIEWPORT = { north: 62.1, south: 61.4, east: 10.2, west: 8.9 }
+
+  beforeEach(() => {
+    rectangleSweepMock.mockReset().mockResolvedValue([])
+    sweepMock.mockReset().mockResolvedValue([])
+  })
+
+  async function runRectangleRescan() {
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    return generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 150,
+      bounds: VIEWPORT,
+      notesFreeText: 'We like hands-on museums.',
+    })
+  }
+
+  it('sweeps the rectangle natively, at a size the circle sweep refuses', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
+    verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
+
+    await runRectangleRescan()
+
+    expect(rectangleSweepMock).toHaveBeenCalledWith(VIEWPORT)
+    // And not through the 50 km circle, which could not have covered it.
+    expect(sweepMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps what is on screen and drops what is not', async () => {
+    createMock
+      .mockReset()
+      .mockResolvedValueOnce(responseWithFinds(['On screen', 'Off screen']))
+    verifyPlaceMock
+      .mockReset()
+      .mockImplementation((_query: string, expectedName: string) =>
+        Promise.resolve(
+          expectedName === 'On screen'
+            ? { name: expectedName, lat: 61.8, lng: 9.6 }
+            : // Inside 150 km of the centre, outside the visible rectangle —
+              // the corner of the screen the circle used to hand back.
+              { name: expectedName, lat: 61.8, lng: 11.4 },
+        ),
+      )
+
+    const finds = await runRectangleRescan()
+
+    expect(finds.map((f) => f.name)).toEqual(['On screen'])
+  })
+
+  it('tells the search how far the area reaches, not just where its middle is', async () => {
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    verifyPlaceMock.mockReset()
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 150,
+      bounds: VIEWPORT,
+      centerName: 'Jotunheimen',
+      areaCorners: { northWest: 'Lom', southEast: 'Lillehammer' },
+    })
+
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    const sent = JSON.parse(params.messages[0].content)
+    expect(sent.areaCorners).toEqual({
+      northWest: 'Lom',
+      southEast: 'Lillehammer',
+    })
+    expect(sent.areaSpanKm.width).toBeGreaterThan(0)
+    expect(sent.areaSpanKm.height).toBeGreaterThan(0)
+    // The radius meant nothing once the rectangle is stated, and stating both
+    // invites the model to reconcile two different shapes.
+    expect(sent.radiusKm).toBeUndefined()
   })
 })

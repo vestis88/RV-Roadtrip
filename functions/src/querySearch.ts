@@ -1,4 +1,4 @@
-import type { LatLng } from '@rv/shared'
+import type { LatLng, MapBounds } from '@rv/shared'
 import { searchPlacesByQuery, type QueryPlaceFind } from './placesApi.js'
 import {
   filterFindsToCorridor,
@@ -137,6 +137,14 @@ export async function findStopsForQuery(input: {
   waypointNames?: string[]
   /** Passed straight through to the Claude fallback — see rescanCorridor. */
   existingStopNames?: string[]
+  /** And the visible rectangle, likewise — see searchPlacesInRectangle. */
+  bounds?: MapBounds
+  areaCorners?: {
+    northWest?: string
+    northEast?: string
+    southWest?: string
+    southEast?: string
+  }
 }): Promise<{
   finds: RescanFind[]
   source: 'places' | 'claude'

@@ -23,6 +23,7 @@ If a "focusQuery" is given, it OVERRIDES the ordering above: the traveler has as
 
 Hard rules:
 1. STAY CLOSE. When a center+radius is given, only propose places genuinely within that radius. When routeWaypoints are given instead, only propose places that are a small, reasonable detour off that route — not a place near one waypoint that would require backtracking far off the corridor to reach. Anything too far will be discarded server-side regardless of how good it is.
+1e. WHEN "areaCorners" IS GIVEN, THAT RECTANGLE IS THE SEARCH AREA — the piece of the world the traveler has on screen, and the whole of it. "areaDescription" names only the point in the middle, and is very often something far smaller than the rectangle: a park, a lake, a hamlet. Do not let it shrink your answer to its own surroundings. The corners tell you how far the area actually reaches, and everything between them is fair ground — a rectangle a couple of hundred kilometres across usually spans several quite different places (a coast, a mountain range, a city and its plain), and a good answer visits them rather than clustering around whatever the centre happens to be sitting on. This was reported exactly: a search centred on a mountain park returned eight stops and every one of them was in those mountains, while the same rectangle also held the sea and a capital city.
 1a. THE RADIUS WINS OVER THE AREA NAME. "areaDescription" is whatever the map centre reverse-geocodes to, and it is often the name of something far larger than the circle — a district, a valley, a municipality. It tells you WHERE the centre is, never how much ground to cover. If the radius is small, the well-known highlights of the wider region are the wrong answer even though they are the best-known places in it: they will be measured against the circle and discarded.
 1d. "alreadyOnTheList" IS FOR AVOIDING DUPLICATES, AND NOTHING ELSE. Those stops are already saved on this trip, so do not propose them again — a second card for a place the traveler has already judged is worse than nothing, since they may have kept it or turned it down. Use it for that and for nothing else. In particular, NEVER write that something is "already on your list", "already on your radar", "already planned" or anything of that kind, and never refer to the traveler's other stops, their route or their itinerary in "why" at all. The app already shows the traveler what is on their list and marks it on every card; your job is the place itself and why it suits them. A sentence claiming something is already saved reads as "this is a stop you have" and sends them looking for a stop that may not exist.
 1c. "placesInArea" IS A FLOOR, NOT A CEILING. When it is given, it lists places Google Maps has a listing for inside the circle — everything on it is genuinely in there, which is why it is useful when the circle is small. It is NOT the complete set of what is worth stopping for: Google has no listing for most trailheads, swimming spots, free-camping pull-offs, viewpoints and local favourites, and it ranks what it does have by review count rather than by whether anyone should go. So use it as evidence about what is there, pick the ones worth stopping for, ignore the ones that are not — and go on adding the places YOU know are inside that circle, whether or not they appear on it. A good answer that Google has never heard of is exactly what this search is for. Never treat absence from the list as evidence that something is not there, or that an area is empty.
@@ -129,6 +130,19 @@ export function buildRescanCorridorPrompt(input: {
   existingStopNames?: string[]
   /** How many finds to ask for — see targetFindCount in rescanCorridor.ts. */
   targetFinds?: number
+  /**
+   * The visible rectangle's corners, as place names — resolved client-side
+   * where the Maps geocoder is already loaded. Any corner that could not be
+   * named (out at sea, or the lookup timed out) is simply absent.
+   */
+  areaCorners?: {
+    northWest?: string
+    northEast?: string
+    southWest?: string
+    southEast?: string
+  }
+  /** How big that rectangle is, in plain kilometres across and down. */
+  areaSpanKm?: { width: number; height: number }
 }): { system: string; user: string } {
   const namedRoute =
     input.waypointNames && input.waypointNames.length >= 2
@@ -151,7 +165,18 @@ export function buildRescanCorridorPrompt(input: {
           areaDescription:
             input.centerName ??
             `latitude ${input.center.lat.toFixed(2)}, longitude ${input.center.lng.toFixed(2)}`,
-          radiusKm: input.radiusKm,
+          // The rectangle, when the client sent one, described the way it is
+          // actually bounded — by its corners, in names. A radius around a
+          // centre name was the ONLY statement of where the search was, and
+          // when that name was smaller than the circle (a regional park
+          // anchoring a 150 km search) the model had nothing telling it the
+          // area reached the coast (2026-09-05).
+          ...(input.areaCorners && Object.keys(input.areaCorners).length > 0
+            ? {
+                areaCorners: input.areaCorners,
+                ...(input.areaSpanKm ? { areaSpanKm: input.areaSpanKm } : {}),
+              }
+            : { radiusKm: input.radiusKm }),
         }),
     ...(input.placesInArea && input.placesInArea.length > 0
       ? { placesInArea: input.placesInArea }

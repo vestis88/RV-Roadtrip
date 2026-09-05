@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   ASSUMED_AVG_SPEED_KMH,
+  boundsCenter,
+  boundsContain,
+  boundsHalfDiagonalKm,
   buildRouteBackbone,
   estimateDetourKm,
   estimateDriveMinutes,
   haversineDistanceKm,
   routeBackboneFrom,
+  shrinkBoundsToFit,
   sortAlongRoute,
 } from './geo.js'
 
@@ -332,5 +336,38 @@ describe('routeBackboneFrom', () => {
 
   it('is just the two ends when there is nothing in between', () => {
     expect(routeBackboneFrom(START, [], END)).toEqual([START, END])
+  })
+})
+
+describe('map bounds', () => {
+  const rome = { lat: 41.9, lng: 12.5 }
+  const pescara = { lat: 42.46, lng: 14.21 }
+  const viewport = { north: 42.6, south: 41.4, east: 14.6, west: 12.2 }
+
+  it('contains what is on screen and excludes what is not', () => {
+    expect(boundsContain(viewport, rome)).toBe(true)
+    expect(boundsContain(viewport, pescara)).toBe(true)
+    // Salento — 400 km south, and the sort of find the old circle filter and
+    // the new rectangle one both have to drop.
+    expect(boundsContain(viewport, { lat: 39.8, lng: 18.3 })).toBe(false)
+  })
+
+  it('measures itself centre-to-corner, the way the cost cap is written', () => {
+    // A degree of latitude is ~111 km, so a 1.2° tall box is ~66 km from
+    // centre to top before the longitude leg is added.
+    expect(boundsHalfDiagonalKm(viewport)).toBeGreaterThan(66)
+  })
+
+  it('shrinks about its centre when asked to fit', () => {
+    const shrunk = shrinkBoundsToFit(viewport, 50)
+
+    expect(boundsHalfDiagonalKm(shrunk)).toBeCloseTo(50, 0)
+    expect(boundsCenter(shrunk).lat).toBeCloseTo(boundsCenter(viewport).lat, 6)
+    expect(boundsCenter(shrunk).lng).toBeCloseTo(boundsCenter(viewport).lng, 6)
+    expect(boundsContain(viewport, boundsCenter(shrunk))).toBe(true)
+  })
+
+  it('leaves a rectangle that already fits exactly as it is', () => {
+    expect(shrinkBoundsToFit(viewport, 500)).toBe(viewport)
   })
 })

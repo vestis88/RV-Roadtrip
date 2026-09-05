@@ -91,3 +91,53 @@ describe('visibleRadiusKm at the raised cap', () => {
     expect(cappedFrom).toBeGreaterThan(MAX_RESCAN_RADIUS_KM)
   })
 })
+
+/**
+ * Asked for 2026-09-05: *"Can't you do it some other way completely? Don't
+ * lock yourself to a circle if a rectangle would work better."*
+ *
+ * The circle was never a decision — it was what survived measuring the
+ * viewport and keeping one number. What it cost is the corners of every
+ * screen: on a landscape view the circle covers the top and bottom of the
+ * map and neither side, while the panel above it says "what I can see".
+ */
+describe('visibleSearchArea', () => {
+  it('is the rectangle the traveler can see, unchanged', async () => {
+    const { visibleSearchArea } = await import('./rescanCorridorAction')
+    const viewport = { north: 42.6, south: 41.4, east: 14.6, west: 12.2 }
+
+    const area = visibleSearchArea(viewport)
+
+    expect(area.bounds).toEqual(viewport)
+    expect(area.cappedFrom).toBeUndefined()
+  })
+
+  /**
+   * The cost cap is unchanged and still measured centre-to-corner, so a
+   * rectangle that reaches too far is shrunk about its centre rather than
+   * refused — exactly what the circle did.
+   */
+  it('shrinks an over-wide view about its centre, and says so', async () => {
+    const { visibleSearchArea, MAX_RESCAN_RADIUS_KM } = await import(
+      './rescanCorridorAction'
+    )
+    const { boundsCenter, boundsHalfDiagonalKm } = await import('@rv/shared')
+    const viewport = { north: 62, south: 55, east: 18, west: 11 }
+
+    const area = visibleSearchArea(viewport)
+
+    expect(area.cappedFrom).toBeGreaterThan(MAX_RESCAN_RADIUS_KM)
+    expect(boundsHalfDiagonalKm(area.bounds!)).toBeLessThanOrEqual(
+      MAX_RESCAN_RADIUS_KM + 0.5,
+    )
+    // Still aimed where the traveler aimed it.
+    expect(boundsCenter(area.bounds!).lat).toBeCloseTo(
+      boundsCenter(viewport).lat,
+      6,
+    )
+    expect(boundsCenter(area.bounds!).lng).toBeCloseTo(
+      boundsCenter(viewport).lng,
+      6,
+    )
+  })
+})

@@ -1,10 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
-import { estimateDetourKm, haversineDistanceKm, type LatLng } from '@rv/shared'
+import {
+  boundsContain,
+  estimateDetourKm,
+  haversineDistanceKm,
+  type LatLng,
+  type MapBounds,
+} from '@rv/shared'
 import {
   searchPlacesInArea,
   SWEEP_COVERS_UP_TO_KM,
+  searchPlacesInRectangle,
   verifyPlaceLocation,
 } from '../placesApi.js'
 import { logClaudeUsage } from '../claudeUsageLogger.js'
@@ -260,6 +267,13 @@ function describeUnusableResponse(
 export async function generateRescanCandidates(input: {
   center: LatLng
   radiusKm: number
+  /**
+   * The rectangle the traveler can actually see, when the client sent one.
+   * Takes over from `center`/`radiusKm` for both halves of the search: the
+   * Places sweep restricts to it natively at any size, and the filter below
+   * asks whether a find is inside it rather than how far it is from a point.
+   */
+  bounds?: MapBounds
   notesFreeText?: string
   /** The trip's stated interests — see buildRescanCorridorPrompt's own note. */
   interests?: string[]
@@ -270,6 +284,13 @@ export async function generateRescanCandidates(input: {
   waypointNames?: string[]
   /** The stops this trip already has — see buildRescanCorridorPrompt. */
   existingStopNames?: string[]
+  /** The visible rectangle's corners in names — see buildRescanCorridorPrompt. */
+  areaCorners?: {
+    northWest?: string
+    northEast?: string
+    southWest?: string
+    southEast?: string
+  }
   /**
    * When this whole search has to be finished, as an epoch millisecond.
    * Supplied by the callable from its own remaining budget so the search
@@ -298,13 +319,25 @@ export async function generateRescanCandidates(input: {
   // answers well, which it has done since this feature existed. The sweep
   // exists for the small circle, where that question is unanswerable. It is
   // a source for the wide one, not a replacement.
-  if (!input.backbone && input.radiusKm <= SWEEP_COVERS_UP_TO_KM) {
+  if (!input.backbone) {
     try {
-      const nearby = await searchPlacesInArea(input.center, input.radiusKm)
-      placesInArea = nearby.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)
-      console.info(
-        `Area sweep found ${nearby.length} places within ${input.radiusKm} km of the map centre`,
-      )
+      // The rectangle sweep has no size limit — see searchPlacesInRectangle
+      // — so it runs whatever the traveler is looking at. The circle below
+      // is the fallback for a caller that sent no bounds, and keeps its own
+      // 50 km honesty ceiling because `searchNearby` cannot exceed it.
+      if (input.bounds) {
+        const inView = await searchPlacesInRectangle(input.bounds)
+        placesInArea = inView.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)
+        console.info(
+          `Rectangle sweep found ${inView.length} places inside the visible map`,
+        )
+      } else if (input.radiusKm <= SWEEP_COVERS_UP_TO_KM) {
+        const nearby = await searchPlacesInArea(input.center, input.radiusKm)
+        placesInArea = nearby.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)
+        console.info(
+          `Area sweep found ${nearby.length} places within ${input.radiusKm} km of the map centre`,
+        )
+      }
     } catch (error) {
       console.warn('Area sweep failed — searching without it', error)
     }
@@ -312,6 +345,24 @@ export async function generateRescanCandidates(input: {
   const { system, user } = buildRescanCorridorPrompt({
     ...input,
     placesInArea,
+    ...(input.bounds
+      ? {
+          areaSpanKm: {
+            width: Math.round(
+              haversineDistanceKm(
+                { lat: input.bounds.north, lng: input.bounds.west },
+                { lat: input.bounds.north, lng: input.bounds.east },
+              ),
+            ),
+            height: Math.round(
+              haversineDistanceKm(
+                { lat: input.bounds.north, lng: input.bounds.west },
+                { lat: input.bounds.south, lng: input.bounds.west },
+              ),
+            ),
+          },
+        }
+      : {}),
     targetFinds: targetFindCount({
       radiusKm: input.radiusKm,
       isCorridor: !!input.backbone && input.backbone.length >= 2,
@@ -449,7 +500,18 @@ export async function generateRescanCandidates(input: {
  */
 export function filterFindsToCorridor(
   finds: (RescanFind | null)[],
-  bounds: { center: LatLng; radiusKm: number; backbone?: LatLng[] },
+  bounds: {
+    center: LatLng
+    radiusKm: number
+    backbone?: LatLng[]
+    /**
+     * The visible rectangle, when the client sent one. It answers the
+     * question the traveler is actually asking — "is this in what I can
+     * see?" — where a circle around the centre answered a different one and
+     * threw away the corners of the screen to do it (2026-09-05).
+     */
+    bounds?: MapBounds
+  },
 ): RescanFind[] {
   // Kept as a property on the returned array rather than changing the return
   // type: every caller wants the finds, and only the one that reports back to
@@ -462,6 +524,15 @@ export function filterFindsToCorridor(
       if (detourKm > MAX_QUERY_SEARCH_DETOUR_KM) {
         console.info(
           `Dropping rescan find "${find.name}" — ≈${Math.round(detourKm)} km detour off route (max ${MAX_QUERY_SEARCH_DETOUR_KM} km)`,
+        )
+        return false
+      }
+      return true
+    }
+    if (bounds.bounds) {
+      if (!boundsContain(bounds.bounds, find)) {
+        console.info(
+          `Dropping rescan find "${find.name}" — outside the visible map rectangle`,
         )
         return false
       }

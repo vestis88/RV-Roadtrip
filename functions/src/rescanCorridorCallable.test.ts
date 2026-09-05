@@ -380,3 +380,49 @@ describe('runRescanCorridor and the stops the trip already has', () => {
     expect(names).toEqual(['Cima Grappa', 'Parco Regionale del Fiume Sile'])
   })
 })
+
+/**
+ * The rectangle reaches the search, and the cost cap still binds.
+ *
+ * Asked for 2026-09-05: *"Don't lock yourself to a circle if a rectangle
+ * would work better."* The cap is unchanged in what it measures — centre to
+ * corner — so a rectangle costs what the circle of the same reach cost.
+ */
+describe('runRescanCorridor and the visible rectangle', () => {
+  it('passes the rectangle and its named corners to the search', async () => {
+    const { tripId } = await createTripForUser('uidRescanRect')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+    const bounds = { north: 62.1, south: 61.4, east: 10.2, west: 8.9 }
+    const corners = { northWest: 'Lom', southEast: 'Lillehammer' }
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(
+      tripId,
+      CENTER,
+      150,
+      undefined,
+      undefined,
+      'Jotunheimen',
+      undefined,
+      undefined,
+      bounds,
+      corners,
+    )
+
+    const [input] = generateRescanCandidatesMock.mock.calls[0]
+    expect(input.bounds).toEqual(bounds)
+    expect(input.areaCorners).toEqual(corners)
+  })
+
+  it('still searches the circle when no rectangle was sent', async () => {
+    const { tripId } = await createTripForUser('uidRescanNoRect')
+    generateRescanCandidatesMock.mockReset().mockResolvedValue([])
+
+    const { runRescanCorridor } = await import('./rescanCorridorCallable.js')
+    await runRescanCorridor(tripId, CENTER, 25)
+
+    const [input] = generateRescanCandidatesMock.mock.calls[0]
+    expect(input.bounds).toBeUndefined()
+    expect(input.radiusKm).toBe(25)
+  })
+})

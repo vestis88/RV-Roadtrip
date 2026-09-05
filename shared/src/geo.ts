@@ -245,3 +245,101 @@ export function estimateDriveMinutes(straightLineKm: number): number {
   if (!Number.isFinite(straightLineKm) || straightLineKm <= 0) return 0
   return (straightLineKm / ASSUMED_AVG_SPEED_KMH) * 60
 }
+
+/**
+ * A rectangle of the world, in the same four numbers Google Maps reports a
+ * viewport as.
+ *
+ * Added 2026-09-05, on: *"Can't you do it some other way completely? Don't
+ * lock yourself to a circle if a rectangle would work better. Google must
+ * have some native understanding of searching a defined area!"*
+ *
+ * They do, and it was being thrown away. The map hands us the visible
+ * rectangle; `visibleRadiusKm` measured its half-diagonal and discarded the
+ * shape, so a search over a landscape view looked for places in a circle
+ * that covered the top and bottom of the screen and none of the sides —
+ * while the button said "this area" and the panel said "what I can see".
+ */
+export interface MapBounds {
+  north: number
+  south: number
+  east: number
+  west: number
+}
+
+/** Whether a point is inside the rectangle. */
+export function boundsContain(bounds: MapBounds, point: LatLng): boolean {
+  if (point.lat > bounds.north || point.lat < bounds.south) return false
+  // A viewport that crosses the antimeridian has east < west, and the
+  // longitudes inside it are the ones OUTSIDE that numeric interval. Rare in
+  // Europe and free to be right about.
+  return bounds.east >= bounds.west
+    ? point.lng >= bounds.west && point.lng <= bounds.east
+    : point.lng >= bounds.west || point.lng <= bounds.east
+}
+
+export function boundsCenter(bounds: MapBounds): LatLng {
+  return {
+    lat: (bounds.north + bounds.south) / 2,
+    lng:
+      bounds.east >= bounds.west
+        ? (bounds.east + bounds.west) / 2
+        : normaliseLng((bounds.east + bounds.west) / 2 + 180),
+  }
+}
+
+function normaliseLng(lng: number): number {
+  return ((((lng + 180) % 360) + 360) % 360) - 180
+}
+
+/**
+ * Half the rectangle's diagonal — centre to corner, in kilometres.
+ *
+ * The same measurement the circle used, kept because it is what the cost cap
+ * is written in: a rectangle whose corner is 150 km from its centre costs
+ * what the old 150 km circle cost, and rather more of it is ground the
+ * traveler can actually see.
+ */
+export function boundsHalfDiagonalKm(bounds: MapBounds): number {
+  return haversineDistanceKm(boundsCenter(bounds), {
+    lat: bounds.north,
+    lng: bounds.east,
+  })
+}
+
+/**
+ * The same rectangle, shrunk about its centre until its corner is no further
+ * than `maxHalfDiagonalKm` away. Returns it unchanged when it already fits.
+ */
+export function shrinkBoundsToFit(
+  bounds: MapBounds,
+  maxHalfDiagonalKm: number,
+): MapBounds {
+  if (boundsHalfDiagonalKm(bounds) <= maxHalfDiagonalKm) return bounds
+  const centre = boundsCenter(bounds)
+  const fullLat = (bounds.north - bounds.south) / 2
+  const fullLng =
+    (bounds.east >= bounds.west
+      ? bounds.east - bounds.west
+      : bounds.east + 360 - bounds.west) / 2
+
+  // Iterated rather than solved, because scaling the degrees is not linear
+  // in the kilometres: shrinking the latitude span moves the corner toward
+  // the equator, where a degree of longitude is wider, so one pass of naive
+  // scaling overshoots. Three passes settle it to well inside a kilometre,
+  // and there is nothing here worth a closed form.
+  let scale = maxHalfDiagonalKm / boundsHalfDiagonalKm(bounds)
+  let scaled = bounds
+  for (let pass = 0; pass < 3; pass++) {
+    scaled = {
+      north: centre.lat + fullLat * scale,
+      south: centre.lat - fullLat * scale,
+      east: normaliseLng(centre.lng + fullLng * scale),
+      west: normaliseLng(centre.lng - fullLng * scale),
+    }
+    const reached = boundsHalfDiagonalKm(scaled)
+    if (reached === 0) break
+    scale *= maxHalfDiagonalKm / reached
+  }
+  return scaled
+}

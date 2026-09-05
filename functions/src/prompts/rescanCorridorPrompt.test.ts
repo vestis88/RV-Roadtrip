@@ -253,3 +253,63 @@ describe('how many places the search is asked for', () => {
     expect(system).toMatch(/an empty "finds" list is a valid and honest answer/)
   })
 })
+
+/**
+ * Reported 2026-09-05 with a screenshot of eight finds clustered in one
+ * valley: *"What's the reason for the grouping of the results?"*
+ *
+ * It was the geography, not the curation. The search is given no coordinates
+ * at all — deliberately, so it cannot invent distances — which makes the
+ * reverse-geocoded centre name the ENTIRE statement of where it is looking.
+ * That name is picked most-specific-first, so a circle centred on a regional
+ * park was told "Parco Naturale Regionale Sirente-Velino, radius 150 km" and
+ * answered with those mountains. Nothing in the prompt said the same area
+ * also held the Adriatic and Rome.
+ */
+describe('what the search is told about how far the area reaches', () => {
+  const corners = {
+    northWest: 'Terni, Italy',
+    northEast: 'Giulianova, Italy',
+    southWest: 'Latina, Italy',
+    southEast: 'Vasto, Italy',
+  }
+
+  it('names the corners, so the span is stated and not inferred', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 150,
+      centerName: 'Parco Naturale Regionale Sirente-Velino',
+      areaCorners: corners,
+      areaSpanKm: { width: 240, height: 170 },
+    })
+
+    const sent = JSON.parse(user)
+    expect(sent.areaCorners).toEqual(corners)
+    expect(sent.areaSpanKm).toEqual({ width: 240, height: 170 })
+    // The centre still says where the middle is; it just no longer has to
+    // carry the whole description on its own.
+    expect(sent.areaDescription).toBe('Parco Naturale Regionale Sirente-Velino')
+  })
+
+  it('says the rectangle is the area and the centre name is not', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 150 })
+    expect(system).toMatch(/WHEN "areaCorners" IS GIVEN, THAT RECTANGLE IS THE SEARCH AREA/)
+    expect(system).toMatch(/Do not let it shrink your answer to its own surroundings/)
+    expect(system).toMatch(/rather than clustering around whatever the centre happens to be sitting on/)
+  })
+
+  // Two shapes in one payload is an invitation to reconcile them.
+  it('drops the radius once the rectangle is stated', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 150,
+      areaCorners: corners,
+    })
+    expect(JSON.parse(user).radiusKm).toBeUndefined()
+  })
+
+  it('keeps the radius when there is no rectangle to describe', () => {
+    const { user } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 25 })
+    expect(JSON.parse(user).radiusKm).toBe(25)
+  })
+})

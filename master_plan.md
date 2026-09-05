@@ -4193,6 +4193,83 @@ and send none of the ones a search there could actually propose twice. The
 comment on `MAX_EXISTING_STOPS` has claimed this ordering since the day it
 was written; now the code does it.
 
+Verification: lint 0, build 0, frontend **478**, functions **673**, e2e
+**174** — all green.
+
+#### 2026-09-05 — the search area is a rectangle, because the map is
+
+Asked after the clustering answer above: *"Can't you do it some other way
+completely? Don't lock yourself to a circle if a rectangle would work better.
+Google must have some native understanding of searching a defined area!
+Claude must be able to do something similar."*
+
+Both halves of that are right, and the circle was never a decision — it was
+what survived measuring the viewport and keeping one number. `visibleRadiusKm`
+took the map's four bounds and returned the half-diagonal. What that cost is
+the corners of every screen: on a landscape iPad the searched circle covers
+the top and bottom of the view and neither side, while the panel above it
+says "what I can see".
+
+**Google.** `places:searchNearby` — what the sweep used — takes only a circle
+and refuses one over 50 km, which is the whole reason the sweep was switched
+off above that and a 150 km search ran on the model's memory with no list of
+what was actually on the ground. `places:searchText` takes a
+`locationRestriction` **rectangle** with no such cap, so the viewport now
+goes to Google verbatim (`searchPlacesInRectangle`).
+
+**Claude.** The prompt gets `areaCorners` — the four corners reverse-geocoded
+client-side, where the geocoder is already loaded — and `areaSpanKm`, and a
+new hard rule 1e saying the rectangle is the search area, the centre name is
+only its middle, and a couple of hundred kilometres usually spans several
+quite different places. The radius is dropped from the payload once the
+rectangle is stated: two shapes in one message is an invitation to reconcile
+them.
+
+**And the filter.** A find is kept if it is inside the rectangle
+(`boundsContain`), not if it is within N km of a point — so the shape drawn
+on the map, the shape Google restricts to, and the shape a find is measured
+against are finally one object. `SearchAreaCircle` became `SearchArea` and
+draws a `<Rectangle>`; the circle survives as the fallback for the first
+frame, before the map has reported bounds, and for an explicitly typed radius
+(a traveler who asks for 30 km has asked for a circle).
+
+The cost cap is unchanged in what it measures — centre to corner — so a
+rectangle costs what the circle of the same reach cost, and
+`shrinkBoundsToFit` shrinks an over-wide view about its centre rather than
+refusing it.
+
+Verification: lint 0, shared **65**, build 0, frontend **480**, functions
+**682**, e2e **174** — all green.
+
+##### Open, and deliberately not deployed yet
+
+Asked immediately, and it is the right question: *"But are you bypassing
+Claude now?"*
+
+No — `placesInArea` is evidence handed to the model, not an answer; hard rule
+1c has always said it is a floor and not a ceiling, and every find, every
+`why` and every judgement about what is worth stopping for is still Claude's.
+But turning the sweep on above 50 km leans on that rule harder than it has
+ever been leaned on, and two things about the wide case are genuinely
+different from the small one it was written for:
+
+- [ ] **The list is ranked, not sampled.** `MAX_PLACES_IN_AREA` takes the top
+      40 by rating and review count. Across 250 km that is a
+      greatest-hits-of-the-region list — the exact answer shape rules 1b, 1c
+      and 1e all fight. It should be bucketed geographically across the
+      rectangle and sampled per bucket, which would also attack the
+      clustering from the other side.
+- [ ] **Rule 1c does not know how big the area is.** It was written when the
+      list only ever arrived for a small circle. Over a large rectangle it
+      should say outright that a list this long over an area this large is
+      necessarily a thin sample of the famous, and that the quiet answers are
+      the model's own job.
+
+Until those land, the wide-area sweep is the part of this change to be
+suspicious of — the rectangle *shape* (search area, filter, corner names) is
+what fixed the reported clustering and stands on its own. Pushed to the
+branch, not merged to `main` and not deployed, pending that call.
+
 ### Known documentation gap
 
 - [ ] **Work between 2026-08-03 and 2026-08-11 is in the code but not in this file** (noticed 2026-08-13 while bringing Sections 3–7 up to date) — the backlog above runs continuously to the access-gate entry of 2026-08-03 and then resumes at 2026-08-10. Sections 3, 4, 7 and 10 have been corrected where that work made them factually wrong, but these have no entry of their own explaining what was decided and why:

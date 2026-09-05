@@ -1,9 +1,11 @@
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import {
+  boundsHalfDiagonalKm,
   corridorStopSchema,
   haversineDistanceKm,
   type LatLng,
+  type MapBounds,
   type Trip,
 } from '@rv/shared'
 import { requireAccess } from './accessControl.js'
@@ -86,6 +88,16 @@ export async function runRescanCorridor(
   centerName?: string,
   waypointNames?: string[],
   deadlineMs?: number,
+  // The rectangle the traveler can see, and its corners in names — see
+  // searchPlacesInRectangle and buildRescanCorridorPrompt. Optional: without
+  // them this is the circle search it has always been.
+  bounds?: MapBounds,
+  areaCorners?: {
+    northWest?: string
+    northEast?: string
+    southWest?: string
+    southEast?: string
+  },
 ): Promise<{
   stopsWritten: number
   droppedTooFar: number
@@ -163,6 +175,10 @@ export async function runRescanCorridor(
           centerName,
           waypointNames,
           ...(existingStopNames.length > 0 ? { existingStopNames } : {}),
+          ...(bounds ? { bounds } : {}),
+          ...(areaCorners && Object.keys(areaCorners).length > 0
+            ? { areaCorners }
+            : {}),
         })
         searchSource = result.source
         claudeFailure = result.claudeFailure
@@ -185,6 +201,10 @@ export async function runRescanCorridor(
         // statement that the list is empty.
         ...(existingStopNames.length > 0 ? { existingStopNames } : {}),
         ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+        ...(bounds ? { bounds } : {}),
+        ...(areaCorners && Object.keys(areaCorners).length > 0
+          ? { areaCorners }
+          : {}),
       })
 
   // Nothing was deduplicated before this: a rescan of ground already
@@ -425,6 +445,10 @@ export const rescanCorridor = onCall(
     const backbone = request.data?.backbone as LatLng[] | undefined
     const centerName = request.data?.centerName
     const waypointNames = request.data?.waypointNames
+    const bounds = request.data?.bounds as MapBounds | undefined
+    const areaCorners = request.data?.areaCorners as
+      | Record<string, unknown>
+      | undefined
     if (
       typeof tripId !== 'string' ||
       typeof center?.lat !== 'number' ||
@@ -437,7 +461,15 @@ export const rescanCorridor = onCall(
       (centerName !== undefined && typeof centerName !== 'string') ||
       (waypointNames !== undefined &&
         (!Array.isArray(waypointNames) ||
-          waypointNames.some((name) => typeof name !== 'string')))
+          waypointNames.some((name) => typeof name !== 'string'))) ||
+      (bounds !== undefined &&
+        (typeof bounds?.north !== 'number' ||
+          typeof bounds?.south !== 'number' ||
+          typeof bounds?.east !== 'number' ||
+          typeof bounds?.west !== 'number')) ||
+      (areaCorners !== undefined &&
+        (typeof areaCorners !== 'object' ||
+          Object.values(areaCorners).some((name) => typeof name !== 'string')))
     ) {
       throw new HttpsError(
         'invalid-argument',
@@ -448,6 +480,17 @@ export const rescanCorridor = onCall(
       throw new HttpsError(
         'invalid-argument',
         `radiusKm must be between 0 and ${MAX_RESCAN_RADIUS_KM}`,
+      )
+    }
+    // The rectangle is capped by the same measurement the circle was: centre
+    // to corner. A rectangle whose corner is 150 km out costs what the old
+    // 150 km circle cost, and rather more of it is ground the traveler can
+    // actually see. The client shrinks to fit before sending; this is the
+    // server refusing to be talked past it.
+    if (bounds && boundsHalfDiagonalKm(bounds) > MAX_RESCAN_RADIUS_KM * 1.05) {
+      throw new HttpsError(
+        'invalid-argument',
+        `the searched rectangle must reach no more than ${MAX_RESCAN_RADIUS_KM} km from its centre`,
       )
     }
     if (query !== undefined && query.trim().length > 200) {
@@ -511,6 +554,15 @@ export const rescanCorridor = onCall(
         (centerName as string | undefined)?.trim() || undefined,
         waypointNames as string[] | undefined,
         Date.now() + SEARCH_BUDGET_MS,
+        bounds,
+        areaCorners as
+          | {
+              northWest?: string
+              northEast?: string
+              southWest?: string
+              southEast?: string
+            }
+          | undefined,
       )
       await tripRef.update({
         'planMeta.rescanStatus': 'idle',

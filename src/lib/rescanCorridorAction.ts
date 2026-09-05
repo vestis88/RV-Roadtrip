@@ -1,5 +1,10 @@
 import { httpsCallable } from 'firebase/functions'
-import { haversineDistanceKm, type LatLng } from '@rv/shared'
+import {
+  boundsHalfDiagonalKm,
+  shrinkBoundsToFit,
+  type LatLng,
+  type MapBounds,
+} from '@rv/shared'
 import { functions } from './firebase'
 import { SEARCH_CALLABLE_TIMEOUT_MS } from './callableTimeouts'
 import { MAX_RESCAN_RADIUS_KM } from './rescanRadius'
@@ -23,21 +28,45 @@ export { MAX_RESCAN_RADIUS_KM, RESCAN_RADIUS_KM } from './rescanRadius'
  * rather than applied quietly, because silently searching less than the
  * traveler is looking at is the bug being fixed.
  */
-export function visibleRadiusKm(bounds: {
-  north: number
-  south: number
-  east: number
-  west: number
-}): { radiusKm: number; cappedFrom?: number } {
-  const center = {
-    lat: (bounds.north + bounds.south) / 2,
-    lng: (bounds.east + bounds.west) / 2,
-  }
-  const corner = { lat: bounds.north, lng: bounds.east }
-  const visible = Math.max(1, Math.round(haversineDistanceKm(center, corner)))
+export function visibleRadiusKm(bounds: MapBounds): {
+  radiusKm: number
+  cappedFrom?: number
+} {
+  const visible = Math.max(1, Math.round(boundsHalfDiagonalKm(bounds)))
   return visible > MAX_RESCAN_RADIUS_KM
     ? { radiusKm: MAX_RESCAN_RADIUS_KM, cappedFrom: visible }
     : { radiusKm: visible }
+}
+
+/**
+ * The area a search will actually cover — as a rectangle, which is what the
+ * traveler is looking at.
+ *
+ * Asked for on 2026-09-05: *"Don't lock yourself to a circle if a rectangle
+ * would work better."* The circle was never a decision; it was what survived
+ * measuring the viewport and keeping only one number. Everything downstream
+ * can take the shape now — Places restricts a text search to a rectangle
+ * natively at any size, the find filter asks "is it inside this?", and the
+ * prompt describes it by its corners — so the shape the map draws, the shape
+ * Google searches and the shape the answer is measured against are finally
+ * the same object.
+ *
+ * The cost cap is unchanged and still measured centre-to-corner: a rectangle
+ * that reaches further than MAX_RESCAN_RADIUS_KM is shrunk about its centre
+ * rather than refused, exactly as the circle was.
+ */
+export function visibleSearchArea(bounds: MapBounds): {
+  bounds: MapBounds
+  radiusKm: number
+  cappedFrom?: number
+} {
+  const half = Math.max(1, Math.round(boundsHalfDiagonalKm(bounds)))
+  if (half <= MAX_RESCAN_RADIUS_KM) return { bounds, radiusKm: half }
+  return {
+    bounds: shrinkBoundsToFit(bounds, MAX_RESCAN_RADIUS_KM),
+    radiusKm: MAX_RESCAN_RADIUS_KM,
+    cappedFrom: half,
+  }
 }
 
 /**
@@ -67,6 +96,11 @@ export async function rescanCorridorArea(
   // Both optional: without them the prompt falls back to coordinates.
   centerName?: string,
   waypointNames?: string[],
+  // The rectangle actually on screen, and its corners in names. Both
+  // optional: without them the server does the circle search it always did,
+  // which is what an older client still gets.
+  bounds?: MapBounds,
+  areaCorners?: AreaCorners,
 ): Promise<{ stopsWritten: number }> {
   const call = httpsCallable<
     {
@@ -77,6 +111,8 @@ export async function rescanCorridorArea(
       backbone?: LatLng[]
       centerName?: string
       waypointNames?: string[]
+      bounds?: MapBounds
+      areaCorners?: AreaCorners
     },
     { stopsWritten: number }
   >(functions, 'rescanCorridor', { timeout: SEARCH_CALLABLE_TIMEOUT_MS })
@@ -88,6 +124,18 @@ export async function rescanCorridorArea(
     ...(backbone && backbone.length >= 2 ? { backbone } : {}),
     ...(centerName ? { centerName } : {}),
     ...(waypointNames && waypointNames.length > 0 ? { waypointNames } : {}),
+    ...(bounds ? { bounds } : {}),
+    ...(areaCorners && Object.keys(areaCorners).length > 0
+      ? { areaCorners }
+      : {}),
   })
   return result.data
+}
+
+/** The visible rectangle's corners, named — see nameAreaCorners. */
+export interface AreaCorners {
+  northWest?: string
+  northEast?: string
+  southWest?: string
+  southEast?: string
 }

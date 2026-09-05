@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { LatLng, PlanMeta } from '@rv/shared'
+import type { LatLng, MapBounds, PlanMeta } from '@rv/shared'
 import { MAX_RESCAN_RADIUS_KM, rescanCorridorArea } from '../lib/rescanCorridorAction'
 import { describeResult } from '../lib/rescanResultMessage'
 import { searchSourceNote } from '../lib/searchSourceNote'
@@ -12,18 +12,22 @@ import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
 } from '../lib/exploreCandidateActions'
-import { reverseGeocodeName } from '../lib/reverseGeocode'
+import { nameAreaCorners, reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
   tripId: string
   center: LatLng
   /**
-   * The circle that will actually be searched, computed by the screen so the
-   * SAME number draws it on the map (see SearchAreaCircle). Computing it in
-   * both places would let the drawn circle and the searched one disagree,
-   * which is a new instance of the bug this is fixing.
+   * The area that will actually be searched, computed by the screen so the
+   * SAME rectangle is drawn on the map (see SearchAreaRectangle). Computing
+   * it in both places would let the drawn area and the searched one
+   * disagree, which is a new instance of the bug this is fixing.
+   *
+   * A rectangle since 2026-09-05 — *"Don't lock yourself to a circle if a
+   * rectangle would work better"* — with `radiusKm` kept beside it as the
+   * cost measure (centre to corner) the server still caps on.
    */
-  area: { radiusKm: number; cappedFrom?: number }
+  area: { bounds?: MapBounds; radiusKm: number; cappedFrom?: number }
   /** Live from the trip doc — see the note on durable status below. */
   planMeta: PlanMeta
   /**
@@ -230,7 +234,13 @@ export function RescanCorridorButton({
     setError(null)
     setDisconnected(false)
     try {
-      const centerName = await reverseGeocodeName(center)
+      // Where the middle is, and how far the area reaches — the second of
+      // those is what a search over a wide view never had. Looked up
+      // together so a slow corner cannot delay the centre.
+      const [centerName, areaCorners] = await Promise.all([
+        reverseGeocodeName(center),
+        area.bounds ? nameAreaCorners(area.bounds) : Promise.resolve(undefined),
+      ])
       // The result is deliberately ignored: the server writes it to the trip
       // and the status above reads it back from there, so the answer is the
       // same whether this promise resolved or the connection died with the
@@ -242,6 +252,9 @@ export function RescanCorridorButton({
         undefined,
         undefined,
         centerName,
+        undefined,
+        area.bounds,
+        areaCorners,
       )
     } catch (err) {
       console.error('rescanCorridor failed', err)
@@ -376,7 +389,9 @@ export function RescanCorridorButton({
               now,
             )
           : armed
-            ? `Search this circle (${area.radiusKm} km)`
+            ? area.bounds
+              ? 'Search this area'
+              : `Search this circle (${area.radiusKm} km)`
             : 'Rescan this area'}
       </button>
       {armed && !scanning && (
