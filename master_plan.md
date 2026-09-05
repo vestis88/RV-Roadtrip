@@ -4211,11 +4211,11 @@ the top and bottom of the view and neither side, while the panel above it
 says "what I can see".
 
 **Google.** `places:searchNearby` — what the sweep used — takes only a circle
-and refuses one over 50 km, which is the whole reason the sweep was switched
-off above that and a 150 km search ran on the model's memory with no list of
-what was actually on the ground. `places:searchText` takes a
-`locationRestriction` **rectangle** with no such cap, so the viewport now
-goes to Google verbatim (`searchPlacesInRectangle`).
+and refuses one over 50 km. `places:searchText` takes a `locationRestriction`
+**rectangle** with no such cap, so the viewport can go to Google verbatim
+(`searchPlacesInRectangle`). It was briefly used at every size on that basis
+and pulled back the same day; see the section below for why the size ceiling
+was never really about what Places can cover.
 
 **Claude.** The prompt gets `areaCorners` — the four corners reverse-geocoded
 client-side, where the geocoder is already loaded — and `areaSpanKm`, and a
@@ -4238,37 +4238,53 @@ rectangle costs what the circle of the same reach cost, and
 `shrinkBoundsToFit` shrinks an over-wide view about its centre rather than
 refusing it.
 
+##### And then: the area is described, not enumerated
+
+Asked immediately, and it was the right question: *"But are you bypassing
+Claude now?"* — then, on hearing that the sweep now ran at every size:
+*"I would expect you to come up with a way to define the area of interest to
+Claude in a reasonable way. I don't want google places to cloud Claude's own
+thinking here!"*
+
+Correct, and the fix is to notice that these are two different Google
+services answering two different questions.
+
+- **Places** enumerates businesses and landmarks and ranks them by review
+  count. Hand a model forty of those across a region and you have handed it
+  the answer, ranked by popularity — which is exactly what this feature
+  exists not to be, and what rules 1b and 1c have been arguing against since
+  they were written.
+- **The geocoder** answers "what is this piece of the world called". Regions,
+  provinces, towns, coastline. That is geography, not a shortlist, and it is
+  what the search never had.
+
+So `describeSearchArea` samples a 3×3 grid across the rectangle in one
+parallel pass and returns the middle, the four corners, and the distinct
+administrative regions and countries the area spans. Nine points rather than
+four because a corner sample misses regions in between — a 250 km rectangle
+over central Italy touches Lazio, Abruzzo, Umbria, Marche and Molise, and its
+corners find perhaps three. Each point may fail on its own: at sea there is
+nothing to name, and three named corners describe an area far better than
+none.
+
+The prompt now carries `areaCorners`, `areaSpanKm`, `areaRegions` and
+`areaCountries`, under three rules: the rectangle is the area and is
+described in full (1e); the centre name is *not* the area, and letting it
+shrink the answer to its own surroundings is the reported failure (1f); and
+over a large area you are working from your own knowledge, deliberately, and
+no `placesInArea` list is given because a ranked list of what has the most
+reviews in a region is a popularity chart rather than an answer (1g).
+
+**The sweep is back where it was:** only for an area whose corner is within
+`SWEEP_COVERS_UP_TO_KM` of its centre. That ceiling was never about what
+Places *can* cover — it is about where the model genuinely cannot recall, and
+at six kilometres it cannot, which is the whole reason the small-circle sweep
+was built after three consecutive reports of an empty valley. It now
+restricts to the rectangle rather than a circle inside it, which is the one
+thing the rectangle work buys the small case.
+
 Verification: lint 0, shared **65**, build 0, frontend **480**, functions
-**682**, e2e **174** — all green.
-
-##### Open, and deliberately not deployed yet
-
-Asked immediately, and it is the right question: *"But are you bypassing
-Claude now?"*
-
-No — `placesInArea` is evidence handed to the model, not an answer; hard rule
-1c has always said it is a floor and not a ceiling, and every find, every
-`why` and every judgement about what is worth stopping for is still Claude's.
-But turning the sweep on above 50 km leans on that rule harder than it has
-ever been leaned on, and two things about the wide case are genuinely
-different from the small one it was written for:
-
-- [ ] **The list is ranked, not sampled.** `MAX_PLACES_IN_AREA` takes the top
-      40 by rating and review count. Across 250 km that is a
-      greatest-hits-of-the-region list — the exact answer shape rules 1b, 1c
-      and 1e all fight. It should be bucketed geographically across the
-      rectangle and sampled per bucket, which would also attack the
-      clustering from the other side.
-- [ ] **Rule 1c does not know how big the area is.** It was written when the
-      list only ever arrived for a small circle. Over a large rectangle it
-      should say outright that a list this long over an area this large is
-      necessarily a thin sample of the famous, and that the quiet answers are
-      the model's own job.
-
-Until those land, the wide-area sweep is the part of this change to be
-suspicious of — the rectangle *shape* (search area, filter, corner names) is
-what fixed the reported clustering and stands on its own. Pushed to the
-branch, not merged to `main` and not deployed, pending that call.
+**685**, e2e **174** — all green.
 
 ### Known documentation gap
 

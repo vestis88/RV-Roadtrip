@@ -101,6 +101,8 @@ export async function rescanCorridorArea(
   // which is what an older client still gets.
   bounds?: MapBounds,
   areaCorners?: AreaCorners,
+  areaRegions?: string[],
+  areaCountries?: string[],
 ): Promise<{ stopsWritten: number }> {
   const call = httpsCallable<
     {
@@ -113,6 +115,8 @@ export async function rescanCorridorArea(
       waypointNames?: string[]
       bounds?: MapBounds
       areaCorners?: AreaCorners
+      areaRegions?: string[]
+      areaCountries?: string[]
     },
     { stopsWritten: number }
   >(functions, 'rescanCorridor', { timeout: SEARCH_CALLABLE_TIMEOUT_MS })
@@ -128,6 +132,8 @@ export async function rescanCorridorArea(
     ...(areaCorners && Object.keys(areaCorners).length > 0
       ? { areaCorners }
       : {}),
+    ...(areaRegions && areaRegions.length > 0 ? { areaRegions } : {}),
+    ...(areaCountries && areaCountries.length > 0 ? { areaCountries } : {}),
   })
   return result.data
 }

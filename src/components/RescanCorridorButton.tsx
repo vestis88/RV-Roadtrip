@@ -12,7 +12,7 @@ import {
   describeExploreHighlightsError,
   GENERIC_STOPS_ERROR,
 } from '../lib/exploreCandidateActions'
-import { nameAreaCorners, reverseGeocodeName } from '../lib/reverseGeocode'
+import { describeSearchArea, reverseGeocodeName } from '../lib/reverseGeocode'
 
 interface RescanCorridorButtonProps {
   tripId: string
@@ -234,13 +234,14 @@ export function RescanCorridorButton({
     setError(null)
     setDisconnected(false)
     try {
-      // Where the middle is, and how far the area reaches — the second of
-      // those is what a search over a wide view never had. Looked up
-      // together so a slow corner cannot delay the centre.
-      const [centerName, areaCorners] = await Promise.all([
-        reverseGeocodeName(center),
-        area.bounds ? nameAreaCorners(area.bounds) : Promise.resolve(undefined),
-      ])
+      // What the area IS — its middle, its corners, the regions it spans —
+      // all from the geocoder, which answers "what is this piece of the
+      // world called" rather than "what is listed inside it". See
+      // describeSearchArea for why that distinction is the whole point.
+      const described = area.bounds
+        ? await describeSearchArea(area.bounds)
+        : undefined
+      const centerName = described?.centerName ?? (await reverseGeocodeName(center))
       // The result is deliberately ignored: the server writes it to the trip
       // and the status above reads it back from there, so the answer is the
       // same whether this promise resolved or the connection died with the
@@ -254,7 +255,9 @@ export function RescanCorridorButton({
         centerName,
         undefined,
         area.bounds,
-        areaCorners,
+        described?.corners,
+        described?.regions,
+        described?.countries,
       )
     } catch (err) {
       console.error('rescanCorridor failed', err)

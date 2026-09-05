@@ -990,15 +990,54 @@ describe('searching the rectangle the traveler can see', () => {
     })
   }
 
-  it('sweeps the rectangle natively, at a size the circle sweep refuses', async () => {
+  /**
+   * *"I don't want google places to cloud Claude's own thinking here!"* —
+   * and that is what a ranked list of forty listings across a region is.
+   * The sweep stays where recall is genuinely impossible and nowhere else.
+   */
+  it('does not hand Places a say over a wide area', async () => {
     createMock.mockReset().mockResolvedValueOnce(responseWithFinds(['Nearby']))
     verifyPlaceMock.mockReset().mockImplementation(found({ lat: 61.8, lng: 9.6 }))
 
     await runRectangleRescan()
 
-    expect(rectangleSweepMock).toHaveBeenCalledWith(VIEWPORT)
-    // And not through the 50 km circle, which could not have covered it.
+    expect(rectangleSweepMock).not.toHaveBeenCalled()
     expect(sweepMock).not.toHaveBeenCalled()
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    expect(JSON.parse(params.messages[0].content).placesInArea).toBeUndefined()
+  })
+
+  /**
+   * But a few kilometres across, nobody can recall what is there — three
+   * reports of a 6 km circle answering "nothing nearby" over ground Google's
+   * own map showed a waterfall, a trail and a campsite on. The list is the
+   * only way that question is answerable, and it is restricted to the
+   * rectangle rather than a circle inside it.
+   */
+  it('still sweeps a small rectangle, where recall is impossible', async () => {
+    const SMALL = { north: 61.79, south: 61.75, east: 9.6, west: 9.48 }
+    createMock.mockReset().mockResolvedValueOnce(responseWithFinds([]))
+    verifyPlaceMock.mockReset()
+    rectangleSweepMock.mockResolvedValueOnce([
+      { name: 'Stuibenfälle', lat: 61.77, lng: 9.54, country: 'NO' },
+    ] as never)
+
+    const { generateRescanCandidates } = await import('./rescanCorridor.js')
+    await generateRescanCandidates({
+      center: CENTER,
+      radiusKm: 6,
+      bounds: SMALL,
+    })
+
+    expect(rectangleSweepMock).toHaveBeenCalledWith(SMALL)
+    const [params] = createMock.mock.calls[0] as [
+      { messages: { content: string }[] },
+    ]
+    expect(JSON.parse(params.messages[0].content).placesInArea).toEqual([
+      'Stuibenfälle',
+    ])
   })
 
   it('keeps what is on screen and drops what is not', async () => {
@@ -1033,6 +1072,7 @@ describe('searching the rectangle the traveler can see', () => {
       bounds: VIEWPORT,
       centerName: 'Jotunheimen',
       areaCorners: { northWest: 'Lom', southEast: 'Lillehammer' },
+      areaRegions: ['Innlandet'],
     })
 
     const [params] = createMock.mock.calls[0] as [
@@ -1043,6 +1083,7 @@ describe('searching the rectangle the traveler can see', () => {
       northWest: 'Lom',
       southEast: 'Lillehammer',
     })
+    expect(sent.areaRegions).toEqual(['Innlandet'])
     expect(sent.areaSpanKm.width).toBeGreaterThan(0)
     expect(sent.areaSpanKm.height).toBeGreaterThan(0)
     // The radius meant nothing once the rectangle is stated, and stating both

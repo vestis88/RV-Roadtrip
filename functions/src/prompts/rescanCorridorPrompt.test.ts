@@ -293,9 +293,38 @@ describe('what the search is told about how far the area reaches', () => {
 
   it('says the rectangle is the area and the centre name is not', () => {
     const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 150 })
-    expect(system).toMatch(/WHEN "areaCorners" IS GIVEN, THAT RECTANGLE IS THE SEARCH AREA/)
-    expect(system).toMatch(/Do not let it shrink your answer to its own surroundings/)
+    expect(system).toMatch(/THE AREA IS A RECTANGLE, AND IT IS DESCRIBED TO YOU IN FULL/)
+    expect(system).toMatch(/THE CENTRE NAME IS NOT THE AREA/)
     expect(system).toMatch(/rather than clustering around whatever the centre happens to be sitting on/)
+  })
+
+  /**
+   * *"I would expect you to come up with a way to define the area of
+   * interest to Claude in a reasonable way. I don't want google places to
+   * cloud Claude's own thinking here!"*
+   *
+   * The geocoder says what the area is called; Places says what is listed
+   * inside it, ranked by review count. The first is geography and belongs in
+   * the prompt. The second, over a region, is the answer in disguise.
+   */
+  it('names the regions the area spans, from the geocoder', () => {
+    const { user } = buildRescanCorridorPrompt({
+      center: CENTER,
+      radiusKm: 150,
+      areaCorners: corners,
+      areaRegions: ['Abruzzo', 'Lazio', 'Marche'],
+      areaCountries: ['Italy'],
+    })
+
+    const sent = JSON.parse(user)
+    expect(sent.areaRegions).toEqual(['Abruzzo', 'Lazio', 'Marche'])
+    expect(sent.areaCountries).toEqual(['Italy'])
+  })
+
+  it('says a wide area is answered from the model’s own knowledge', () => {
+    const { system } = buildRescanCorridorPrompt({ center: CENTER, radiusKm: 150 })
+    expect(system).toMatch(/OVER A LARGE AREA YOU ARE WORKING FROM YOUR OWN KNOWLEDGE/)
+    expect(system).toMatch(/a popularity chart, not an answer/)
   })
 
   // Two shapes in one payload is an invitation to reconcile them.

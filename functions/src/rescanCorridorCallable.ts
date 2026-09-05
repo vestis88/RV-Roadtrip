@@ -98,6 +98,8 @@ export async function runRescanCorridor(
     southWest?: string
     southEast?: string
   },
+  areaRegions?: string[],
+  areaCountries?: string[],
 ): Promise<{
   stopsWritten: number
   droppedTooFar: number
@@ -179,6 +181,10 @@ export async function runRescanCorridor(
           ...(areaCorners && Object.keys(areaCorners).length > 0
             ? { areaCorners }
             : {}),
+          ...(areaRegions && areaRegions.length > 0 ? { areaRegions } : {}),
+          ...(areaCountries && areaCountries.length > 0
+            ? { areaCountries }
+            : {}),
         })
         searchSource = result.source
         claudeFailure = result.claudeFailure
@@ -205,6 +211,8 @@ export async function runRescanCorridor(
         ...(areaCorners && Object.keys(areaCorners).length > 0
           ? { areaCorners }
           : {}),
+        ...(areaRegions && areaRegions.length > 0 ? { areaRegions } : {}),
+        ...(areaCountries && areaCountries.length > 0 ? { areaCountries } : {}),
       })
 
   // Nothing was deduplicated before this: a rescan of ground already
@@ -449,6 +457,8 @@ export const rescanCorridor = onCall(
     const areaCorners = request.data?.areaCorners as
       | Record<string, unknown>
       | undefined
+    const areaRegions = request.data?.areaRegions as string[] | undefined
+    const areaCountries = request.data?.areaCountries as string[] | undefined
     if (
       typeof tripId !== 'string' ||
       typeof center?.lat !== 'number' ||
@@ -469,7 +479,14 @@ export const rescanCorridor = onCall(
           typeof bounds?.west !== 'number')) ||
       (areaCorners !== undefined &&
         (typeof areaCorners !== 'object' ||
-          Object.values(areaCorners).some((name) => typeof name !== 'string')))
+          Object.values(areaCorners).some((name) => typeof name !== 'string'))) ||
+      [areaRegions, areaCountries].some(
+        (list) =>
+          list !== undefined &&
+          (!Array.isArray(list) ||
+            list.length > 30 ||
+            list.some((name) => typeof name !== 'string' || name.length > 100)),
+      )
     ) {
       throw new HttpsError(
         'invalid-argument',
@@ -563,6 +580,8 @@ export const rescanCorridor = onCall(
               southEast?: string
             }
           | undefined,
+        areaRegions,
+        areaCountries,
       )
       await tripRef.update({
         'planMeta.rescanStatus': 'idle',

@@ -407,11 +407,15 @@ describe('runRescanCorridor and the visible rectangle', () => {
       undefined,
       bounds,
       corners,
+      ['Innlandet'],
+      ['Norway'],
     )
 
     const [input] = generateRescanCandidatesMock.mock.calls[0]
     expect(input.bounds).toEqual(bounds)
     expect(input.areaCorners).toEqual(corners)
+    expect(input.areaRegions).toEqual(['Innlandet'])
+    expect(input.areaCountries).toEqual(['Norway'])
   })
 
   it('still searches the circle when no rectangle was sent', async () => {

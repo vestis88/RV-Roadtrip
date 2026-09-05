@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { defineSecret } from 'firebase-functions/params'
 import {
   boundsContain,
+  boundsHalfDiagonalKm,
   estimateDetourKm,
   haversineDistanceKm,
   type LatLng,
@@ -291,6 +292,9 @@ export async function generateRescanCandidates(input: {
     southWest?: string
     southEast?: string
   }
+  /** And the regions it spans — see describeSearchArea. */
+  areaRegions?: string[]
+  areaCountries?: string[]
   /**
    * When this whole search has to be finished, as an epoch millisecond.
    * Supplied by the callable from its own remaining budget so the search
@@ -321,11 +325,23 @@ export async function generateRescanCandidates(input: {
   // a source for the wide one, not a replacement.
   if (!input.backbone) {
     try {
-      // The rectangle sweep has no size limit — see searchPlacesInRectangle
-      // — so it runs whatever the traveler is looking at. The circle below
-      // is the fallback for a caller that sent no bounds, and keeps its own
-      // 50 km honesty ceiling because `searchNearby` cannot exceed it.
-      if (input.bounds) {
+      // Only for an area small enough that recall is genuinely impossible.
+      //
+      // The sweep briefly ran at every size, on the reasoning that a
+      // rectangle restriction covers what it claims to. It was pulled back
+      // the same day, on: *"I don't want google places to cloud Claude's own
+      // thinking here!"* — which is right, and is the whole reason this
+      // ceiling existed before there was a rectangle to argue about. Forty
+      // Places names ranked by review count across a region IS an answer,
+      // ranked by popularity, and handing it over is handing over the one
+      // judgement this call exists to make. At a few kilometres there is no
+      // judgement to lose: nobody can recall what is within 6 km of a name,
+      // and the list is the only way the question is answerable at all.
+      //
+      // Above it, the search is told what the AREA is instead — its regions,
+      // its span, its corners, all from the geocoder rather than from Places
+      // — and what is worth stopping for inside it stays Claude's.
+      if (input.bounds && boundsHalfDiagonalKm(input.bounds) <= SWEEP_COVERS_UP_TO_KM) {
         const inView = await searchPlacesInRectangle(input.bounds)
         placesInArea = inView.slice(0, MAX_PLACES_IN_AREA).map((place) => place.name)
         console.info(

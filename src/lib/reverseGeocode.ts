@@ -87,18 +87,27 @@ export async function reverseGeocodeName(
 async function resolveName(
   point: { lat: number; lng: number },
 ): Promise<string | undefined> {
+  const results = await geocodeResults(point)
+  if (results.length === 0) return undefined
+  return (mostSpecific(results) ?? results[0]).formatted_address
+}
+
+/** The raw ladder for a point, or an empty list. Never throws. */
+async function geocodeResults(point: {
+  lat: number
+  lng: number
+}): Promise<google.maps.GeocoderResult[]> {
   try {
     const { Geocoder } = (await google.maps.importLibrary(
       'geocoding',
     )) as google.maps.GeocodingLibrary
     const { results } = await new Geocoder().geocode({ location: point })
-    if (results.length === 0) return undefined
-
-    const preferred = mostSpecific(results) ?? results[0]
-    return preferred.formatted_address
+    return results
   } catch (error) {
-    console.warn('Reverse geocoding the map centre failed', error)
-    return undefined
+    // A point in the sea geocodes to nothing, which is not a failure — it is
+    // a fact about that corner of the map.
+    console.warn('Reverse geocoding a point failed', error)
+    return []
   }
 }
 
@@ -183,43 +192,111 @@ export function mostSpecific(
 }
 
 /**
- * The four corners of the visible map, as place names.
+ * What the visible rectangle IS, in the terms a person would use.
  *
- * The fix for a search that knew where its centre was and nothing about how
- * far it reached. `reverseGeocodeName` picks the most specific rung it can —
- * a park, a lake, a hamlet — which is exactly right for locating a 7 km
- * circle and exactly wrong as the ONLY thing describing a 250 km rectangle:
- * a search centred on Parco Sirente-Velino answered with those mountains and
- * never mentioned the sea or Rome, both of which were on screen (reported
- * 2026-09-05, with the pins clustered in one valley).
+ * Asked for on 2026-09-05, after the Places sweep was extended to cover a
+ * wide area: *"I would expect you to come up with a way to define the area
+ * of interest to Claude in a reasonable way. I don't want google places to
+ * cloud Claude's own thinking here!"*
  *
- * Corners rather than the centre, because corners are what state a span. All
- * four are looked up at once and each is allowed to fail on its own: a
- * corner out at sea names nothing, and the rectangle is still better
- * described by the three that answered than by none of them.
+ * That is the right line, and it is the line between two different Google
+ * services. **Places** enumerates businesses and landmarks, ranked by review
+ * count — hand a model forty of those across a region and you have handed it
+ * the answer, ranked by popularity, which is precisely what this feature
+ * exists not to be. **The geocoder** answers a different question: what is
+ * this piece of the world called. Regions, provinces, towns, coastline. That
+ * is geography, not a shortlist, and it is what a model needs before it can
+ * think about a place at all.
+ *
+ * So the search is told where it is looking the way you would tell a person:
+ * the middle, the four corners, how far across, and which regions it spans.
+ * What is worth stopping for inside that is left entirely to Claude, which
+ * is the only part of this it is uniquely good at.
+ *
+ * Nine points in a 3×3 grid, all looked up at once. Corners state the span;
+ * the whole grid catches regions a corner would miss — a 250 km rectangle
+ * over central Italy touches Lazio, Abruzzo, Umbria, Marche and Molise, and
+ * four corners find perhaps three of them. Each point may fail on its own:
+ * out at sea there is nothing to name, and three named corners describe an
+ * area far better than none do.
  */
-export async function nameAreaCorners(bounds: {
+export interface SearchAreaDescription {
+  /** The most specific name for the middle — the old `centerName`. */
+  centerName?: string
+  corners: {
+    northWest?: string
+    northEast?: string
+    southWest?: string
+    southEast?: string
+  }
+  /** Distinct administrative regions the rectangle covers. */
+  regions: string[]
+  /** And the countries, since a wide view crosses borders. */
+  countries: string[]
+}
+
+export async function describeSearchArea(bounds: {
   north: number
   south: number
   east: number
   west: number
-}): Promise<{
-  northWest?: string
-  northEast?: string
-  southWest?: string
-  southEast?: string
-}> {
-  const corners = {
-    northWest: { lat: bounds.north, lng: bounds.west },
-    northEast: { lat: bounds.north, lng: bounds.east },
-    southWest: { lat: bounds.south, lng: bounds.west },
-    southEast: { lat: bounds.south, lng: bounds.east },
-  }
-  const named = await Promise.all(
-    Object.entries(corners).map(async ([corner, point]) => {
-      const name = await reverseGeocodeName(point)
-      return [corner, name] as const
-    }),
+}): Promise<SearchAreaDescription> {
+  const lats = [bounds.north, (bounds.north + bounds.south) / 2, bounds.south]
+  const lngs = [bounds.west, (bounds.west + bounds.east) / 2, bounds.east]
+  const grid = lats.flatMap((lat, row) =>
+    lngs.map((lng, column) => ({ lat, lng, row, column })),
   )
-  return Object.fromEntries(named.filter(([, name]) => !!name))
+
+  const sampled = await Promise.all(
+    grid.map(async (point) => ({
+      ...point,
+      results: await Promise.race([
+        geocodeResults(point),
+        timeout(NAME_LOOKUP_TIMEOUT_MS).then(
+          () => [] as google.maps.GeocoderResult[],
+        ),
+      ]),
+    })),
+  )
+
+  const at = (row: number, column: number) =>
+    sampled.find((point) => point.row === row && point.column === column)
+  const nameAt = (row: number, column: number): string | undefined => {
+    const results = at(row, column)?.results ?? []
+    if (results.length === 0) return undefined
+    return (mostSpecific(results) ?? results[0]).formatted_address
+  }
+
+  const regions: string[] = []
+  const countries: string[] = []
+  for (const point of sampled) {
+    for (const result of point.results) {
+      for (const part of result.address_components) {
+        if (
+          part.types.includes('administrative_area_level_1') &&
+          !regions.includes(part.long_name)
+        ) {
+          regions.push(part.long_name)
+        }
+        if (
+          part.types.includes('country') &&
+          !countries.includes(part.long_name)
+        ) {
+          countries.push(part.long_name)
+        }
+      }
+    }
+  }
+
+  return {
+    ...(nameAt(1, 1) ? { centerName: nameAt(1, 1) } : {}),
+    corners: {
+      ...(nameAt(0, 0) ? { northWest: nameAt(0, 0) } : {}),
+      ...(nameAt(0, 2) ? { northEast: nameAt(0, 2) } : {}),
+      ...(nameAt(2, 0) ? { southWest: nameAt(2, 0) } : {}),
+      ...(nameAt(2, 2) ? { southEast: nameAt(2, 2) } : {}),
+    },
+    regions,
+    countries,
+  }
 }
